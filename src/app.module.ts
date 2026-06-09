@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { validate } from './shared/config/env.validation';
+import { DatabaseModule } from './shared/database/database.module';
 
 @Module({
   imports: [
@@ -8,6 +9,7 @@ import { validate } from './shared/config/env.validation';
       validate,
       isGlobal: true,
     }),
+    DatabaseModule,
   ],
   controllers: [],
   providers: [],
