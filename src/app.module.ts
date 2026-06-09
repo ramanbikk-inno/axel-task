@@ -7,6 +7,9 @@ import { ClockModule } from './shared/clock/clock.module';
 import { CryptoModule } from './shared/crypto/crypto.module';
 import { HealthModule } from './shared/health/health.module';
 import { AllExceptionsFilter } from './shared/errors/all-exceptions.filter';
+import { UsersModule } from './modules/users/users.module';
+import { MailModule } from './modules/mail/mail.module';
+import { StorageModule } from './modules/storage/storage.module';
 
 @Module({
   imports: [
@@ -15,13 +18,13 @@ import { AllExceptionsFilter } from './shared/errors/all-exceptions.filter';
     ClockModule,
     CryptoModule,
     HealthModule,
+    UsersModule,
+    MailModule,
+    StorageModule,
   ],
   controllers: [],
   providers: [
-    {
-      provide: APP_FILTER,
-      useClass: AllExceptionsFilter,
-    },
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
     {
       provide: APP_PIPE,
       useValue: new ValidationPipe({
