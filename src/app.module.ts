@@ -1,8 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { validate } from './shared/config/env.validation';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true })],
+  imports: [
+    ConfigModule.forRoot({
+      validate,
+      isGlobal: true,
+    }),
+  ],
   controllers: [],
   providers: [],
 })
