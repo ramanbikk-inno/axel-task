@@ -18,10 +18,10 @@ export const envSchema = z.object({
   SUPER_ADMIN_EMAIL: z.string().email(),
   SUPER_ADMIN_PASSWORD: z.string().min(12),
 
-  RESEND_API_KEY: z.string().min(1),
+  RESEND_API_KEY: z.string().default(''),
   MAIL_FROM: z.string().min(1),
 
-  CLOUDINARY_URL: z.string().min(1),
+  CLOUDINARY_URL: z.string().default(''),
 
   CORS_ORIGINS: z.string().min(1),
   APP_URL: z.string().url(),

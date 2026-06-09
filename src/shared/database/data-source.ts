@@ -20,14 +20,20 @@ const baseOptions: PostgresConnectionOptions = {
 export const dataSourceOptions: DataSourceOptions = baseOptions;
 
 /**
- * Build DataSourceOptions with overrides (e.g. a Testcontainers host/port in
- * integration/e2e, or a seed connection). Keeps a single source of truth for
- * entities/migrations globs.
+ * Build DataSourceOptions from a connection URL (e.g. a Testcontainers
+ * `getConnectionUri()` in integration/e2e), reusing the same entities/migrations
+ * globs so tests run the real migrations without env vars.
  */
-export function dataSourceOptionsForUrl(
-  overrides: Partial<PostgresConnectionOptions> = {},
-): DataSourceOptions {
-  return { ...baseOptions, ...overrides };
+export function dataSourceOptionsForUrl(url: string): DataSourceOptions {
+  return {
+    type: 'postgres',
+    url,
+    ssl: false,
+    synchronize: false,
+    logging: false,
+    entities: baseOptions.entities,
+    migrations: baseOptions.migrations,
+  };
 }
 
 export const AppDataSource = new DataSource(dataSourceOptions);

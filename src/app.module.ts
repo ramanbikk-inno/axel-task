@@ -4,6 +4,7 @@ import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { validate } from './shared/config/env.validation';
 import { DatabaseModule } from './shared/database/database.module';
 import { ClockModule } from './shared/clock/clock.module';
+import { CryptoModule } from './shared/crypto/crypto.module';
 import { HealthModule } from './shared/health/health.module';
 import { AllExceptionsFilter } from './shared/errors/all-exceptions.filter';
 
@@ -12,6 +13,7 @@ import { AllExceptionsFilter } from './shared/errors/all-exceptions.filter';
     ConfigModule.forRoot({ validate, isGlobal: true }),
     DatabaseModule,
     ClockModule,
+    CryptoModule,
     HealthModule,
   ],
   controllers: [],
