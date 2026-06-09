@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: axel-task-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-axel}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-axel}
+      POSTGRES_DB: ${DB_NAME:-axel_task}
+    ports:
+      - '${DB_PORT:-5432}:5432'
+    volumes:
+      - axel_task_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-axel} -d ${DB_NAME:-axel_task}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  axel_task_pgdata:
