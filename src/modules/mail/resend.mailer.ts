@@ -6,12 +6,23 @@ import { Mailer } from './mailer.interface';
 @Injectable()
 export class ResendMailer implements Mailer {
   private readonly logger = new Logger(ResendMailer.name);
-  private readonly client: Resend;
+  private client: Resend | null = null;
+  private readonly apiKey: string;
   private readonly from: string;
 
   constructor(private readonly config: ConfigService) {
-    this.client = new Resend(this.config.get<string>('RESEND_API_KEY') || undefined);
+    this.apiKey = this.config.get<string>('RESEND_API_KEY') ?? '';
     this.from = this.config.get<string>('MAIL_FROM') ?? 'no-reply@axel.test';
+  }
+
+  private getClient(): Resend {
+    if (!this.apiKey) {
+      throw new Error('RESEND_API_KEY is not configured; cannot send email.');
+    }
+    if (!this.client) {
+      this.client = new Resend(this.apiKey);
+    }
+    return this.client;
   }
 
   async sendVerification(input: { to: string; verifyUrl: string }): Promise<void> {
@@ -55,7 +66,7 @@ export class ResendMailer implements Mailer {
   }
 
   private async send(to: string, subject: string, html: string): Promise<void> {
-    const { error } = await this.client.emails.send({
+    const { error } = await this.getClient().emails.send({
       from: this.from,
       to,
       subject,
