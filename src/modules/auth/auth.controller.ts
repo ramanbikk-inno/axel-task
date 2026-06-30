@@ -13,6 +13,7 @@ import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SetupPasswordDto } from './dto/setup-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Principal } from './principal';
@@ -97,6 +98,15 @@ export class AuthController {
       newPassword: dto.newPassword,
     });
     return { message: 'Password changed.' };
+  }
+
+  @Post('setup-password')
+  @HttpCode(200)
+  async setupPassword(@Body() dto: SetupPasswordDto, @Req() req: Request): Promise<AuthTokens> {
+    return this.authService.setupPassword(dto, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Get('me')

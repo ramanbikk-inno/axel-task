@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { Role, UserStatus } from './entities/user.enums';
 
@@ -31,8 +31,10 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { id } });
   }
 
-  async create(input: CreateUserInput): Promise<User> {
-    const user: User = this.usersRepository.create({
+  async create(input: CreateUserInput, manager?: EntityManager): Promise<User> {
+    const repository: Repository<User> =
+      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
+    const user: User = repository.create({
       email: input.email,
       role: input.role,
       firstName: input.firstName ?? null,
@@ -43,7 +45,7 @@ export class UsersService {
       mustSetPassword: input.mustSetPassword ?? false,
       status: input.status ?? UserStatus.Active,
     });
-    return this.usersRepository.save(user);
+    return repository.save(user);
   }
 
   async findByEmailWithPassword(email: string): Promise<User | null> {

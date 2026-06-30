@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { EntityManager, IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { PasswordService } from '../../shared/crypto/password.service';
@@ -18,6 +18,7 @@ import { UsersService } from '../users/users.service';
 import { AuthTokens, RefreshClaims } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { AccountSetupToken } from './entities/account-setup-token.entity';
 import { AuthSession } from './entities/auth-session.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
@@ -38,6 +39,8 @@ export class AuthService {
     private readonly emailVerifications: Repository<EmailVerificationToken>,
     @InjectRepository(PasswordResetToken)
     private readonly passwordResets: Repository<PasswordResetToken>,
+    @InjectRepository(AccountSetupToken)
+    private readonly accountSetups: Repository<AccountSetupToken>,
     private readonly tokens: TokenService,
     private readonly passwords: PasswordService,
     private readonly mail: MailService,
@@ -422,5 +425,70 @@ export class AuthService {
     const passwordHash = await this.passwords.hash(input.newPassword);
     await this.usersService.setPasswordAndBumpVersion(userId, passwordHash);
     await this.mail.sendPasswordChangedEmail(user.email);
+  }
+
+  async createSetupToken(userId: string, manager?: EntityManager): Promise<string> {
+    const repository =
+      manager !== undefined ? manager.getRepository(AccountSetupToken) : this.accountSetups;
+    const { token, tokenHash } = this.tokens.generateOpaqueToken();
+    const expiresAt = new Date(this.clock.now().getTime() + 72 * 60 * 60 * 1000);
+    await repository.save(repository.create({ userId, tokenHash, consumedAt: null, expiresAt }));
+    return token;
+  }
+
+  async setupPassword(
+    input: { token: string; newPassword: string },
+    meta: { ip?: string; userAgent?: string },
+  ): Promise<AuthTokens> {
+    const tokenHash = this.tokens.hashOpaqueToken(input.token);
+    const row = await this.accountSetups.findOne({ where: { tokenHash } });
+    if (!row) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Invalid setup token.',
+      });
+    }
+    if (row.consumedAt) {
+      throw new ConflictException({
+        errorCode: ErrorCode.TOKEN_ALREADY_USED,
+        message: 'This setup token has already been used.',
+      });
+    }
+    const now = this.clock.now();
+    if (row.expiresAt.getTime() < now.getTime()) {
+      throw new GoneException({
+        errorCode: ErrorCode.EXPIRED_TOKEN,
+        message: 'This setup token has expired.',
+      });
+    }
+
+    const user = await this.usersService.findById(row.userId);
+    if (!user) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Invalid setup token.',
+      });
+    }
+
+    const passwordHash = await this.passwords.hash(input.newPassword);
+    await this.accountSetups.update({ id: row.id }, { consumedAt: now });
+    await this.usersService.setPasswordAndBumpVersion(user.id, passwordHash);
+    await this.usersService.markEmailVerified(user.id, now);
+
+    const refreshed = await this.usersService.findById(user.id);
+    if (!refreshed) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Invalid setup token.',
+      });
+    }
+
+    const pair = await this.issueTokensForSession(refreshed, meta);
+    return {
+      accessToken: pair.accessToken,
+      refreshToken: pair.refreshToken,
+      tokenType: 'Bearer',
+      expiresIn: ACCESS_TTL_SECONDS,
+    };
   }
 }
