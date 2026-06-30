@@ -10,6 +10,7 @@ import { AllExceptionsFilter } from './shared/errors/all-exceptions.filter';
 import { UsersModule } from './modules/users/users.module';
 import { MailModule } from './modules/mail/mail.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { StorageModule } from './modules/storage/storage.module';
     UsersModule,
     MailModule,
     StorageModule,
+    AuthModule,
   ],
   controllers: [],
   providers: [

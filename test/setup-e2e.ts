@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { getDataSourceToken } from '@nestjs/typeorm';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
@@ -84,9 +85,16 @@ export async function bootstrapE2E(): Promise<E2EContext> {
   const storage: jest.Mocked<StorageService> = buildMockStorage();
   const clock = new FakeClock();
 
+  // The app's ConfigService resolves DB params from the .env file, not the
+  // process.env overrides set above, so AppModule would otherwise connect to a
+  // different database than the one migrations ran on. Pin the app to the
+  // already-migrated Testcontainers DataSource so repositories and migrations
+  // share one connection.
   const moduleRef: TestingModule = await Test.createTestingModule({
     imports: [AppModule],
   })
+    .overrideProvider(getDataSourceToken())
+    .useValue(migrationDataSource)
     .overrideProvider(MAILER)
     .useValue(mailer)
     .overrideProvider(STORAGE)
