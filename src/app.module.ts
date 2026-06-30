@@ -12,6 +12,7 @@ import { UsersModule } from './modules/users/users.module';
 import { MailModule } from './modules/mail/mail.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { AbilityModule } from './modules/ability/ability.module';
 import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
 
 @Module({
@@ -25,6 +26,7 @@ import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
     MailModule,
     StorageModule,
     AuthModule,
+    AbilityModule,
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 60 }]),
   ],
   controllers: [],
