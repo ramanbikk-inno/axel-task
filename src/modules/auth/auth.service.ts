@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { PasswordService } from '../../shared/crypto/password.service';
@@ -20,6 +20,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { AuthSession } from './entities/auth-session.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
+import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { TokenService } from './token.service';
 
@@ -35,6 +36,8 @@ export class AuthService {
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
     @InjectRepository(EmailVerificationToken)
     private readonly emailVerifications: Repository<EmailVerificationToken>,
+    @InjectRepository(PasswordResetToken)
+    private readonly passwordResets: Repository<PasswordResetToken>,
     private readonly tokens: TokenService,
     private readonly passwords: PasswordService,
     private readonly mail: MailService,
@@ -161,6 +164,9 @@ export class AuthService {
       email: dto.email,
       role: Role.PlayerParent,
       passwordHash,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      phone: dto.phone,
       emailVerified: false,
       mustSetPassword: false,
       status: UserStatus.Active,
@@ -340,5 +346,81 @@ export class AuthService {
     const now = this.clock.now();
     await this.refreshTokens.update({ id: row.id }, { revokedAt: now });
     await this.sessions.update({ id: row.sessionId }, { revokedAt: now, revokedReason: 'logout' });
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      return;
+    }
+
+    const { token, tokenHash } = this.tokens.generateOpaqueToken();
+    const expiresAt = new Date(this.clock.now().getTime() + 60 * 60 * 1000);
+    await this.passwordResets.save(
+      this.passwordResets.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }),
+    );
+    await this.mail.sendPasswordResetEmail(user.email, token);
+  }
+
+  async resetPassword(input: { token: string; newPassword: string }): Promise<void> {
+    const tokenHash = this.tokens.hashOpaqueToken(input.token);
+    const row = await this.passwordResets.findOne({ where: { tokenHash } });
+    if (!row) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Invalid reset token.',
+      });
+    }
+    if (row.consumedAt) {
+      throw new ConflictException({
+        errorCode: ErrorCode.TOKEN_ALREADY_USED,
+        message: 'This reset token has already been used.',
+      });
+    }
+    const now = this.clock.now();
+    if (row.expiresAt.getTime() < now.getTime()) {
+      throw new GoneException({
+        errorCode: ErrorCode.EXPIRED_TOKEN,
+        message: 'This reset token has expired.',
+      });
+    }
+
+    const passwordHash = await this.passwords.hash(input.newPassword);
+    await this.passwordResets.update({ id: row.id }, { consumedAt: now });
+    await this.usersService.setPasswordAndBumpVersion(row.userId, passwordHash);
+    await this.sessions.update(
+      { userId: row.userId, revokedAt: IsNull() },
+      { revokedAt: now, revokedReason: 'password-reset' },
+    );
+
+    const user = await this.usersService.findById(row.userId);
+    if (user) {
+      await this.mail.sendPasswordChangedEmail(user.email);
+    }
+  }
+
+  async changePassword(
+    userId: string,
+    input: { currentPassword: string; newPassword: string },
+  ): Promise<void> {
+    const user = await this.usersService.findByIdWithPassword(userId);
+    if (!user || !user.passwordHash) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_CREDENTIALS,
+        message: 'Invalid credentials.',
+      });
+    }
+
+    const ok = await this.passwords.verify(user.passwordHash, input.currentPassword);
+    if (!ok) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_CREDENTIALS,
+        message: 'Invalid credentials.',
+      });
+    }
+
+    const passwordHash = await this.passwords.hash(input.newPassword);
+    await this.usersService.setPasswordAndBumpVersion(userId, passwordHash);
+    await this.mail.sendPasswordChangedEmail(user.email);
   }
 }

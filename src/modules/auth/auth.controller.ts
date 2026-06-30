@@ -1,14 +1,17 @@
-import { Body, Controller, Get, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 
 import { AuthService } from './auth.service';
 import { AuthTokens } from './auth.types';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { MessageResponseDto } from './dto/message-response.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Principal } from './principal';
@@ -58,6 +61,36 @@ export class AuthController {
   async resendVerification(@Body() dto: ResendVerificationDto): Promise<{ message: string }> {
     await this.authService.resendVerification(dto.email);
     return { message: 'If the account exists and is unverified, an email was sent.' };
+  }
+
+  @Post('forgot-password')
+  @HttpCode(202)
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<{ message: string }> {
+    await this.authService.forgotPassword(dto.email);
+    return { message: 'If the account exists, a reset email was sent.' };
+  }
+
+  @Post('reset-password')
+  @HttpCode(200)
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<{ message: string }> {
+    await this.authService.resetPassword({ token: dto.token, newPassword: dto.newPassword });
+    return { message: 'Password reset. Please log in with your new password.' };
+  }
+
+  @Patch('change-password')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  async changePassword(
+    @Req() req: Request,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    const principal = req.user as Principal;
+    await this.authService.changePassword(principal.userId, {
+      currentPassword: dto.currentPassword,
+      newPassword: dto.newPassword,
+    });
+    return { message: 'Password changed.' };
   }
 
   @Get('me')
