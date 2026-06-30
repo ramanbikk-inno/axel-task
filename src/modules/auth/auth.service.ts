@@ -1,10 +1,17 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
@@ -12,6 +19,7 @@ import { AuthTokens, RefreshClaims } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { AuthSession } from './entities/auth-session.entity';
+import { EmailVerificationToken } from './entities/email-verification-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { TokenService } from './token.service';
 
@@ -25,8 +33,11 @@ export class AuthService {
   constructor(
     @InjectRepository(AuthSession) private readonly sessions: Repository<AuthSession>,
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
+    @InjectRepository(EmailVerificationToken)
+    private readonly emailVerifications: Repository<EmailVerificationToken>,
     private readonly tokens: TokenService,
     private readonly passwords: PasswordService,
+    private readonly mail: MailService,
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
   ) {}
@@ -146,7 +157,7 @@ export class AuthService {
     }
 
     const passwordHash = await this.passwords.hash(dto.password);
-    await this.usersService.create({
+    const user = await this.usersService.create({
       email: dto.email,
       role: Role.PlayerParent,
       passwordHash,
@@ -155,7 +166,60 @@ export class AuthService {
       status: UserStatus.Active,
     });
 
+    const { token, tokenHash } = this.tokens.generateOpaqueToken();
+    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
+    await this.emailVerifications.save(
+      this.emailVerifications.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }),
+    );
+    await this.mail.sendVerificationEmail(user.email, token);
+
     return { message: REGISTER_MESSAGE };
+  }
+
+  async verifyEmail(token: string): Promise<void> {
+    const tokenHash = this.tokens.hashOpaqueToken(token);
+    const row = await this.emailVerifications.findOne({ where: { tokenHash } });
+    if (!row) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Invalid verification token.',
+      });
+    }
+    if (row.consumedAt) {
+      throw new ConflictException({
+        errorCode: ErrorCode.TOKEN_ALREADY_USED,
+        message: 'This verification token has already been used.',
+      });
+    }
+    const now = this.clock.now();
+    if (row.expiresAt.getTime() < now.getTime()) {
+      throw new GoneException({
+        errorCode: ErrorCode.EXPIRED_TOKEN,
+        message: 'This verification token has expired.',
+      });
+    }
+
+    await this.emailVerifications.update({ id: row.id }, { consumedAt: now });
+    await this.usersService.markEmailVerified(row.userId, now);
+
+    const user = await this.usersService.findById(row.userId);
+    if (user) {
+      await this.mail.sendWelcomeEmail(user.email, user.firstName ?? '');
+    }
+  }
+
+  async resendVerification(email: string): Promise<void> {
+    const user = await this.usersService.findByEmail(email);
+    if (!user || user.emailVerified) {
+      return;
+    }
+
+    const { token, tokenHash } = this.tokens.generateOpaqueToken();
+    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
+    await this.emailVerifications.save(
+      this.emailVerifications.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }),
+    );
+    await this.mail.sendVerificationEmail(user.email, token);
   }
 
   async refresh(

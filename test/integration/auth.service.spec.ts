@@ -37,7 +37,9 @@ describe('AuthService (login + register)', () => {
     Pick<UsersService, 'findByEmail' | 'findByEmailWithPassword' | 'create' | 'touchLastLogin'>
   >;
   let passwords: jest.Mocked<Pick<PasswordService, 'hash' | 'verify'>>;
-  let tokens: jest.Mocked<Pick<TokenService, 'signAccess' | 'signRefresh' | 'hashOpaqueToken'>>;
+  let tokens: jest.Mocked<
+    Pick<TokenService, 'signAccess' | 'signRefresh' | 'hashOpaqueToken' | 'generateOpaqueToken'>
+  >;
   let mail: jest.Mocked<Pick<MailService, 'sendVerificationEmail'>>;
   let sessions: RepoMock;
   let refreshTokens: RepoMock;
@@ -79,7 +81,9 @@ describe('AuthService (login + register)', () => {
       signAccess: jest.fn(),
       signRefresh: jest.fn(),
       hashOpaqueToken: jest.fn(),
+      generateOpaqueToken: jest.fn(),
     };
+    tokens.generateOpaqueToken.mockReturnValue({ token: 'verify-tok', tokenHash: 'verify-hash' });
     tokens.signAccess.mockReturnValue('access.jwt');
     tokens.signRefresh.mockReturnValue({
       token: 'refresh.jwt',

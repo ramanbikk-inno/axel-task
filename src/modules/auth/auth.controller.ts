@@ -8,6 +8,8 @@ import { LoginDto } from './dto/login.dto';
 import { MessageResponseDto } from './dto/message-response.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Principal } from './principal';
 
@@ -42,6 +44,20 @@ export class AuthController {
   @HttpCode(204)
   async logout(@Body() dto: RefreshDto): Promise<void> {
     await this.authService.logout(dto.refreshToken);
+  }
+
+  @Post('verify-email')
+  @HttpCode(200)
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
+    await this.authService.verifyEmail(dto.token);
+    return { message: 'Email verified. You can now log in.' };
+  }
+
+  @Post('resend-verification')
+  @HttpCode(202)
+  async resendVerification(@Body() dto: ResendVerificationDto): Promise<{ message: string }> {
+    await this.authService.resendVerification(dto.email);
+    return { message: 'If the account exists and is unverified, an email was sent.' };
   }
 
   @Get('me')
