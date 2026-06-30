@@ -157,4 +157,106 @@ export class AuthService {
 
     return { message: REGISTER_MESSAGE };
   }
+
+  async refresh(
+    refreshToken: string,
+    meta: { ip?: string; userAgent?: string },
+  ): Promise<AuthTokens> {
+    const claims = this.tokens.verifyRefresh(refreshToken);
+
+    const row = await this.refreshTokens.findOne({ where: { id: claims.jti } });
+    if (!row) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+        message: 'Refresh token is invalid.',
+      });
+    }
+
+    if (row.revokedAt !== null || row.replacedById !== null) {
+      await this.refreshTokens.update({ familyId: row.familyId }, { revokedAt: this.clock.now() });
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.TOKEN_REUSED,
+        message: 'Refresh token reuse detected.',
+      });
+    }
+
+    if (row.tokenHash !== this.tokens.hashOpaqueToken(refreshToken)) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+        message: 'Refresh token is invalid.',
+      });
+    }
+
+    if (row.expiresAt.getTime() < this.clock.now().getTime()) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+        message: 'Refresh token has expired.',
+      });
+    }
+
+    const session = await this.sessions.findOne({ where: { id: row.sessionId } });
+    if (!session || session.revokedAt !== null) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+        message: 'Session is no longer active.',
+      });
+    }
+
+    const user = await this.usersService.findById(row.userId);
+    if (!user || user.status !== UserStatus.Active) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+        message: 'User is not active.',
+      });
+    }
+
+    const accessToken = this.tokens.signAccess({
+      userId: user.id,
+      role: user.role,
+      sessionId: session.id,
+      activeTrainerProfileId: session.activeTrainerProfileId,
+      trainerOrgId: null,
+      tokenVersion: user.tokenVersion,
+    });
+
+    const newRefresh = this.tokens.signRefresh({
+      userId: user.id,
+      sessionId: session.id,
+      familyId: row.familyId,
+    });
+
+    await this.refreshTokens.save(
+      this.refreshTokens.create({
+        id: newRefresh.jti,
+        sessionId: session.id,
+        userId: user.id,
+        familyId: newRefresh.familyId,
+        tokenHash: this.tokens.hashOpaqueToken(newRefresh.token),
+        expiresAt: newRefresh.expiresAt,
+        revokedAt: null,
+        replacedById: null,
+      }),
+    );
+
+    await this.refreshTokens.update(
+      { id: row.id },
+      { revokedAt: this.clock.now(), replacedById: newRefresh.jti },
+    );
+
+    session.lastUsedAt = this.clock.now();
+    if (meta.ip !== undefined) {
+      session.ip = meta.ip;
+    }
+    if (meta.userAgent !== undefined) {
+      session.userAgent = meta.userAgent;
+    }
+    await this.sessions.save(session);
+
+    return {
+      accessToken,
+      refreshToken: newRefresh.token,
+      tokenType: 'Bearer',
+      expiresIn: ACCESS_TTL_SECONDS,
+    };
+  }
 }

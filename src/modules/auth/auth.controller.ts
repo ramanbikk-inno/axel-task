@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { AuthTokens } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { MessageResponseDto } from './dto/message-response.dto';
+import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Principal } from './principal';
@@ -26,6 +27,15 @@ export class AuthController {
   @HttpCode(200)
   login(@Body() dto: LoginDto, @Req() req: Request): Promise<AuthTokens> {
     return this.authService.login(dto, { ip: req.ip, userAgent: req.headers['user-agent'] });
+  }
+
+  @Post('refresh')
+  @HttpCode(200)
+  refresh(@Body() dto: RefreshDto, @Req() req: Request): Promise<AuthTokens> {
+    return this.authService.refresh(dto.refreshToken, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Get('me')
