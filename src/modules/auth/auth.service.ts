@@ -8,7 +8,7 @@ import { ErrorCode } from '../../shared/errors/error-codes';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
-import { AuthTokens } from './auth.types';
+import { AuthTokens, RefreshClaims } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { AuthSession } from './entities/auth-session.entity';
@@ -258,5 +258,23 @@ export class AuthService {
       tokenType: 'Bearer',
       expiresIn: ACCESS_TTL_SECONDS,
     };
+  }
+
+  async logout(refreshToken: string): Promise<void> {
+    let claims: RefreshClaims;
+    try {
+      claims = this.tokens.verifyRefresh(refreshToken);
+    } catch {
+      return;
+    }
+
+    const row = await this.refreshTokens.findOne({ where: { id: claims.jti } });
+    if (!row) {
+      return;
+    }
+
+    const now = this.clock.now();
+    await this.refreshTokens.update({ id: row.id }, { revokedAt: now });
+    await this.sessions.update({ id: row.sessionId }, { revokedAt: now, revokedReason: 'logout' });
   }
 }

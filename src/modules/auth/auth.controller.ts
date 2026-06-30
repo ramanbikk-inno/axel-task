@@ -38,6 +38,12 @@ export class AuthController {
     });
   }
 
+  @Post('logout')
+  @HttpCode(204)
+  async logout(@Body() dto: RefreshDto): Promise<void> {
+    await this.authService.logout(dto.refreshToken);
+  }
+
   @Get('me')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
