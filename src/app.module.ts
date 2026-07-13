@@ -14,6 +14,7 @@ import { StorageModule } from './modules/storage/storage.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AbilityModule } from './modules/ability/ability.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { ImpersonationModule } from './modules/impersonation/impersonation.module';
 import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
 
 @Module({
@@ -29,6 +30,7 @@ import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
     AuthModule,
     AbilityModule,
     AdminModule,
+    ImpersonationModule,
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 60 }]),
   ],
   controllers: [],

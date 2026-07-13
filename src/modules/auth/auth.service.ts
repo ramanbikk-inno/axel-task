@@ -275,6 +275,18 @@ export class AuthService {
       });
     }
 
+    // Hard session expiry (e.g. impersonation sessions are capped at 1 hour).
+    if (session.expiresAt && session.expiresAt.getTime() < this.clock.now().getTime()) {
+      await this.sessions.update(
+        { id: session.id },
+        { revokedAt: this.clock.now(), revokedReason: 'expired' },
+      );
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+        message: 'Session has expired.',
+      });
+    }
+
     const user = await this.usersService.findById(row.userId);
     if (!user || user.status !== UserStatus.Active) {
       throw new UnauthorizedException({
@@ -290,6 +302,7 @@ export class AuthService {
       activeTrainerProfileId: session.activeTrainerProfileId,
       trainerOrgId: null,
       tokenVersion: user.tokenVersion,
+      actorUserId: session.impersonatedBy ?? undefined,
     });
 
     const newRefresh = this.tokens.signRefresh({
