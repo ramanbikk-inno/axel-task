@@ -73,6 +73,24 @@ export class AssociationsService {
     return { association: saved, created: true };
   }
 
+  /**
+   * Set the status of an existing association (e.g. deactivate to disconnect a
+   * player from a trainer while preserving history). Returns null if none.
+   */
+  async setStatus(
+    trainerProfileId: string,
+    playerProfileId: string,
+    status: AssociationStatus,
+    manager?: EntityManager,
+  ): Promise<TrainerPlayerAssociation | null> {
+    const existing = await this.find(trainerProfileId, playerProfileId, manager);
+    if (!existing) {
+      return null;
+    }
+    existing.status = status;
+    return this.repo(manager).save(existing);
+  }
+
   /** Player profiles connected to a trainer's organization. */
   async findByTrainer(trainerProfileId: string): Promise<TrainerPlayerAssociation[]> {
     return this.repo().find({
