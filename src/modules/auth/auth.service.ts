@@ -364,6 +364,19 @@ export class AuthService {
     await this.sessions.update({ id: row.sessionId }, { revokedAt: now, revokedReason: 'logout' });
   }
 
+  /**
+   * Revoke every active session and refresh token for a user (e.g. when a
+   * Super Admin deactivates the account). Historical rows are preserved.
+   */
+  async revokeAllUserSessions(userId: string, reason: string): Promise<void> {
+    const now = this.clock.now();
+    await this.sessions.update(
+      { userId, revokedAt: IsNull() },
+      { revokedAt: now, revokedReason: reason },
+    );
+    await this.refreshTokens.update({ userId, revokedAt: IsNull() }, { revokedAt: now });
+  }
+
   async forgotPassword(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
