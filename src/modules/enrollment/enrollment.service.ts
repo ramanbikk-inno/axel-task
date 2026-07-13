@@ -1,0 +1,220 @@
+import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
+
+import { ClockService } from '../../shared/clock/clock.service';
+import { ErrorCode } from '../../shared/errors/error-codes';
+import { AuthService } from '../auth/auth.service';
+import { Principal } from '../auth/principal';
+import { MailService } from '../mail/mail.service';
+import { PlayerProfile } from '../players/entities/player-profile.entity';
+import { PlayersService } from '../players/players.service';
+import { TrainersService } from '../trainers/trainers.service';
+import { User } from '../users/entities/user.entity';
+import { UsersService } from '../users/users.service';
+import { AssociationsService } from './associations.service';
+import { JoinRegisterDto } from './dto/join-register.dto';
+import { ShareLink, ShareLinkType } from './entities/share-link.entity';
+import { ShareLinksService } from './share-links.service';
+
+export interface ResolvedShareLink {
+  code: string;
+  valid: boolean;
+  trainer: { profileId: string; businessName: string } | null;
+}
+
+export interface JoinResult {
+  message: string;
+  associationId: string;
+  trainerProfileId: string;
+  playerProfileId: string;
+}
+
+function displayNameFor(
+  input: { firstName?: string | null; lastName?: string | null },
+  fallback: string,
+): string {
+  const full = [input.firstName, input.lastName]
+    .filter((v) => v !== null && v !== undefined && v.trim() !== '')
+    .join(' ');
+  return full !== '' ? full : fallback;
+}
+
+@Injectable()
+export class EnrollmentService {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly authService: AuthService,
+    private readonly usersService: UsersService,
+    private readonly playersService: PlayersService,
+    private readonly trainersService: TrainersService,
+    private readonly shareLinks: ShareLinksService,
+    private readonly associations: AssociationsService,
+    private readonly mail: MailService,
+    private readonly clock: ClockService,
+  ) {}
+
+  /** Public: resolve a ShareLink for the join page (trainer name + validity). */
+  async resolve(code: string): Promise<ResolvedShareLink> {
+    const link = await this.shareLinks.findByCode(code);
+    if (!link || !link.active) {
+      return { code, valid: false, trainer: null };
+    }
+    const usable =
+      (link.expiresAt === null || link.expiresAt.getTime() > this.clock.now().getTime()) &&
+      (link.maxUses === null || link.useCount < link.maxUses);
+    const profile = await this.trainersService.findById(link.trainerProfileId);
+    return {
+      code,
+      valid: usable,
+      trainer: profile ? { profileId: profile.id, businessName: profile.businessName } : null,
+    };
+  }
+
+  /** Generate a static player ShareLink for the calling trainer (US-01.02). */
+  async createTrainerShareLink(principal: Principal, type?: ShareLinkType): Promise<ShareLink> {
+    const trainerProfile = await this.trainersService.findByUserId(principal.userId);
+    if (!trainerProfile) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
+        message: 'No trainer profile for this account.',
+      });
+    }
+    return this.shareLinks.create({
+      trainerProfileId: trainerProfile.id,
+      type: type ?? ShareLinkType.PlayerStatic,
+      createdByUserId: principal.userId,
+    });
+  }
+
+  async listTrainerShareLinks(principal: Principal): Promise<ShareLink[]> {
+    const trainerProfile = await this.trainersService.findByUserId(principal.userId);
+    if (!trainerProfile) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
+        message: 'No trainer profile for this account.',
+      });
+    }
+    return this.shareLinks.findByTrainer(trainerProfile.id);
+  }
+
+  /**
+   * New player/parent registers via a trainer's ShareLink: creates the account
+   * + self player profile + trainer association, then emails verification and a
+   * join confirmation.
+   */
+  async registerViaShareLink(code: string, dto: JoinRegisterDto): Promise<JoinResult> {
+    const link = await this.shareLinks.requireUsable(code);
+
+    const existing = await this.usersService.findByEmail(dto.email);
+    if (existing) {
+      throw new ConflictException({
+        errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
+        message: 'An account with this email already exists. Log in to join this trainer.',
+      });
+    }
+
+    let verificationToken = '';
+    const result = await this.dataSource.transaction(async (manager: EntityManager) => {
+      const { user, verificationToken: token } = await this.authService.createUnverifiedPlayer(
+        {
+          email: dto.email,
+          password: dto.password,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+        },
+        manager,
+      );
+      verificationToken = token;
+
+      const profile = await this.playersService.create(
+        {
+          ownerUserId: user.id,
+          displayName: displayNameFor(dto, dto.email),
+          isChild: false,
+          gender: dto.gender ?? null,
+          birthDate: dto.birthDate ?? null,
+        },
+        manager,
+      );
+
+      const { association } = await this.associations.associate(
+        {
+          trainerProfileId: link.trainerProfileId,
+          playerProfileId: profile.id,
+          shareLinkId: link.id,
+        },
+        manager,
+      );
+
+      await this.shareLinks.incrementUse(link.id, manager);
+
+      return { user, profile, association };
+    });
+
+    const trainerName = await this.trainerName(link.trainerProfileId);
+    await this.mail.sendVerificationEmail(result.user.email, verificationToken);
+    await this.mail.sendJoinConfirmationEmail(result.user.email, trainerName);
+
+    return {
+      message: 'Registration received. Verify your email to finish joining.',
+      associationId: result.association.id,
+      trainerProfileId: link.trainerProfileId,
+      playerProfileId: result.profile.id,
+    };
+  }
+
+  /**
+   * Existing logged-in player joins another trainer via a ShareLink — no
+   * duplicate account, just a new association (multi-trainer support).
+   */
+  async joinAsExistingPlayer(code: string, principal: Principal): Promise<JoinResult> {
+    const link = await this.shareLinks.requireUsable(code);
+
+    const result = await this.dataSource.transaction(async (manager: EntityManager) => {
+      let profile: PlayerProfile | null = await this.playersService.findSelfProfile(
+        principal.userId,
+        manager,
+      );
+      if (!profile) {
+        const user = (await this.usersService.findById(principal.userId)) as User;
+        profile = await this.playersService.create(
+          {
+            ownerUserId: principal.userId,
+            displayName: displayNameFor(user, user.email),
+            isChild: false,
+          },
+          manager,
+        );
+      }
+
+      const { association, created } = await this.associations.associate(
+        {
+          trainerProfileId: link.trainerProfileId,
+          playerProfileId: profile.id,
+          shareLinkId: link.id,
+        },
+        manager,
+      );
+      if (created) {
+        await this.shareLinks.incrementUse(link.id, manager);
+      }
+
+      return { profile, association, created };
+    });
+
+    return {
+      message: result.created
+        ? 'You are now connected with this trainer.'
+        : 'You are already connected with this trainer.',
+      associationId: result.association.id,
+      trainerProfileId: link.trainerProfileId,
+      playerProfileId: result.profile.id,
+    };
+  }
+
+  private async trainerName(trainerProfileId: string): Promise<string> {
+    const profile = await this.trainersService.findById(trainerProfileId);
+    return profile?.businessName ?? 'your trainer';
+  }
+}

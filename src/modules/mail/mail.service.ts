@@ -35,4 +35,8 @@ export class MailService {
     const setupUrl = `${this.appUrl}/setup?token=${setupToken}`;
     await this.mailer.sendTrainerInvite({ to, firstName, setupUrl });
   }
+
+  async sendJoinConfirmationEmail(to: string, trainerName: string): Promise<void> {
+    await this.mailer.sendJoinConfirmation({ to, trainerName });
+  }
 }
