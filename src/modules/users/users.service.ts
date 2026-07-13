@@ -16,6 +16,14 @@ export interface CreateUserInput {
   status?: UserStatus;
 }
 
+export interface SearchUsersInput {
+  search?: string;
+  role?: Role;
+  status?: UserStatus;
+  page: number;
+  limit: number;
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -25,6 +33,34 @@ export class UsersService {
 
   async findByEmail(email: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { email } });
+  }
+
+  /**
+   * Paginated directory search over all users. Matches `search` as a substring
+   * of email / first name / last name (tool-specific, not global), optionally
+   * filtered by role and status. Ordered newest-first.
+   */
+  async search(input: SearchUsersInput): Promise<{ items: User[]; total: number }> {
+    const qb = this.usersRepository.createQueryBuilder('user');
+
+    if (input.search !== undefined && input.search.trim() !== '') {
+      qb.andWhere('(user.email ILIKE :q OR user.firstName ILIKE :q OR user.lastName ILIKE :q)', {
+        q: `%${input.search.trim()}%`,
+      });
+    }
+    if (input.role !== undefined) {
+      qb.andWhere('user.role = :role', { role: input.role });
+    }
+    if (input.status !== undefined) {
+      qb.andWhere('user.status = :status', { status: input.status });
+    }
+
+    qb.orderBy('user.createdAt', 'DESC')
+      .skip((input.page - 1) * input.limit)
+      .take(input.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total };
   }
 
   async findById(id: string): Promise<User | null> {
