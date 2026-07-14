@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
@@ -6,13 +11,19 @@ import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
 import { Role, UserStatus } from '../users/entities/user.enums';
+import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
+import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
 
 export const AUDIT_TRAINER_CREATED = 'trainer.created';
+export const AUDIT_USER_DEACTIVATED = 'user.deactivated';
+export const AUDIT_USER_REACTIVATED = 'user.reactivated';
+export const AUDIT_USER_UPDATED = 'user.updated';
+export const AUDIT_USER_DELETED = 'user.deleted';
 
 @Injectable()
 export class AdminService {
@@ -23,6 +34,7 @@ export class AdminService {
     private readonly authService: AuthService,
     private readonly mail: MailService,
     private readonly audit: AuditService,
+    private readonly playersService: PlayersService,
   ) {}
 
   async createTrainer(
@@ -88,6 +100,156 @@ export class AdminService {
     await this.mail.sendTrainerInviteEmail(user.email, input.firstName ?? '', setupToken);
 
     return { id: user.id, email: user.email, role: Role.Trainer };
+  }
+
+  /**
+   * Soft-deactivate a user (US-01.12): flips status to Inactive, revokes their
+   * active sessions so they are logged out, and records the action. All
+   * historical data is preserved. Super Admin accounts (including the caller)
+   * cannot be deactivated to avoid locking the platform out.
+   */
+  async deactivateUser(
+    targetUserId: string,
+    actorUserId: string,
+    reason?: string,
+  ): Promise<UserSummaryDto> {
+    const target = await this.requireUser(targetUserId);
+
+    if (target.role === Role.SuperAdmin) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.CANNOT_DEACTIVATE_SUPER_ADMIN,
+        message: 'Super Admin accounts cannot be deactivated.',
+      });
+    }
+
+    if (target.status !== UserStatus.Inactive) {
+      await this.usersService.setStatus(target.id, UserStatus.Inactive);
+      await this.authService.revokeAllUserSessions(target.id, 'deactivated');
+      await this.audit.record({
+        action: AUDIT_USER_DEACTIVATED,
+        actorUserId,
+        targetUserId: target.id,
+        metadata: { reason: reason ?? null },
+      });
+    }
+
+    const updated = await this.requireUser(target.id);
+    return UserSummaryDto.fromEntity(updated);
+  }
+
+  /**
+   * Reactivate a previously deactivated user (US-01.12). Deleted (anonymized)
+   * users cannot be reactivated (US-01.13 — deletion is permanent).
+   */
+  async reactivateUser(
+    targetUserId: string,
+    actorUserId: string,
+    reason?: string,
+  ): Promise<UserSummaryDto> {
+    const target = await this.requireUser(targetUserId);
+
+    if (target.status === UserStatus.Deleted) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ACCOUNT_DELETED,
+        message: 'Deleted users cannot be reactivated.',
+      });
+    }
+
+    if (target.status !== UserStatus.Active) {
+      await this.usersService.setStatus(target.id, UserStatus.Active);
+      await this.audit.record({
+        action: AUDIT_USER_REACTIVATED,
+        actorUserId,
+        targetUserId: target.id,
+        metadata: { reason: reason ?? null },
+      });
+    }
+
+    const updated = await this.requireUser(target.id);
+    return UserSummaryDto.fromEntity(updated);
+  }
+
+  /** Super Admin edits any user's common profile fields (US-01.11). */
+  async updateUser(
+    targetUserId: string,
+    actorUserId: string,
+    input: { firstName?: string; lastName?: string; phone?: string },
+  ): Promise<UserSummaryDto> {
+    await this.requireUser(targetUserId);
+    const updated = await this.usersService.updateProfile(targetUserId, {
+      firstName: input.firstName,
+      lastName: input.lastName,
+      phone: input.phone,
+    });
+    await this.audit.record({
+      action: AUDIT_USER_UPDATED,
+      actorUserId,
+      targetUserId,
+      metadata: {
+        fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
+      },
+    });
+    return UserSummaryDto.fromEntity(updated);
+  }
+
+  /**
+   * GDPR delete (US-01.13): permanently anonymize a user's PII (and the PII on
+   * every player profile they own), mark them Deleted, revoke sessions, and
+   * write a compliance record to the audit log (original email/name preserved
+   * there for legal purposes). Historical references become "Deleted User".
+   */
+  async deleteUser(
+    targetUserId: string,
+    actorUserId: string,
+    reason?: string,
+  ): Promise<UserSummaryDto> {
+    const target = await this.requireUser(targetUserId);
+
+    if (target.role === Role.SuperAdmin) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.CANNOT_DELETE_SUPER_ADMIN,
+        message: 'Super Admin accounts cannot be deleted.',
+      });
+    }
+    if (target.status === UserStatus.Deleted) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ACCOUNT_DELETED,
+        message: 'This user has already been deleted.',
+      });
+    }
+
+    const originalEmail = target.email;
+    const originalName = [target.firstName, target.lastName]
+      .filter((v) => v !== null && v !== undefined && v.trim() !== '')
+      .join(' ');
+    const originalPhone = target.phone;
+
+    await this.dataSource.transaction(async (manager: EntityManager) => {
+      await this.usersService.anonymize(target.id, manager);
+      await this.playersService.anonymizeByOwner(target.id, manager);
+      await this.audit.record(
+        {
+          action: AUDIT_USER_DELETED,
+          actorUserId,
+          targetUserId: target.id,
+          metadata: { originalEmail, originalName, originalPhone, reason: reason ?? null },
+        },
+        manager,
+      );
+    });
+
+    await this.authService.revokeAllUserSessions(target.id, 'deleted');
+
+    const updated = await this.requireUser(target.id);
+    return UserSummaryDto.fromEntity(updated);
+  }
+
+  private async requireUser(id: string): Promise<User> {
+    const user = await this.usersService.findById(id);
+    if (!user) {
+      throw new NotFoundException({ errorCode: ErrorCode.NOT_FOUND, message: 'User not found.' });
+    }
+    return user;
   }
 
   async listUsers(query: ListUsersQueryDto): Promise<PaginatedUsersDto> {

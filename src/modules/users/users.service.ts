@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { Role, UserStatus } from './entities/user.enums';
 
@@ -67,6 +67,13 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { id } });
   }
 
+  async findByIds(ids: string[]): Promise<User[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    return this.usersRepository.find({ where: { id: In(ids) } });
+  }
+
   async create(input: CreateUserInput, manager?: EntityManager): Promise<User> {
     const repository: Repository<User> =
       manager !== undefined ? manager.getRepository(User) : this.usersRepository;
@@ -102,6 +109,64 @@ export class UsersService {
 
   async touchLastLogin(id: string, at: Date): Promise<void> {
     await this.usersRepository.update({ id }, { lastLoginAt: at });
+  }
+
+  /**
+   * Update common profile fields. Only keys present in `input` are changed;
+   * `undefined` values are left untouched (email/role/status are not editable
+   * here).
+   */
+  async updateProfile(
+    id: string,
+    input: { firstName?: string | null; lastName?: string | null; phone?: string | null },
+  ): Promise<User> {
+    const patch: Partial<User> = {};
+    if (input.firstName !== undefined) {
+      patch.firstName = input.firstName;
+    }
+    if (input.lastName !== undefined) {
+      patch.lastName = input.lastName;
+    }
+    if (input.phone !== undefined) {
+      patch.phone = input.phone;
+    }
+    if (Object.keys(patch).length > 0) {
+      await this.usersRepository.update({ id }, patch);
+    }
+    return (await this.findById(id)) as User;
+  }
+
+  async setPhotoUrl(id: string, photoUrl: string): Promise<User> {
+    await this.usersRepository.update({ id }, { photoUrl });
+    return (await this.findById(id)) as User;
+  }
+
+  async setStatus(id: string, status: UserStatus, manager?: EntityManager): Promise<void> {
+    const repository: Repository<User> =
+      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
+    await repository.update({ id }, { status });
+  }
+
+  /**
+   * GDPR anonymization (US-01.13): strip PII, disable login, and mark the
+   * account Deleted. Irreversible; historical rows keep referring to this id as
+   * "Deleted User".
+   */
+  async anonymize(id: string, manager?: EntityManager): Promise<void> {
+    const repository: Repository<User> =
+      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
+    await repository.update(
+      { id },
+      {
+        firstName: 'Deleted',
+        lastName: 'User',
+        email: `deleted_${id}@example.com`,
+        phone: null,
+        photoUrl: null,
+        passwordHash: null,
+        status: UserStatus.Deleted,
+      },
+    );
   }
 
   async markEmailVerified(id: string, at: Date): Promise<void> {

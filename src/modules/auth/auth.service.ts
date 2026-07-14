@@ -275,6 +275,18 @@ export class AuthService {
       });
     }
 
+    // Hard session expiry (e.g. impersonation sessions are capped at 1 hour).
+    if (session.expiresAt && session.expiresAt.getTime() < this.clock.now().getTime()) {
+      await this.sessions.update(
+        { id: session.id },
+        { revokedAt: this.clock.now(), revokedReason: 'expired' },
+      );
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+        message: 'Session has expired.',
+      });
+    }
+
     const user = await this.usersService.findById(row.userId);
     if (!user || user.status !== UserStatus.Active) {
       throw new UnauthorizedException({
@@ -290,6 +302,7 @@ export class AuthService {
       activeTrainerProfileId: session.activeTrainerProfileId,
       trainerOrgId: null,
       tokenVersion: user.tokenVersion,
+      actorUserId: session.impersonatedBy ?? undefined,
     });
 
     const newRefresh = this.tokens.signRefresh({
@@ -349,6 +362,19 @@ export class AuthService {
     const now = this.clock.now();
     await this.refreshTokens.update({ id: row.id }, { revokedAt: now });
     await this.sessions.update({ id: row.sessionId }, { revokedAt: now, revokedReason: 'logout' });
+  }
+
+  /**
+   * Revoke every active session and refresh token for a user (e.g. when a
+   * Super Admin deactivates the account). Historical rows are preserved.
+   */
+  async revokeAllUserSessions(userId: string, reason: string): Promise<void> {
+    const now = this.clock.now();
+    await this.sessions.update(
+      { userId, revokedAt: IsNull() },
+      { revokedAt: now, revokedReason: reason },
+    );
+    await this.refreshTokens.update({ userId, revokedAt: IsNull() }, { revokedAt: now });
   }
 
   async forgotPassword(email: string): Promise<void> {
@@ -425,6 +451,66 @@ export class AuthService {
     const passwordHash = await this.passwords.hash(input.newPassword);
     await this.usersService.setPasswordAndBumpVersion(userId, passwordHash);
     await this.mail.sendPasswordChangedEmail(user.email);
+  }
+
+  /**
+   * Create an unverified PlayerParent account and its email-verification token
+   * inside a caller-provided transaction, returning the plaintext token so the
+   * caller can send the verification email after the transaction commits. Used
+   * by the ShareLink join flow (US-01.02).
+   */
+  async createUnverifiedPlayer(
+    input: {
+      email: string;
+      password: string;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+    },
+    manager: EntityManager,
+  ): Promise<{ user: User; verificationToken: string }> {
+    return this.createUnverifiedAccount({ ...input, role: Role.PlayerParent }, manager);
+  }
+
+  /**
+   * Create an unverified account with the given role and its email-verification
+   * token inside a caller transaction, returning the plaintext token so the
+   * caller can send the email after commit. Used by the ShareLink join flow
+   * (PlayerParent, US-01.02) and the coach-invite flow (Coach, US-01.08).
+   */
+  async createUnverifiedAccount(
+    input: {
+      email: string;
+      password: string;
+      role: Role;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+    },
+    manager: EntityManager,
+  ): Promise<{ user: User; verificationToken: string }> {
+    const passwordHash = await this.passwords.hash(input.password);
+    const user = await this.usersService.create(
+      {
+        email: input.email,
+        role: input.role,
+        passwordHash,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        phone: input.phone,
+        emailVerified: false,
+        mustSetPassword: false,
+        status: UserStatus.Active,
+      },
+      manager,
+    );
+
+    const { token, tokenHash } = this.tokens.generateOpaqueToken();
+    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
+    const evRepo = manager.getRepository(EmailVerificationToken);
+    await evRepo.save(evRepo.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }));
+
+    return { user, verificationToken: token };
   }
 
   async createSetupToken(userId: string, manager?: EntityManager): Promise<string> {

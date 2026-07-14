@@ -16,6 +16,8 @@ describe('MailService (unit)', () => {
       sendPasswordChanged: jest.fn().mockResolvedValue(undefined),
       sendWelcome: jest.fn().mockResolvedValue(undefined),
       sendTrainerInvite: jest.fn().mockResolvedValue(undefined),
+      sendJoinConfirmation: jest.fn().mockResolvedValue(undefined),
+      sendCoachInvite: jest.fn().mockResolvedValue(undefined),
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -72,6 +74,14 @@ describe('MailService (unit)', () => {
     expect(mailer.sendWelcome).toHaveBeenCalledWith({
       to: 'user@axel.test',
       firstName: 'Ada',
+    });
+  });
+
+  it('sendJoinConfirmationEmail forwards recipient and trainerName', async () => {
+    await service.sendJoinConfirmationEmail('user@axel.test', 'Hoops Academy');
+    expect(mailer.sendJoinConfirmation).toHaveBeenCalledWith({
+      to: 'user@axel.test',
+      trainerName: 'Hoops Academy',
     });
   });
 });

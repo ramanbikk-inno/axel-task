@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { json } from 'express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 
@@ -53,13 +54,18 @@ function buildMockMailer(): jest.Mocked<Mailer> {
     sendPasswordChanged: jest.fn(),
     sendWelcome: jest.fn(),
     sendTrainerInvite: jest.fn(),
+    sendJoinConfirmation: jest.fn(),
+    sendCoachInvite: jest.fn(),
   } as unknown as jest.Mocked<Mailer>;
 }
 
 function buildMockStorage(): jest.Mocked<StorageService> {
   return {
-    upload: jest.fn(),
-    delete: jest.fn(),
+    upload: jest.fn().mockResolvedValue({
+      url: 'https://storage.test/uploads/mock.png',
+      publicId: 'uploads/mock.png',
+    }),
+    delete: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<StorageService>;
 }
 
@@ -103,7 +109,8 @@ export async function bootstrapE2E(): Promise<E2EContext> {
     .useValue(clock)
     .compile();
 
-  const app: INestApplication = moduleRef.createNestApplication();
+  const app: INestApplication = moduleRef.createNestApplication({ bodyParser: false });
+  app.use(json({ limit: '5mb' }));
   app.setGlobalPrefix('api/v1');
   await app.init();
 

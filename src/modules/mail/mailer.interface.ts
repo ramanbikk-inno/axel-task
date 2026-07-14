@@ -6,4 +6,11 @@ export interface Mailer {
   sendPasswordChanged(input: { to: string }): Promise<void>;
   sendWelcome(input: { to: string; firstName: string }): Promise<void>;
   sendTrainerInvite(input: { to: string; firstName: string; setupUrl: string }): Promise<void>;
+  sendJoinConfirmation(input: { to: string; trainerName: string }): Promise<void>;
+  sendCoachInvite(input: {
+    to: string;
+    trainerName: string;
+    acceptUrl: string;
+    message?: string;
+  }): Promise<void>;
 }
