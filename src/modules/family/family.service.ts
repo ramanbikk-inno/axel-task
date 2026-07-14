@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
@@ -10,10 +11,12 @@ import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AssociationsService } from '../enrollment/associations.service';
 import { AssociationStatus } from '../enrollment/entities/trainer-player-association.entity';
+import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { CreateChildDto } from './dto/create-child.dto';
+import { FamilyContextView } from './dto/family-context.view';
 import { PlayerProfileView, TrainerContextView } from './dto/player-profile.view';
 
 @Injectable()
@@ -22,6 +25,7 @@ export class FamilyService {
     private readonly dataSource: DataSource,
     private readonly playersService: PlayersService,
     private readonly associations: AssociationsService,
+    private readonly shareLinks: ShareLinksService,
     private readonly trainersService: TrainersService,
     private readonly clock: ClockService,
   ) {}
@@ -97,6 +101,111 @@ export class FamilyService {
     return view;
   }
 
+  /** Context-switcher data: the parent's own context + each child's contexts. */
+  async getContext(parentUserId: string): Promise<FamilyContextView> {
+    const views = await this.listFamily(parentUserId);
+    return {
+      self: views.find((v) => !v.isChild) ?? null,
+      children: views.filter((v) => v.isChild),
+    };
+  }
+
+  /** Connect an owned profile to a trainer the parent is already associated with. */
+  async addTrainerFromExisting(
+    parentUserId: string,
+    profileId: string,
+    trainerProfileId: string,
+  ): Promise<PlayerProfileView> {
+    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+
+    const owned = await this.playersService.findByOwner(parentUserId);
+    const parentTrainers = await this.parentTrainerProfileIds(owned);
+    if (!parentTrainers.has(trainerProfileId)) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.TRAINER_NOT_ASSOCIATED,
+        message: 'You can only add a profile to trainers you are associated with.',
+      });
+    }
+
+    await this.associations.associate({ trainerProfileId, playerProfileId: profile.id });
+    const [view] = await this.buildViews([profile]);
+    return view;
+  }
+
+  /** Connect an owned profile to a (possibly new) trainer via a ShareLink code. */
+  async addTrainerByCode(
+    parentUserId: string,
+    profileId: string,
+    code: string,
+  ): Promise<PlayerProfileView> {
+    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+    const link = await this.shareLinks.requireUsable(code);
+
+    await this.dataSource.transaction(async (manager: EntityManager) => {
+      const { created } = await this.associations.associate(
+        {
+          trainerProfileId: link.trainerProfileId,
+          playerProfileId: profile.id,
+          shareLinkId: link.id,
+        },
+        manager,
+      );
+      if (created) {
+        await this.shareLinks.incrementUse(link.id, manager);
+      }
+    });
+
+    const [view] = await this.buildViews([profile]);
+    return view;
+  }
+
+  /**
+   * Disconnect an owned profile from a trainer. The association is deactivated
+   * (soft-deleted) so history is preserved.
+   */
+  async removeTrainer(
+    parentUserId: string,
+    profileId: string,
+    trainerProfileId: string,
+  ): Promise<PlayerProfileView> {
+    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+
+    const updated = await this.associations.setStatus(
+      trainerProfileId,
+      profile.id,
+      AssociationStatus.Inactive,
+    );
+    if (!updated) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'This profile is not connected to that trainer.',
+      });
+    }
+
+    const [view] = await this.buildViews([profile]);
+    return view;
+  }
+
+  private async requireOwnedProfile(
+    parentUserId: string,
+    profileId: string,
+  ): Promise<PlayerProfile> {
+    const profile = await this.playersService.findById(profileId);
+    if (!profile) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'Player profile not found.',
+      });
+    }
+    if (profile.ownerUserId !== parentUserId) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.PROFILE_NOT_OWNED,
+        message: 'You do not own this player profile.',
+      });
+    }
+    return profile;
+  }
+
   /** Distinct active trainer profile ids across all of the parent's profiles. */
   private async parentTrainerProfileIds(ownedProfiles: PlayerProfile[]): Promise<Set<string>> {
     const associations = await this.associations.findByPlayerProfiles(
@@ -113,7 +222,9 @@ export class FamilyService {
     if (profiles.length === 0) {
       return [];
     }
-    const associations = await this.associations.findByPlayerProfiles(profiles.map((p) => p.id));
+    const associations = (
+      await this.associations.findByPlayerProfiles(profiles.map((p) => p.id))
+    ).filter((a) => a.status === AssociationStatus.Active);
     const trainerIds = [...new Set(associations.map((a) => a.trainerProfileId))];
     const trainers = await this.trainersService.findByIds(trainerIds);
     const nameById = new Map(trainers.map((t) => [t.id, t.businessName]));
