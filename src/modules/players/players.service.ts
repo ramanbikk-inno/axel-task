@@ -51,6 +51,35 @@ export class PlayersService {
     return this.repo(manager).findOne({ where: { id } });
   }
 
+  /** Update the account holder's own (self) profile fields (US-01.11). */
+  async updateSelfProfile(
+    ownerUserId: string,
+    input: {
+      displayName?: string;
+      school?: string | null;
+      jerseyNumber?: string | null;
+      gender?: string | null;
+    },
+  ): Promise<PlayerProfile | null> {
+    const profile = await this.findSelfProfile(ownerUserId);
+    if (!profile) {
+      return null;
+    }
+    if (input.displayName !== undefined) {
+      profile.displayName = input.displayName;
+    }
+    if (input.school !== undefined) {
+      profile.school = input.school;
+    }
+    if (input.jerseyNumber !== undefined) {
+      profile.jerseyNumber = input.jerseyNumber;
+    }
+    if (input.gender !== undefined) {
+      profile.gender = input.gender;
+    }
+    return this.profiles.save(profile);
+  }
+
   /** All profiles (self + children) owned by an account. */
   async findByOwner(ownerUserId: string, manager?: EntityManager): Promise<PlayerProfile[]> {
     return this.repo(manager).find({

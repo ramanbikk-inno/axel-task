@@ -49,4 +49,33 @@ export class TrainersService {
     }
     return this.trainersRepository.find({ where: { id: In(ids) } });
   }
+
+  /** Update the trainer's own organization fields (US-01.11 role-specific). */
+  async updateProfileByUserId(
+    userId: string,
+    input: {
+      businessName?: string;
+      website?: string | null;
+      address?: string | null;
+      description?: string | null;
+    },
+  ): Promise<TrainerProfile | null> {
+    const profile = await this.findByUserId(userId);
+    if (!profile) {
+      return null;
+    }
+    if (input.businessName !== undefined) {
+      profile.businessName = input.businessName;
+    }
+    if (input.website !== undefined) {
+      profile.website = input.website;
+    }
+    if (input.address !== undefined) {
+      profile.address = input.address;
+    }
+    if (input.description !== undefined) {
+      profile.description = input.description;
+    }
+    return this.trainersRepository.save(profile);
+  }
 }
