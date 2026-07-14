@@ -140,6 +140,28 @@ export class UsersService {
     await repository.update({ id }, { status });
   }
 
+  /**
+   * GDPR anonymization (US-01.13): strip PII, disable login, and mark the
+   * account Deleted. Irreversible; historical rows keep referring to this id as
+   * "Deleted User".
+   */
+  async anonymize(id: string, manager?: EntityManager): Promise<void> {
+    const repository: Repository<User> =
+      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
+    await repository.update(
+      { id },
+      {
+        firstName: 'Deleted',
+        lastName: 'User',
+        email: `deleted_${id}@example.com`,
+        phone: null,
+        photoUrl: null,
+        passwordHash: null,
+        status: UserStatus.Deleted,
+      },
+    );
+  }
+
   async markEmailVerified(id: string, at: Date): Promise<void> {
     await this.usersRepository.update(
       { id },
