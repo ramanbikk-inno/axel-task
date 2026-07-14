@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 
 import { PlayerProfile } from './entities/player-profile.entity';
 
@@ -49,6 +49,13 @@ export class PlayersService {
 
   async findById(id: string, manager?: EntityManager): Promise<PlayerProfile | null> {
     return this.repo(manager).findOne({ where: { id } });
+  }
+
+  async findByIds(ids: string[]): Promise<PlayerProfile[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    return this.profiles.find({ where: { id: In(ids) } });
   }
 
   /** Update the account holder's own (self) profile fields (US-01.11). */
