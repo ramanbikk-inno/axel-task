@@ -45,6 +45,13 @@ export class TrainerProfile {
   @Column({ name: 'platform_fee_percent', type: 'numeric', precision: 5, scale: 2, nullable: true })
   platformFeePercent!: string | null;
 
+  /** Portal branding (US-01.14). */
+  @Column({ name: 'logo_url', type: 'text', nullable: true })
+  logoUrl!: string | null;
+
+  @Column({ name: 'primary_color', type: 'text', nullable: true })
+  primaryColor!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

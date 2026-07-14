@@ -1,8 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
+import { ErrorCode } from '../../shared/errors/error-codes';
+import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from './entities/trainer-profile.entity';
+
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 export interface CreateTrainerProfileInput {
   userId: string;
@@ -17,6 +21,7 @@ export class TrainersService {
   constructor(
     @InjectRepository(TrainerProfile)
     private readonly trainersRepository: Repository<TrainerProfile>,
+    @Inject(STORAGE) private readonly storage: StorageService,
   ) {}
 
   async create(input: CreateTrainerProfileInput, manager?: EntityManager): Promise<TrainerProfile> {
@@ -77,5 +82,54 @@ export class TrainersService {
       profile.description = input.description;
     }
     return this.trainersRepository.save(profile);
+  }
+
+  /** Set the trainer's primary brand color (US-01.14). */
+  async setPrimaryColor(userId: string, primaryColor: string): Promise<TrainerProfile> {
+    const profile = await this.requireOwnProfile(userId);
+    profile.primaryColor = primaryColor;
+    return this.trainersRepository.save(profile);
+  }
+
+  /** Validate + store an uploaded logo, returning the updated profile (US-01.14). */
+  async setLogoFromUpload(
+    userId: string,
+    input: { fileName: string; mimeType: string; dataBase64: string },
+  ): Promise<TrainerProfile> {
+    const profile = await this.requireOwnProfile(userId);
+
+    const buffer = Buffer.from(input.dataBase64, 'base64');
+    if (buffer.length === 0) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        message: 'Empty logo data.',
+      });
+    }
+    if (buffer.length > MAX_LOGO_BYTES) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.FILE_TOO_LARGE,
+        message: 'Logo must be 2MB or smaller.',
+      });
+    }
+
+    const { url } = await this.storage.upload({
+      buffer,
+      fileName: input.fileName,
+      mimeType: input.mimeType,
+      folder: 'logos',
+    });
+    profile.logoUrl = url;
+    return this.trainersRepository.save(profile);
+  }
+
+  private async requireOwnProfile(userId: string): Promise<TrainerProfile> {
+    const profile = await this.findByUserId(userId);
+    if (!profile) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
+        message: 'No trainer profile for this account.',
+      });
+    }
+    return profile;
   }
 }
