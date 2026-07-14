@@ -5,6 +5,7 @@ import { AdminService } from './admin.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
+import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { UsersService } from '../users/users.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
@@ -37,6 +38,7 @@ describe('AdminService.createTrainer', () => {
     const authService = { createSetupToken } as unknown as AuthService;
     const mail = { sendTrainerInviteEmail: sendTrainerInvite } as unknown as MailService;
     const audit = { record: auditRecord } as unknown as AuditService;
+    const playersService = {} as unknown as PlayersService;
     const dataSource = {
       transaction: async <T>(cb: (mgr: EntityManager) => Promise<T>): Promise<T> =>
         cb({} as EntityManager),
@@ -49,6 +51,7 @@ describe('AdminService.createTrainer', () => {
       authService,
       mail,
       audit,
+      playersService,
     );
 
     return {

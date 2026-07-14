@@ -80,6 +80,21 @@ export class PlayersService {
     return this.profiles.save(profile);
   }
 
+  /** GDPR anonymization of every profile owned by a user (US-01.13). */
+  async anonymizeByOwner(ownerUserId: string, manager?: EntityManager): Promise<void> {
+    const repository = this.repo(manager);
+    await repository.update(
+      { ownerUserId },
+      {
+        displayName: 'Deleted User',
+        school: null,
+        jerseyNumber: null,
+        gender: null,
+        birthDate: null,
+      },
+    );
+  }
+
   /** All profiles (self + children) owned by an account. */
   async findByOwner(ownerUserId: string, manager?: EntityManager): Promise<PlayerProfile[]> {
     return this.repo(manager).find({

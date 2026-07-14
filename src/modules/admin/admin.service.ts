@@ -13,6 +13,7 @@ import { MailService } from '../mail/mail.service';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
+import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
@@ -22,6 +23,7 @@ export const AUDIT_TRAINER_CREATED = 'trainer.created';
 export const AUDIT_USER_DEACTIVATED = 'user.deactivated';
 export const AUDIT_USER_REACTIVATED = 'user.reactivated';
 export const AUDIT_USER_UPDATED = 'user.updated';
+export const AUDIT_USER_DELETED = 'user.deleted';
 
 @Injectable()
 export class AdminService {
@@ -32,6 +34,7 @@ export class AdminService {
     private readonly authService: AuthService,
     private readonly mail: MailService,
     private readonly audit: AuditService,
+    private readonly playersService: PlayersService,
   ) {}
 
   async createTrainer(
@@ -186,6 +189,58 @@ export class AdminService {
         fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
       },
     });
+    return UserSummaryDto.fromEntity(updated);
+  }
+
+  /**
+   * GDPR delete (US-01.13): permanently anonymize a user's PII (and the PII on
+   * every player profile they own), mark them Deleted, revoke sessions, and
+   * write a compliance record to the audit log (original email/name preserved
+   * there for legal purposes). Historical references become "Deleted User".
+   */
+  async deleteUser(
+    targetUserId: string,
+    actorUserId: string,
+    reason?: string,
+  ): Promise<UserSummaryDto> {
+    const target = await this.requireUser(targetUserId);
+
+    if (target.role === Role.SuperAdmin) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.CANNOT_DELETE_SUPER_ADMIN,
+        message: 'Super Admin accounts cannot be deleted.',
+      });
+    }
+    if (target.status === UserStatus.Deleted) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ACCOUNT_DELETED,
+        message: 'This user has already been deleted.',
+      });
+    }
+
+    const originalEmail = target.email;
+    const originalName = [target.firstName, target.lastName]
+      .filter((v) => v !== null && v !== undefined && v.trim() !== '')
+      .join(' ');
+    const originalPhone = target.phone;
+
+    await this.dataSource.transaction(async (manager: EntityManager) => {
+      await this.usersService.anonymize(target.id, manager);
+      await this.playersService.anonymizeByOwner(target.id, manager);
+      await this.audit.record(
+        {
+          action: AUDIT_USER_DELETED,
+          actorUserId,
+          targetUserId: target.id,
+          metadata: { originalEmail, originalName, originalPhone, reason: reason ?? null },
+        },
+        manager,
+      );
+    });
+
+    await this.authService.revokeAllUserSessions(target.id, 'deleted');
+
+    const updated = await this.requireUser(target.id);
     return UserSummaryDto.fromEntity(updated);
   }
 

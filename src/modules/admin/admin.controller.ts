@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -105,5 +106,21 @@ export class AdminController {
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;
     return this.adminService.updateUser(id, principal.userId, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Delete, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: UserSummaryDto })
+  async deleteUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UserStatusChangeDto,
+    @Req() req: Request,
+  ): Promise<UserSummaryDto> {
+    const principal = req.user as Principal;
+    return this.adminService.deleteUser(id, principal.userId, dto.reason);
   }
 }
