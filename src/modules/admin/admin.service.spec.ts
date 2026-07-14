@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { AdminService } from './admin.service';
+import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
 import { TrainersService } from '../trainers/trainers.service';
@@ -19,12 +20,14 @@ describe('AdminService.createTrainer', () => {
     trainersCreate: jest.Mock;
     createSetupToken: jest.Mock;
     sendTrainerInvite: jest.Mock;
+    auditRecord: jest.Mock;
   } => {
     const findByEmail = jest.fn();
     const usersCreate = jest.fn();
     const trainersCreate = jest.fn();
     const createSetupToken = jest.fn().mockResolvedValue('plain-setup');
     const sendTrainerInvite = jest.fn().mockResolvedValue(undefined);
+    const auditRecord = jest.fn().mockResolvedValue(undefined);
 
     const usersService = {
       findByEmail,
@@ -33,12 +36,20 @@ describe('AdminService.createTrainer', () => {
     const trainersService = { create: trainersCreate } as unknown as TrainersService;
     const authService = { createSetupToken } as unknown as AuthService;
     const mail = { sendTrainerInviteEmail: sendTrainerInvite } as unknown as MailService;
+    const audit = { record: auditRecord } as unknown as AuditService;
     const dataSource = {
       transaction: async <T>(cb: (mgr: EntityManager) => Promise<T>): Promise<T> =>
         cb({} as EntityManager),
     } as unknown as DataSource;
 
-    const service = new AdminService(dataSource, usersService, trainersService, authService, mail);
+    const service = new AdminService(
+      dataSource,
+      usersService,
+      trainersService,
+      authService,
+      mail,
+      audit,
+    );
 
     return {
       service,
@@ -47,6 +58,7 @@ describe('AdminService.createTrainer', () => {
       trainersCreate,
       createSetupToken,
       sendTrainerInvite,
+      auditRecord,
     };
   };
 
@@ -96,12 +108,13 @@ describe('AdminService.createTrainer', () => {
       trainersCreate,
       createSetupToken,
       sendTrainerInvite,
+      auditRecord,
     } = makeService();
     findByEmail.mockResolvedValue(null);
     usersCreate.mockResolvedValue({ id: 'user-1', email: dto.email } as User);
     trainersCreate.mockResolvedValue({ id: 'tp-1' });
 
-    const result = await service.createTrainer(dto);
+    const result = await service.createTrainer(dto, 'admin-1');
 
     expect(usersCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -119,6 +132,14 @@ describe('AdminService.createTrainer', () => {
     );
     expect(createSetupToken).toHaveBeenCalledWith('user-1', expect.anything());
     expect(sendTrainerInvite).toHaveBeenCalledWith(dto.email, 'New', 'plain-setup');
+    expect(auditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'trainer.created',
+        actorUserId: 'admin-1',
+        targetUserId: 'user-1',
+      }),
+      expect.anything(),
+    );
     expect(result).toEqual({ id: 'user-1', email: dto.email, role: Role.Trainer });
   });
 });

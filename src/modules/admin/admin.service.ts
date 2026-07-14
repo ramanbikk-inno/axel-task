@@ -2,12 +2,17 @@ import { ConflictException, ForbiddenException, Injectable } from '@nestjs/commo
 import { DataSource, EntityManager } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
+import { ListUsersQueryDto } from './dto/list-users.query.dto';
+import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
+
+export const AUDIT_TRAINER_CREATED = 'trainer.created';
 
 @Injectable()
 export class AdminService {
@@ -17,9 +22,13 @@ export class AdminService {
     private readonly trainersService: TrainersService,
     private readonly authService: AuthService,
     private readonly mail: MailService,
+    private readonly audit: AuditService,
   ) {}
 
-  async createTrainer(input: CreateTrainerDto): Promise<{ id: string; email: string; role: Role }> {
+  async createTrainer(
+    input: CreateTrainerDto,
+    actorUserId?: string,
+  ): Promise<{ id: string; email: string; role: Role }> {
     if (input.role !== undefined && input.role === Role.SuperAdmin) {
       throw new ForbiddenException({
         errorCode: ErrorCode.CANNOT_CREATE_SUPER_ADMIN,
@@ -58,11 +67,43 @@ export class AdminService {
 
       setupToken = await this.authService.createSetupToken(created.id, manager);
 
+      // Audit log: who created the trainer, when, and the trainer details.
+      await this.audit.record(
+        {
+          action: AUDIT_TRAINER_CREATED,
+          actorUserId: actorUserId ?? null,
+          targetUserId: created.id,
+          metadata: {
+            email: input.email,
+            businessName: input.businessName,
+            role: Role.Trainer,
+          },
+        },
+        manager,
+      );
+
       return created;
     });
 
     await this.mail.sendTrainerInviteEmail(user.email, input.firstName ?? '', setupToken);
 
     return { id: user.id, email: user.email, role: Role.Trainer };
+  }
+
+  async listUsers(query: ListUsersQueryDto): Promise<PaginatedUsersDto> {
+    const { items, total } = await this.usersService.search({
+      search: query.search,
+      role: query.role,
+      status: query.status,
+      page: query.page,
+      limit: query.limit,
+    });
+
+    return {
+      items: items.map((user) => UserSummaryDto.fromEntity(user)),
+      total,
+      page: query.page,
+      limit: query.limit,
+    };
   }
 }
