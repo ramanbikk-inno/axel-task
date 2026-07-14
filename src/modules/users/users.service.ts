@@ -104,6 +104,12 @@ export class UsersService {
     await this.usersRepository.update({ id }, { lastLoginAt: at });
   }
 
+  async setStatus(id: string, status: UserStatus, manager?: EntityManager): Promise<void> {
+    const repository: Repository<User> =
+      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
+    await repository.update({ id }, { status });
+  }
+
   async markEmailVerified(id: string, at: Date): Promise<void> {
     await this.usersRepository.update(
       { id },

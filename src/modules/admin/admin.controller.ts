@@ -1,4 +1,15 @@
-import { Body, Controller, Get, HttpCode, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 
@@ -13,7 +24,8 @@ import { Role } from '../users/entities/user.enums';
 import { AdminService } from './admin.service';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
-import { PaginatedUsersDto } from './dto/user-summary.dto';
+import { UserStatusChangeDto } from './dto/user-status-change.dto';
+import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
 
 @ApiTags('admin')
 @Controller('users')
@@ -43,5 +55,37 @@ export class AdminController {
   @ApiOkResponse({ type: PaginatedUsersDto })
   async listUsers(@Query() query: ListUsersQueryDto): Promise<PaginatedUsersDto> {
     return this.adminService.listUsers(query);
+  }
+
+  @Post(':id/deactivate')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: UserSummaryDto })
+  async deactivateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UserStatusChangeDto,
+    @Req() req: Request,
+  ): Promise<UserSummaryDto> {
+    const principal = req.user as Principal;
+    return this.adminService.deactivateUser(id, principal.userId, dto.reason);
+  }
+
+  @Post(':id/reactivate')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: UserSummaryDto })
+  async reactivateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UserStatusChangeDto,
+    @Req() req: Request,
+  ): Promise<UserSummaryDto> {
+    const principal = req.user as Principal;
+    return this.adminService.reactivateUser(id, principal.userId, dto.reason);
   }
 }
