@@ -65,6 +65,14 @@ export class ResendMailer implements Mailer {
     );
   }
 
+  async sendJoinConfirmation(input: { to: string; trainerName: string }): Promise<void> {
+    await this.send(
+      input.to,
+      `You joined ${input.trainerName}`,
+      `<p>You are now connected with ${input.trainerName}. You can see their events and content once your email is verified.</p>`,
+    );
+  }
+
   private async send(to: string, subject: string, html: string): Promise<void> {
     const { error } = await this.getClient().emails.send({
       from: this.from,

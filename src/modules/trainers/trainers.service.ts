@@ -38,4 +38,8 @@ export class TrainersService {
   async findByUserId(userId: string): Promise<TrainerProfile | null> {
     return this.trainersRepository.findOne({ where: { userId } });
   }
+
+  async findById(id: string): Promise<TrainerProfile | null> {
+    return this.trainersRepository.findOne({ where: { id } });
+  }
 }

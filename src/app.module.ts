@@ -15,6 +15,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AbilityModule } from './modules/ability/ability.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { ImpersonationModule } from './modules/impersonation/impersonation.module';
+import { PlayersModule } from './modules/players/players.module';
+import { EnrollmentModule } from './modules/enrollment/enrollment.module';
 import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
 
 @Module({
@@ -31,6 +33,8 @@ import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
     AbilityModule,
     AdminModule,
     ImpersonationModule,
+    PlayersModule,
+    EnrollmentModule,
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 60 }]),
   ],
   controllers: [],

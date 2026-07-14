@@ -453,6 +453,46 @@ export class AuthService {
     await this.mail.sendPasswordChangedEmail(user.email);
   }
 
+  /**
+   * Create an unverified PlayerParent account and its email-verification token
+   * inside a caller-provided transaction, returning the plaintext token so the
+   * caller can send the verification email after the transaction commits. Used
+   * by the ShareLink join flow (US-01.02).
+   */
+  async createUnverifiedPlayer(
+    input: {
+      email: string;
+      password: string;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+    },
+    manager: EntityManager,
+  ): Promise<{ user: User; verificationToken: string }> {
+    const passwordHash = await this.passwords.hash(input.password);
+    const user = await this.usersService.create(
+      {
+        email: input.email,
+        role: Role.PlayerParent,
+        passwordHash,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        phone: input.phone,
+        emailVerified: false,
+        mustSetPassword: false,
+        status: UserStatus.Active,
+      },
+      manager,
+    );
+
+    const { token, tokenHash } = this.tokens.generateOpaqueToken();
+    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
+    const evRepo = manager.getRepository(EmailVerificationToken);
+    await evRepo.save(evRepo.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }));
+
+    return { user, verificationToken: token };
+  }
+
   async createSetupToken(userId: string, manager?: EntityManager): Promise<string> {
     const repository =
       manager !== undefined ? manager.getRepository(AccountSetupToken) : this.accountSetups;
