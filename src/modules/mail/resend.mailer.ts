@@ -73,6 +73,20 @@ export class ResendMailer implements Mailer {
     );
   }
 
+  async sendCoachInvite(input: {
+    to: string;
+    trainerName: string;
+    acceptUrl: string;
+    message?: string;
+  }): Promise<void> {
+    const note = input.message ? `<p>${input.message}</p>` : '';
+    await this.send(
+      input.to,
+      `${input.trainerName} invited you to coach`,
+      `${note}<p>Accept your coaching invitation via <a href="${input.acceptUrl}">this link</a> (expires in 7 days).</p>`,
+    );
+  }
+
   private async send(to: string, subject: string, html: string): Promise<void> {
     const { error } = await this.getClient().emails.send({
       from: this.from,

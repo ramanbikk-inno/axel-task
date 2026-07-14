@@ -39,4 +39,14 @@ export class MailService {
   async sendJoinConfirmationEmail(to: string, trainerName: string): Promise<void> {
     await this.mailer.sendJoinConfirmation({ to, trainerName });
   }
+
+  async sendCoachInviteEmail(
+    to: string,
+    trainerName: string,
+    acceptToken: string,
+    message?: string,
+  ): Promise<void> {
+    const acceptUrl = `${this.appUrl}/coach-invite?token=${acceptToken}`;
+    await this.mailer.sendCoachInvite({ to, trainerName, acceptUrl, message });
+  }
 }
