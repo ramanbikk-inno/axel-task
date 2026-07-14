@@ -1,0 +1,17 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+
+export class LoginDto {
+  @ApiProperty({ example: 'player@example.com' })
+  @IsEmail()
+  email!: string;
+
+  @ApiProperty({ minLength: 12, maxLength: 128 })
+  @IsString()
+  @MinLength(12)
+  @MaxLength(128)
+  @Matches(/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/, {
+    message: 'password must contain upper, lower, number and symbol',
+  })
+  password!: string;
+}

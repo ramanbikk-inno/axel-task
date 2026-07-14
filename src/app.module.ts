@@ -1,6 +1,7 @@
 import { HttpStatus, Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { validate } from './shared/config/env.validation';
 import { DatabaseModule } from './shared/database/database.module';
 import { ClockModule } from './shared/clock/clock.module';
@@ -10,6 +11,10 @@ import { AllExceptionsFilter } from './shared/errors/all-exceptions.filter';
 import { UsersModule } from './modules/users/users.module';
 import { MailModule } from './modules/mail/mail.module';
 import { StorageModule } from './modules/storage/storage.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { AbilityModule } from './modules/ability/ability.module';
+import { AdminModule } from './modules/admin/admin.module';
+import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
 
 @Module({
   imports: [
@@ -21,6 +26,10 @@ import { StorageModule } from './modules/storage/storage.module';
     UsersModule,
     MailModule,
     StorageModule,
+    AuthModule,
+    AbilityModule,
+    AdminModule,
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 60 }]),
   ],
   controllers: [],
   providers: [
@@ -34,6 +43,7 @@ import { StorageModule } from './modules/storage/storage.module';
         errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
       }),
     },
+    { provide: APP_GUARD, useClass: AuthThrottlerGuard },
   ],
 })
 export class AppModule {}
