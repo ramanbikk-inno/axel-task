@@ -14,7 +14,9 @@ export class CreateAvailability1700000800000 implements MigrationInterface {
         "created_at" timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT "PK_availability_slots_id" PRIMARY KEY ("id"),
         CONSTRAINT "FK_availability_slots_player" FOREIGN KEY ("player_profile_id")
-          REFERENCES "player_profiles"("id") ON DELETE CASCADE
+          REFERENCES "player_profiles"("id") ON DELETE CASCADE,
+        CONSTRAINT "CHK_availability_slots_day" CHECK ("day_of_week" >= 0 AND "day_of_week" <= 6),
+        CONSTRAINT "CHK_availability_slots_range" CHECK ("start_minute" >= 0 AND "end_minute" <= 1439 AND "start_minute" < "end_minute")
       )
     `);
     await queryRunner.query(

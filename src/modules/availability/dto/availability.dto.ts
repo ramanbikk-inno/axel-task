@@ -12,6 +12,9 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+// Time-of-day in 24h HH:MM, confined to a single calendar day (00:00–23:59).
+// Availability windows do not cross midnight: endTime must be strictly after
+// startTime and both fall on the same day, so a window cannot end at 24:00.
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class AvailabilitySlotInput {

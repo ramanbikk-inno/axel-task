@@ -56,15 +56,7 @@ export class AvailabilityService {
     input: AvailabilitySlotInput[],
   ): Promise<AvailabilitySlotView[]> {
     await this.requireOwnedProfile(ownerUserId, profileId);
-
-    for (const s of input) {
-      if (toMinutes(s.endTime) <= toMinutes(s.startTime)) {
-        throw new BadRequestException({
-          errorCode: ErrorCode.VALIDATION_ERROR,
-          message: `endTime must be after startTime (day ${s.dayOfWeek}).`,
-        });
-      }
-    }
+    this.assertValidSlots(input);
 
     await this.dataSource.transaction(async (manager: EntityManager) => {
       const repo = manager.getRepository(AvailabilitySlot);
@@ -83,16 +75,53 @@ export class AvailabilityService {
       }
     });
 
-    return this.getForProfile(ownerUserId, profileId);
+    return this.listForProfile(profileId);
   }
 
   async getForProfile(ownerUserId: string, profileId: string): Promise<AvailabilitySlotView[]> {
     await this.requireOwnedProfile(ownerUserId, profileId);
+    return this.listForProfile(profileId);
+  }
+
+  private async listForProfile(profileId: string): Promise<AvailabilitySlotView[]> {
     const rows = await this.slots.find({
       where: { playerProfileId: profileId },
       order: { dayOfWeek: 'ASC', startMinute: 'ASC' },
     });
     return rows.map(toView);
+  }
+
+  /**
+   * Validate a proposed set of windows: each must be a single-day range with
+   * endTime strictly after startTime (windows never cross midnight), and
+   * windows on the same day must not overlap. Touching windows (17:00–18:00 and
+   * 18:00–19:00) are allowed because ranges are end-exclusive.
+   */
+  private assertValidSlots(input: AvailabilitySlotInput[]): void {
+    const byDay = new Map<number, AvailabilitySlotInput[]>();
+    for (const s of input) {
+      if (toMinutes(s.endTime) <= toMinutes(s.startTime)) {
+        throw new BadRequestException({
+          errorCode: ErrorCode.VALIDATION_ERROR,
+          message: `endTime must be after startTime (day ${s.dayOfWeek}).`,
+        });
+      }
+      const list = byDay.get(s.dayOfWeek) ?? [];
+      list.push(s);
+      byDay.set(s.dayOfWeek, list);
+    }
+
+    for (const [day, daySlots] of byDay) {
+      const sorted = [...daySlots].sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+      for (let i = 1; i < sorted.length; i++) {
+        if (toMinutes(sorted[i].startTime) < toMinutes(sorted[i - 1].endTime)) {
+          throw new BadRequestException({
+            errorCode: ErrorCode.VALIDATION_ERROR,
+            message: `Availability windows overlap on day ${day}.`,
+          });
+        }
+      }
+    }
   }
 
   /** Trainer view of associated players' availability, optionally filtered. */
@@ -120,7 +149,12 @@ export class AvailabilityService {
       return [];
     }
 
-    const profiles = await this.playersService.findByIds(profileIds);
+    // Sorted for stable ordering across requests. The day/time filter applied
+    // below narrows *which* players are returned; each returned player keeps
+    // their full weekly availability for scheduling context.
+    const profiles = (await this.playersService.findByIds(profileIds)).sort(
+      (a, b) => a.displayName.localeCompare(b.displayName) || a.id.localeCompare(b.id),
+    );
     const rows = await this.slots.find({ where: { playerProfileId: In(profileIds) } });
 
     const byProfile = new Map<string, AvailabilitySlot[]>();

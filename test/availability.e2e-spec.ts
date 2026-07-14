@@ -179,4 +179,94 @@ describe('Availability / Best Times (e2e, US-01.09)', () => {
       .set('Authorization', `Bearer ${parentToken}`)
       .expect(403);
   });
+
+  it('rejects overlapping windows on the same day', async () => {
+    const trainer = await makeTrainer('t6@example.com', 'Zeta');
+    const parentToken = await registerParent('parent6@example.com', trainer.code);
+    const profileId = await selfProfileId(parentToken);
+
+    await request(app.getHttpServer())
+      .put(`/api/v1/players/${profileId}/availability`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({
+        slots: [
+          { dayOfWeek: 1, startTime: '17:00', endTime: '20:00' },
+          { dayOfWeek: 1, startTime: '19:00', endTime: '21:00' },
+        ],
+      })
+      .expect(400)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR));
+  });
+
+  it('allows adjacent (touching) windows on the same day', async () => {
+    const trainer = await makeTrainer('t7@example.com', 'Eta');
+    const parentToken = await registerParent('parent7@example.com', trainer.code);
+    const profileId = await selfProfileId(parentToken);
+
+    const res = await request(app.getHttpServer())
+      .put(`/api/v1/players/${profileId}/availability`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({
+        slots: [
+          { dayOfWeek: 1, startTime: '17:00', endTime: '18:00' },
+          { dayOfWeek: 1, startTime: '18:00', endTime: '19:00' },
+        ],
+      })
+      .expect(200);
+    expect(res.body).toHaveLength(2);
+  });
+
+  it('clears all availability when given an empty slot list', async () => {
+    const trainer = await makeTrainer('t8@example.com', 'Theta');
+    const parentToken = await registerParent('parent8@example.com', trainer.code);
+    const profileId = await selfProfileId(parentToken);
+
+    await request(app.getHttpServer())
+      .put(`/api/v1/players/${profileId}/availability`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ slots: [{ dayOfWeek: 2, startTime: '10:00', endTime: '12:00' }] })
+      .expect(200);
+
+    const cleared = await request(app.getHttpServer())
+      .put(`/api/v1/players/${profileId}/availability`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ slots: [] })
+      .expect(200);
+    expect(cleared.body).toHaveLength(0);
+
+    const got = await request(app.getHttpServer())
+      .get(`/api/v1/players/${profileId}/availability`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .expect(200);
+    expect(got.body).toHaveLength(0);
+  });
+
+  it('accepts Sunday (dayOfWeek 0) and matches the trainer day filter', async () => {
+    const trainer = await makeTrainer('t9@example.com', 'Iota');
+    const parentToken = await registerParent('parent9@example.com', trainer.code);
+    const profileId = await selfProfileId(parentToken);
+
+    await request(app.getHttpServer())
+      .put(`/api/v1/players/${profileId}/availability`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ slots: [{ dayOfWeek: 0, startTime: '09:00', endTime: '11:00' }] })
+      .expect(200);
+
+    const match = await request(app.getHttpServer())
+      .get('/api/v1/trainers/me/players/availability?dayOfWeek=0&time=10:00')
+      .set('Authorization', `Bearer ${trainer.token}`)
+      .expect(200);
+    expect(match.body).toHaveLength(1);
+    expect(match.body[0].slots[0]).toMatchObject({ dayOfWeek: 0, startTime: '09:00' });
+  });
+
+  it('returns an empty list for a trainer with no associated players', async () => {
+    const trainer = await makeTrainer('t10@example.com', 'Kappa');
+
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/trainers/me/players/availability')
+      .set('Authorization', `Bearer ${trainer.token}`)
+      .expect(200);
+    expect(res.body).toEqual([]);
+  });
 });
