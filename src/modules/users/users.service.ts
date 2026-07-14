@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { Role, UserStatus } from './entities/user.enums';
 
@@ -65,6 +65,13 @@ export class UsersService {
 
   async findById(id: string): Promise<User | null> {
     return this.usersRepository.findOne({ where: { id } });
+  }
+
+  async findByIds(ids: string[]): Promise<User[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    return this.usersRepository.find({ where: { id: In(ids) } });
   }
 
   async create(input: CreateUserInput, manager?: EntityManager): Promise<User> {

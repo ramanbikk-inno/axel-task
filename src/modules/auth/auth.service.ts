@@ -469,11 +469,31 @@ export class AuthService {
     },
     manager: EntityManager,
   ): Promise<{ user: User; verificationToken: string }> {
+    return this.createUnverifiedAccount({ ...input, role: Role.PlayerParent }, manager);
+  }
+
+  /**
+   * Create an unverified account with the given role and its email-verification
+   * token inside a caller transaction, returning the plaintext token so the
+   * caller can send the email after commit. Used by the ShareLink join flow
+   * (PlayerParent, US-01.02) and the coach-invite flow (Coach, US-01.08).
+   */
+  async createUnverifiedAccount(
+    input: {
+      email: string;
+      password: string;
+      role: Role;
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+    },
+    manager: EntityManager,
+  ): Promise<{ user: User; verificationToken: string }> {
     const passwordHash = await this.passwords.hash(input.password);
     const user = await this.usersService.create(
       {
         email: input.email,
-        role: Role.PlayerParent,
+        role: input.role,
         passwordHash,
         firstName: input.firstName,
         lastName: input.lastName,
