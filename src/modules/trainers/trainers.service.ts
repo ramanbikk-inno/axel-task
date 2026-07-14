@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 
 import { TrainerProfile } from './entities/trainer-profile.entity';
 
@@ -41,5 +41,12 @@ export class TrainersService {
 
   async findById(id: string): Promise<TrainerProfile | null> {
     return this.trainersRepository.findOne({ where: { id } });
+  }
+
+  async findByIds(ids: string[]): Promise<TrainerProfile[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+    return this.trainersRepository.find({ where: { id: In(ids) } });
   }
 }
