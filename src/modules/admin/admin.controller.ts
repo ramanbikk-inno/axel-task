@@ -5,6 +5,7 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -22,6 +23,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { AdminService } from './admin.service';
+import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { UserStatusChangeDto } from './dto/user-status-change.dto';
@@ -87,5 +89,21 @@ export class AdminController {
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;
     return this.adminService.reactivateUser(id, principal.userId, dto.reason);
+  }
+
+  @Patch(':id')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: UserSummaryDto })
+  async updateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminUpdateUserDto,
+    @Req() req: Request,
+  ): Promise<UserSummaryDto> {
+    const principal = req.user as Principal;
+    return this.adminService.updateUser(id, principal.userId, dto);
   }
 }

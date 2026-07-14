@@ -21,6 +21,7 @@ import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
 export const AUDIT_TRAINER_CREATED = 'trainer.created';
 export const AUDIT_USER_DEACTIVATED = 'user.deactivated';
 export const AUDIT_USER_REACTIVATED = 'user.reactivated';
+export const AUDIT_USER_UPDATED = 'user.updated';
 
 @Injectable()
 export class AdminService {
@@ -162,6 +163,29 @@ export class AdminService {
     }
 
     const updated = await this.requireUser(target.id);
+    return UserSummaryDto.fromEntity(updated);
+  }
+
+  /** Super Admin edits any user's common profile fields (US-01.11). */
+  async updateUser(
+    targetUserId: string,
+    actorUserId: string,
+    input: { firstName?: string; lastName?: string; phone?: string },
+  ): Promise<UserSummaryDto> {
+    await this.requireUser(targetUserId);
+    const updated = await this.usersService.updateProfile(targetUserId, {
+      firstName: input.firstName,
+      lastName: input.lastName,
+      phone: input.phone,
+    });
+    await this.audit.record({
+      action: AUDIT_USER_UPDATED,
+      actorUserId,
+      targetUserId,
+      metadata: {
+        fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
+      },
+    });
     return UserSummaryDto.fromEntity(updated);
   }
 

@@ -104,6 +104,36 @@ export class UsersService {
     await this.usersRepository.update({ id }, { lastLoginAt: at });
   }
 
+  /**
+   * Update common profile fields. Only keys present in `input` are changed;
+   * `undefined` values are left untouched (email/role/status are not editable
+   * here).
+   */
+  async updateProfile(
+    id: string,
+    input: { firstName?: string | null; lastName?: string | null; phone?: string | null },
+  ): Promise<User> {
+    const patch: Partial<User> = {};
+    if (input.firstName !== undefined) {
+      patch.firstName = input.firstName;
+    }
+    if (input.lastName !== undefined) {
+      patch.lastName = input.lastName;
+    }
+    if (input.phone !== undefined) {
+      patch.phone = input.phone;
+    }
+    if (Object.keys(patch).length > 0) {
+      await this.usersRepository.update({ id }, patch);
+    }
+    return (await this.findById(id)) as User;
+  }
+
+  async setPhotoUrl(id: string, photoUrl: string): Promise<User> {
+    await this.usersRepository.update({ id }, { photoUrl });
+    return (await this.findById(id)) as User;
+  }
+
   async setStatus(id: string, status: UserStatus, manager?: EntityManager): Promise<void> {
     const repository: Repository<User> =
       manager !== undefined ? manager.getRepository(User) : this.usersRepository;
