@@ -1,17 +1,26 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
 export class LoginDto {
   @ApiProperty({ example: 'player@example.com' })
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ minLength: 12, maxLength: 128 })
+  /**
+   * Deliberately *not* validated against the password policy.
+   *
+   * Login checks a password, it does not set one. Applying the complexity rules
+   * here meant a wrong password of the wrong shape produced a 422 quoting the
+   * policy, while a wrong password of the right shape produced a 401 — which
+   * both leaks the policy to an unauthenticated caller and breaks the
+   * enumeration-safe contract that every failed login looks identical.
+   *
+   * The length bound stays: it is what keeps an attacker from making us run
+   * argon2id over a megabyte of input.
+   */
+  @ApiProperty({ maxLength: 128 })
   @IsString()
-  @MinLength(12)
+  @IsNotEmpty()
   @MaxLength(128)
-  @Matches(/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/, {
-    message: 'password must contain upper, lower, number and symbol',
-  })
   password!: string;
 }

@@ -37,7 +37,10 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
   let sessionRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock };
   let userRepo: { findOne: jest.Mock };
   let tokens: jest.Mocked<
-    Pick<TokenService, 'verifyRefresh' | 'hashOpaqueToken' | 'signAccess' | 'signRefresh'>
+    Pick<
+      TokenService,
+      'verifyRefresh' | 'hashOpaqueToken' | 'signAccess' | 'signRefresh' | 'accessTtlSeconds'
+    >
   >;
   let clock: FakeClock;
 
@@ -81,6 +84,7 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       hashOpaqueToken: jest.fn(),
       signAccess: jest.fn(),
       signRefresh: jest.fn(),
+      accessTtlSeconds: jest.fn().mockReturnValue(900),
     };
     tokens.verifyRefresh.mockReturnValue(validClaims);
     tokens.hashOpaqueToken.mockImplementation((t: string) => `hash:${t}`);

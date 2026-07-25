@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
+import {
+  IsStrongPassword,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_POLICY_DESCRIPTION,
+} from '../../../shared/validation/password';
 import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 
 export class RegisterDto {
@@ -8,13 +14,12 @@ export class RegisterDto {
   @IsEmail()
   email!: string;
 
-  @ApiProperty({ minLength: 12, maxLength: 128 })
-  @IsString()
-  @MinLength(12)
-  @MaxLength(128)
-  @Matches(/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/, {
-    message: 'password must contain upper, lower, number and symbol',
+  @ApiProperty({
+    minLength: PASSWORD_MIN_LENGTH,
+    maxLength: PASSWORD_MAX_LENGTH,
+    description: PASSWORD_POLICY_DESCRIPTION,
   })
+  @IsStrongPassword()
   password!: string;
 
   @ApiPropertyOptional()

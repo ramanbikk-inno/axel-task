@@ -1,5 +1,16 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 
 import { Action, AppAbility } from '../ability/ability.factory';
@@ -23,9 +34,13 @@ export class ImpersonationController {
   @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
   @Roles(Role.SuperAdmin)
   @CheckPolicies((ability: AppAbility) => ability.can(Action.Impersonate, 'User'))
+  // Assuming another user's identity is the single most sensitive action on the
+  // platform. A rate limit bounds how much of the user table one compromised
+  // admin token can be walked through before anyone notices.
+  @Throttle({ default: { limit: 10, ttl: 60000 }, ip: { limit: 20, ttl: 60000 } })
   @ApiBearerAuth()
   async impersonate(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() dto: ImpersonateDto,
     @Req() req: Request,
   ): Promise<StartImpersonationResult> {

@@ -21,6 +21,8 @@ export interface E2EContext {
   dataSource: DataSource;
   mailer: jest.Mocked<Mailer>;
   storage: jest.Mocked<StorageService>;
+  /** The real service, so tests can forge hashes under other argon2 parameters. */
+  passwords: PasswordService;
   clock: { set(d: Date): void; advance(ms: number): void };
   resetDb(): Promise<void>;
   seedSuperAdmin(): Promise<{ email: string; password: string }>;
@@ -217,6 +219,7 @@ export async function bootstrapE2E(): Promise<E2EContext> {
     dataSource,
     mailer,
     storage,
+    passwords,
     clock,
     resetDb,
     seedSuperAdmin,

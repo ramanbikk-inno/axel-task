@@ -17,6 +17,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      issuer: config.get<string>('JWT_ISSUER', 'axel-api'),
+      audience: config.get<string>('JWT_AUDIENCE', 'axel-app'),
     });
   }
 

@@ -1,17 +1,25 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+
+import {
+  IsStrongPassword,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_POLICY_DESCRIPTION,
+} from '../../../shared/validation/password';
 
 export class SetupPasswordDto {
   @ApiProperty({ description: 'The opaque 72h account-setup token from the invite email.' })
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(512)
   token!: string;
 
-  @ApiProperty({ description: 'New password: 12-128 chars, upper/lower/number/symbol.' })
-  @IsString()
-  @MinLength(12)
-  @MaxLength(128)
-  @Matches(/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/, {
-    message: 'newPassword must contain upper- and lower-case letters, a number and a symbol',
+  @ApiProperty({
+    minLength: PASSWORD_MIN_LENGTH,
+    maxLength: PASSWORD_MAX_LENGTH,
+    description: PASSWORD_POLICY_DESCRIPTION,
   })
+  @IsStrongPassword()
   newPassword!: string;
 }

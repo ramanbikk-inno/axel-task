@@ -48,14 +48,22 @@ export class AuthController {
     });
   }
 
+  /**
+   * Intentionally unauthenticated. Possession of a valid refresh token is the
+   * authorisation — requiring an access token as well would leave a user whose
+   * access token has expired unable to revoke their own session, and the
+   * refresh token is a signed JWT, so it cannot be guessed.
+   */
   @Post('logout')
   @HttpCode(204)
+  @Throttle({ default: { limit: 30, ttl: 60000 }, ip: { limit: 60, ttl: 60000 } })
   async logout(@Body() dto: RefreshDto): Promise<void> {
     await this.authService.logout(dto.refreshToken);
   }
 
   @Post('verify-email')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60000 }, ip: { limit: 20, ttl: 60000 } })
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
     await this.authService.verifyEmail(dto.token);
     return { message: 'Email verified. You can now log in.' };
@@ -79,6 +87,7 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60000 }, ip: { limit: 20, ttl: 60000 } })
   async resetPassword(@Body() dto: ResetPasswordDto): Promise<{ message: string }> {
     await this.authService.resetPassword({ token: dto.token, newPassword: dto.newPassword });
     return { message: 'Password reset. Please log in with your new password.' };
@@ -87,6 +96,10 @@ export class AuthController {
   @Patch('change-password')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
+  // Authenticated, but still throttled: the current-password field makes this
+  // an online oracle for a password an attacker holding a stolen access token
+  // does not yet know.
+  @Throttle({ default: { limit: 5, ttl: 60000 }, ip: { limit: 20, ttl: 60000 } })
   @ApiBearerAuth()
   async changePassword(
     @Req() req: Request,
@@ -94,7 +107,7 @@ export class AuthController {
   ): Promise<AuthTokens & { message: string }> {
     const principal = req.user as Principal;
     const tokens = await this.authService.changePassword(
-      principal.userId,
+      principal,
       { currentPassword: dto.currentPassword, newPassword: dto.newPassword },
       { ip: req.ip, userAgent: req.headers['user-agent'] },
     );
@@ -105,6 +118,7 @@ export class AuthController {
 
   @Post('setup-password')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60000 }, ip: { limit: 20, ttl: 60000 } })
   async setupPassword(@Body() dto: SetupPasswordDto, @Req() req: Request): Promise<AuthTokens> {
     return this.authService.setupPassword(dto, {
       ip: req.ip,
