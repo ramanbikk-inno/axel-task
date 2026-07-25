@@ -61,12 +61,49 @@ export class ShareLinksService {
   }
 
   /**
-   * Resolve a code and validate it is usable (active, not expired, uses left),
-   * throwing the appropriate error otherwise.
+   * Resolve, validate and lock a share link for redemption, inside the caller's
+   * transaction.
+   *
+   * `expectedType` is required rather than optional: player joins and coach
+   * invite acceptance redeem out of the same table, and the player-side paths
+   * used to skip the type check entirely — so a stranger could spend a
+   * trainer's single-use, 7-day coach invite by registering as a player,
+   * burning the invite and joining the org.
+   *
+   * The pessimistic write lock is what makes single-use actually single use.
+   * Validating and then incrementing in two statements is a check-then-act
+   * race: two concurrent redemptions of a maxUses=1 link both read
+   * useCount = 0 and both succeed. Holding the row until the transaction
+   * commits serialises them, so the second sees the incremented count.
    */
-  async requireUsable(code: string, manager?: EntityManager): Promise<ShareLink> {
-    const link = await this.findByCode(code, manager);
-    if (!link || !link.active) {
+  async lockForRedemption(
+    code: string,
+    expectedType: ShareLinkType,
+    manager: EntityManager,
+  ): Promise<ShareLink> {
+    const link = await manager.getRepository(ShareLink).findOne({
+      where: { code },
+      lock: { mode: 'pessimistic_write' },
+    });
+    return this.assertUsable(link, expectedType);
+  }
+
+  /**
+   * Non-locking validity check, for read-only preview endpoints. Never use this
+   * to gate a redemption — see lockForRedemption.
+   */
+  async requireUsable(
+    code: string,
+    expectedType: ShareLinkType,
+    manager?: EntityManager,
+  ): Promise<ShareLink> {
+    return this.assertUsable(await this.findByCode(code, manager), expectedType);
+  }
+
+  private assertUsable(link: ShareLink | null, expectedType: ShareLinkType): ShareLink {
+    // A code of the wrong kind is reported as simply invalid, so this does not
+    // become an oracle for probing which codes are coach invites.
+    if (!link || !link.active || link.type !== expectedType) {
       throw new NotFoundException({
         errorCode: ErrorCode.SHARE_LINK_INVALID,
         message: 'This invite link is invalid.',

@@ -51,8 +51,10 @@ export class ShareLinksController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.Trainer)
   @ApiBearerAuth()
-  async create(@Body() dto: CreateShareLinkDto, @Req() req: Request): Promise<ShareLinkView> {
-    const link = await this.enrollment.createTrainerShareLink(req.user as Principal, dto.type);
+  async create(@Body() _dto: CreateShareLinkDto, @Req() req: Request): Promise<ShareLinkView> {
+    // The body is validated (and rejects anything but player_static) but carries
+    // no choice: this endpoint only ever mints a static player link.
+    const link = await this.enrollment.createTrainerShareLink(req.user as Principal);
     return this.toView(link);
   }
 

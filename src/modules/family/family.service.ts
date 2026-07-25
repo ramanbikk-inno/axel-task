@@ -10,6 +10,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AssociationsService } from '../enrollment/associations.service';
+import { ShareLinkType } from '../enrollment/entities/share-link.entity';
 import { AssociationStatus } from '../enrollment/entities/trainer-player-association.entity';
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
@@ -139,9 +140,16 @@ export class FamilyService {
     code: string,
   ): Promise<PlayerProfileView> {
     const profile = await this.requireOwnedProfile(parentUserId, profileId);
-    const link = await this.shareLinks.requireUsable(code);
 
     await this.dataSource.transaction(async (manager: EntityManager) => {
+      // Player links only: a parent pasting a coach invite code here used to
+      // consume the trainer's single-use coach invitation.
+      const link = await this.shareLinks.lockForRedemption(
+        code,
+        ShareLinkType.PlayerStatic,
+        manager,
+      );
+
       const { created } = await this.associations.associate(
         {
           trainerProfileId: link.trainerProfileId,
