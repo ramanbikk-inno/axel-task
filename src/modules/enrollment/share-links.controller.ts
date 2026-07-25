@@ -1,5 +1,15 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 
@@ -9,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { CreateShareLinkDto } from './dto/create-share-link.dto';
+import { RosterEntryView, RosterQueryDto } from './dto/roster.dto';
 import { EnrollmentService, ResolvedShareLink } from './enrollment.service';
 import { ShareLink } from './entities/share-link.entity';
 
@@ -44,6 +55,17 @@ export class ShareLinksController {
       active: link.active,
       createdAt: link.createdAt,
     };
+  }
+
+  /** US-01.02: the trainer's CRM view of everyone connected to them. */
+  @Get('trainers/me/roster')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Trainer)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: [RosterEntryView] })
+  async roster(@Query() query: RosterQueryDto, @Req() req: Request): Promise<RosterEntryView[]> {
+    return this.enrollment.roster(req.user as Principal, query);
   }
 
   @Post('sharelinks')
