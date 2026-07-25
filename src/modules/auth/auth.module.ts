@@ -7,6 +7,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClockModule } from '../../shared/clock/clock.module';
 import { CryptoModule } from '../../shared/crypto/crypto.module';
 import { MailModule } from '../mail/mail.module';
+import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -15,6 +16,7 @@ import { AuthSession } from './entities/auth-session.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
+import { SessionValidatorService } from './session-validator.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenService } from './token.service';
 
@@ -33,10 +35,11 @@ import { TokenService } from './token.service';
       EmailVerificationToken,
       PasswordResetToken,
       AccountSetupToken,
+      User,
     ]),
   ],
   controllers: [AuthController],
-  providers: [TokenService, JwtStrategy, AuthService],
-  exports: [TokenService, AuthService],
+  providers: [TokenService, JwtStrategy, AuthService, SessionValidatorService],
+  exports: [TokenService, AuthService, SessionValidatorService],
 })
 export class AuthModule {}
