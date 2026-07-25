@@ -11,8 +11,13 @@ import { MailModule } from '../mail/mail.module';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
+import { AbilityModule } from '../ability/ability.module';
+import { TrainerPlayerAssociation } from '../enrollment/entities/trainer-player-association.entity';
+import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { ContextController } from './context.controller';
+import { ContextService } from './context.service';
 import { AccountSetupToken } from './entities/account-setup-token.entity';
 import { AuthSession } from './entities/auth-session.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
@@ -40,10 +45,13 @@ import { TokenService } from './token.service';
       User,
       TrainerProfile,
       CoachProfile,
+      PlayerProfile,
+      TrainerPlayerAssociation,
     ]),
+    AbilityModule,
   ],
-  controllers: [AuthController],
-  providers: [TokenService, JwtStrategy, AuthService, SessionValidatorService],
-  exports: [TokenService, AuthService, SessionValidatorService],
+  controllers: [AuthController, ContextController],
+  providers: [TokenService, JwtStrategy, AuthService, SessionValidatorService, ContextService],
+  exports: [TokenService, AuthService, SessionValidatorService, ContextService],
 })
 export class AuthModule {}

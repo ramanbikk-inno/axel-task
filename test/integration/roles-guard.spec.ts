@@ -37,6 +37,7 @@ describe('RolesGuard (integration via probe controller)', () => {
     role,
     sessionId: 's1',
     activeTrainerProfileId: null,
+    activePlayerProfileId: null,
     trainerOrgId: null,
     coachProfileId: null,
     tokenVersion: 0,

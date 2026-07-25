@@ -24,6 +24,7 @@ describe('RolesGuard', () => {
     role,
     sessionId: 's1',
     activeTrainerProfileId: null,
+    activePlayerProfileId: null,
     trainerOrgId: null,
     coachProfileId: null,
     tokenVersion: 0,

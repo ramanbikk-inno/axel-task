@@ -26,6 +26,7 @@ function principal(over: Partial<Principal> = {}): Principal {
     role: Role.PlayerParent,
     sessionId: 'session-1',
     activeTrainerProfileId: null,
+    activePlayerProfileId: null,
     trainerOrgId: null,
     coachProfileId: null,
     tokenVersion: 0,

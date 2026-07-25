@@ -15,7 +15,9 @@ export interface Principal {
   userId: string;
   role: Role;
   sessionId: string;
+  /** The selected context pair, read from the session row on every request. */
   activeTrainerProfileId: string | null;
+  activePlayerProfileId: string | null;
   trainerOrgId: string | null;
   /** Set only for Coach accounts; the row availability and profile rules key on. */
   coachProfileId: string | null;
