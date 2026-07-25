@@ -173,7 +173,9 @@ describe('Parent manages child-trainer associations (e2e, US-01.04)', () => {
       .post(`/api/v1/players/${childOfB}/trainers`)
       .set('Authorization', `Bearer ${parentA}`)
       .send({ trainerProfileId: trainerA.trainerProfileId })
-      .expect(403)
-      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.PROFILE_NOT_OWNED));
+      // 404, not 403: a 403 would confirm the id names a real profile
+      // belonging to another family.
+      .expect(404)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.NOT_FOUND));
   });
 });

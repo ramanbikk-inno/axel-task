@@ -9,7 +9,10 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { PasswordService } from '../../shared/crypto/password.service';
 import { parseCalendarDate } from '../../shared/validation/calendar-date';
+import { AuthService } from '../auth/auth.service';
+import { Principal } from '../auth/principal';
 import { ContextService } from '../auth/context.service';
 import { AssociationsService } from '../enrollment/associations.service';
 import { ShareLinkType } from '../enrollment/entities/share-link.entity';
@@ -18,6 +21,9 @@ import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
+import { Role, UserStatus } from '../users/entities/user.enums';
+import { UsersService } from '../users/users.service';
+import { ChildLoginStatusView, ChildLoginView } from './dto/child-login.dto';
 import { CreateChildDto } from './dto/create-child.dto';
 import { FamilyContextView } from './dto/family-context.view';
 import { PlayerProfileView, TrainerContextView } from './dto/player-profile.view';
@@ -31,12 +37,28 @@ export class FamilyService {
     private readonly shareLinks: ShareLinksService,
     private readonly trainersService: TrainersService,
     private readonly context: ContextService,
+    private readonly usersService: UsersService,
+    private readonly passwords: PasswordService,
+    private readonly auth: AuthService,
     private readonly clock: ClockService,
   ) {}
 
-  /** All profiles owned by the parent (self + children), each with its trainers. */
-  async listFamily(parentUserId: string): Promise<PlayerProfileView[]> {
-    const profiles = await this.playersService.findByOwner(parentUserId);
+  /**
+   * All profiles owned by the parent (self + children), each with its trainers.
+   *
+   * For a child login this is their single profile and nothing else. Keying on
+   * `ownerUserId` alone would return an empty list for a child — their profile
+   * belongs to the parent — which reads as "no data" rather than "your data".
+   */
+  async listFamily(principal: Principal): Promise<PlayerProfileView[]> {
+    if (principal.isChild) {
+      const own =
+        principal.childPlayerProfileId === null
+          ? null
+          : await this.playersService.findById(principal.childPlayerProfileId);
+      return own ? this.buildViews([own]) : [];
+    }
+    const profiles = await this.playersService.findByOwner(principal.userId);
     return this.buildViews(profiles);
   }
 
@@ -99,9 +121,17 @@ export class FamilyService {
     return view;
   }
 
-  /** Context-switcher data: the parent's own context + each child's contexts. */
-  async getContext(parentUserId: string): Promise<FamilyContextView> {
-    const views = await this.listFamily(parentUserId);
+  /**
+   * Context-switcher data: the parent's own context + each child's contexts.
+   *
+   * A child sees a flat list of their own trainers with no "Me" section, which
+   * is exactly the shape US-01.06 documents for the child selector.
+   */
+  async getContext(principal: Principal): Promise<FamilyContextView> {
+    const views = await this.listFamily(principal);
+    if (principal.isChild) {
+      return { self: null, children: views };
+    }
     return {
       self: views.find((v) => !v.isChild) ?? null,
       children: views.filter((v) => v.isChild),
@@ -196,21 +226,121 @@ export class FamilyService {
     return view;
   }
 
+  /**
+   * Give a child profile its own login (US-01.06).
+   *
+   * The account is a PlayerParent like any other player; what makes it a child
+   * account is `player_profiles.child_user_id` pointing at it, which the
+   * session validator reads on every request. The database enforces both rules
+   * that matter: the link is unique, and a CHECK refuses it on a profile that
+   * is not a child.
+   */
+  async createChildLogin(
+    parentUserId: string,
+    profileId: string,
+    input: { email: string; password: string },
+  ): Promise<ChildLoginView> {
+    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+    if (!profile.isChild) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.NOT_A_CHILD_PROFILE,
+        message: 'Only a child profile can be given its own login.',
+      });
+    }
+    if (profile.childUserId !== null) {
+      throw new ConflictException({
+        errorCode: ErrorCode.CHILD_LOGIN_EXISTS,
+        message: 'This child already has a login.',
+      });
+    }
+
+    const existing = await this.usersService.findByEmail(input.email);
+    if (existing) {
+      // Not enumeration-sensitive: the caller is an authenticated parent
+      // choosing an address, and a silent no-op here would leave them thinking
+      // the login was created.
+      throw new ConflictException({
+        errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
+        message: 'An account with this email already exists.',
+      });
+    }
+
+    const passwordHash = await this.passwords.hash(input.password);
+    const childUser = await this.dataSource.transaction(async (manager: EntityManager) => {
+      const created = await this.usersService.create(
+        {
+          email: input.email,
+          role: Role.PlayerParent,
+          passwordHash,
+          firstName: profile.displayName,
+          // The parent vouching for the address is the verification; there is
+          // no separate mailbox to confirm.
+          emailVerified: true,
+          mustSetPassword: false,
+          status: UserStatus.Active,
+        },
+        manager,
+      );
+      await manager
+        .getRepository(PlayerProfile)
+        .update({ id: profile.id }, { childUserId: created.id });
+      return created;
+    });
+
+    return {
+      playerProfileId: profile.id,
+      displayName: profile.displayName,
+      childUserId: childUser.id,
+      email: childUser.email,
+    };
+  }
+
+  /**
+   * Revoke a child's login. The profile stays; only the ability to sign in as
+   * it goes away, along with every session currently doing so — otherwise a
+   * live child session keeps working for up to its refresh lifetime after the
+   * parent has withdrawn access.
+   */
+  async revokeChildLogin(parentUserId: string, profileId: string): Promise<void> {
+    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+    if (profile.childUserId === null) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'This child does not have a login.',
+      });
+    }
+
+    const childUserId = profile.childUserId;
+    await this.dataSource.transaction(async (manager: EntityManager) => {
+      await manager.getRepository(PlayerProfile).update({ id: profile.id }, { childUserId: null });
+      await this.usersService.setStatus(childUserId, UserStatus.Inactive, manager);
+    });
+    await this.auth.revokeAllUserSessions(childUserId, 'child-login-revoked');
+  }
+
+  async childLoginStatus(parentUserId: string, profileId: string): Promise<ChildLoginStatusView> {
+    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+    if (profile.childUserId === null) {
+      return { hasLogin: false };
+    }
+    const user = await this.usersService.findById(profile.childUserId);
+    return user ? { hasLogin: true, childUserId: user.id, email: user.email } : { hasLogin: false };
+  }
+
   private async requireOwnedProfile(
     parentUserId: string,
     profileId: string,
   ): Promise<PlayerProfile> {
     const profile = await this.playersService.findById(profileId);
-    if (!profile) {
+    // One answer for "no such profile" and "not yours". The split used to
+    // return 404 for the first and 403 for the second, which told a caller
+    // holding an id whether it named a real profile belonging to someone else
+    // — and it disagreed with the context-switch endpoint, which already
+    // collapsed both into 404.
+    if (!profile || profile.ownerUserId !== parentUserId) {
       throw new NotFoundException({
         errorCode: ErrorCode.NOT_FOUND,
         message: 'Player profile not found.',
-      });
-    }
-    if (profile.ownerUserId !== parentUserId) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.PROFILE_NOT_OWNED,
-        message: 'You do not own this player profile.',
       });
     }
     return profile;

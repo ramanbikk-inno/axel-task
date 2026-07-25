@@ -45,6 +45,15 @@ export class ContextService {
    * employer, not from a selection they make).
    */
   private async switchableProfiles(principal: Principal): Promise<PlayerProfile[]> {
+    // US-01.06: "Context selector shows only child's own trainer contexts (no
+    // parent data)." A child's profile is owned by the parent, so the owner
+    // clause below would match the *parent's* whole family for them — hence
+    // the separate branch keyed on the one profile this login is.
+    if (principal.isChild) {
+      return principal.childPlayerProfileId === null
+        ? []
+        : this.profiles.find({ where: { id: principal.childPlayerProfileId } });
+    }
     return this.profiles.find({
       where: { ownerUserId: principal.userId },
       order: { isChild: 'ASC', displayName: 'ASC' },
@@ -104,11 +113,10 @@ export class ContextService {
    * caller gets a new access token because the claims change.
    */
   async switch(principal: Principal, target: ActiveContext): Promise<ActiveContext> {
-    const profile = await this.profiles.findOne({
-      // Never `where: { id: target.playerProfileId }` alone — the owner clause
-      // is what stops one parent selecting another family's child.
-      where: { id: target.playerProfileId, ownerUserId: principal.userId },
-    });
+    // Resolved through the same allow-list the selector renders, so a child
+    // cannot name a sibling's profile id and a parent cannot name a stranger's.
+    const allowed = await this.switchableProfiles(principal);
+    const profile = allowed.find((p) => p.id === target.playerProfileId) ?? null;
     if (!profile) {
       // 404, not 403: a parent must not be able to tell a profile that exists
       // and belongs to someone else from one that does not exist.

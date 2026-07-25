@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
@@ -41,6 +41,8 @@ function displayNameFor(
 
 @Injectable()
 export class EnrollmentService {
+  private readonly logger = new Logger(EnrollmentService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly authService: AuthService,
@@ -184,6 +186,14 @@ export class EnrollmentService {
    * duplicate account, just a new association (multi-trainer support).
    */
   async joinAsExistingPlayer(code: string, principal: Principal): Promise<JoinResult> {
+    if (principal.isChild) {
+      await this.notifyParentOfChildJoinAttempt(principal, code);
+      throw new ForbiddenException({
+        errorCode: ErrorCode.CHILD_CANNOT_ADD_TRAINER,
+        message: 'Ask your parent to register you with this trainer.',
+      });
+    }
+
     const result = await this.dataSource.transaction(async (manager: EntityManager) => {
       const link = await this.shareLinks.lockForRedemption(
         code,
@@ -230,6 +240,43 @@ export class EnrollmentService {
       trainerProfileId: result.trainerProfileId,
       playerProfileId: result.profile.id,
     };
+  }
+
+  /**
+   * US-01.06: a child clicking a trainer's ShareLink is blocked, and the parent
+   * is emailed the link so they can complete the registration.
+   *
+   * Deliberately best-effort. The block is the security control and must hold
+   * whether or not the mail provider is reachable; swallowing the failure here
+   * keeps a provider outage from turning a 403 into a 500 that looks, to the
+   * child, like the link might work on a retry.
+   */
+  private async notifyParentOfChildJoinAttempt(principal: Principal, code: string): Promise<void> {
+    try {
+      if (principal.parentUserId === null) {
+        return;
+      }
+      const parent = await this.usersService.findById(principal.parentUserId);
+      const link = await this.shareLinks.findByCode(code);
+      if (!parent || !link || link.type !== ShareLinkType.PlayerStatic) {
+        return;
+      }
+      const child = principal.childPlayerProfileId
+        ? await this.playersService.findById(principal.childPlayerProfileId)
+        : null;
+
+      await this.mail.sendChildJoinRequestEmail(parent.email, {
+        childName: child?.displayName ?? 'Your child',
+        trainerName: await this.trainerName(link.trainerProfileId),
+        code: link.code,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Blocked child ${principal.userId} from joining via ${code}; parent notification failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private async trainerName(trainerProfileId: string): Promise<string> {

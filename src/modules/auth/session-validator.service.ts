@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
+import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -22,7 +23,21 @@ export interface ValidatedSession {
   trainerOrgId: string | null;
   /** The Coach's own profile row id, or null for every other role. */
   coachProfileId: string | null;
+  /**
+   * Child-account identity (US-01.06), resolved from
+   * `player_profiles.child_user_id`. Read per request rather than carried in
+   * the token so unlinking a child login takes effect at once.
+   */
+  isChild: boolean;
+  childPlayerProfileId: string | null;
+  parentUserId: string | null;
 }
+
+const NOT_A_CHILD = {
+  isChild: false as const,
+  childPlayerProfileId: null,
+  parentUserId: null,
+};
 
 function reject(errorCode: ErrorCode, message: string): UnauthorizedException {
   return new UnauthorizedException({ errorCode, message });
@@ -50,6 +65,8 @@ export class SessionValidatorService {
     private readonly trainerProfiles: Repository<TrainerProfile>,
     @InjectRepository(CoachProfile)
     private readonly coachProfiles: Repository<CoachProfile>,
+    @InjectRepository(PlayerProfile)
+    private readonly playerProfiles: Repository<PlayerProfile>,
     private readonly clock: ClockService,
   ) {}
 
@@ -64,13 +81,18 @@ export class SessionValidatorService {
    */
   private async resolveTenancy(
     user: User,
-  ): Promise<{ trainerOrgId: string | null; coachProfileId: string | null }> {
+  ): Promise<
+    Pick<
+      ValidatedSession,
+      'trainerOrgId' | 'coachProfileId' | 'isChild' | 'childPlayerProfileId' | 'parentUserId'
+    >
+  > {
     if (user.role === Role.Trainer) {
       const profile = await this.trainerProfiles.findOne({
         where: { userId: user.id },
         select: { id: true },
       });
-      return { trainerOrgId: profile?.id ?? null, coachProfileId: null };
+      return { trainerOrgId: profile?.id ?? null, coachProfileId: null, ...NOT_A_CHILD };
     }
     if (user.role === Role.Coach) {
       const profile = await this.coachProfiles.findOne({
@@ -80,9 +102,27 @@ export class SessionValidatorService {
       return {
         trainerOrgId: profile?.trainerProfileId ?? null,
         coachProfileId: profile?.id ?? null,
+        ...NOT_A_CHILD,
       };
     }
-    return { trainerOrgId: null, coachProfileId: null };
+
+    // A PlayerParent login attached to a child profile is a *child* account.
+    // One indexed lookup on a unique column, only for this role.
+    const asChild = await this.playerProfiles.findOne({
+      where: { childUserId: user.id },
+      select: { id: true, ownerUserId: true },
+    });
+    if (asChild) {
+      return {
+        trainerOrgId: null,
+        coachProfileId: null,
+        isChild: true,
+        childPlayerProfileId: asChild.id,
+        parentUserId: asChild.ownerUserId,
+      };
+    }
+
+    return { trainerOrgId: null, coachProfileId: null, ...NOT_A_CHILD };
   }
 
   async validate(claims: AccessClaims): Promise<ValidatedSession> {

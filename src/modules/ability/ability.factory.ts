@@ -34,8 +34,59 @@ export type Subjects =
 
 export type AppAbility = MongoAbility<[Action, Subjects | Record<string, unknown>]>;
 
+type Can = AbilityBuilder<AppAbility>['can'];
+type Cannot = AbilityBuilder<AppAbility>['cannot'];
+
 @Injectable()
 export class AbilityFactory {
+  /**
+   * US-01.06. A child account shares the PlayerParent role but not its
+   * permissions, and the difference is not cosmetic: the parent rules are
+   * scoped by `ownerUserId`, which for a child login matches *nothing* — their
+   * profile is owned by the parent. Falling through to them would leave a
+   * child unable to see their own data while still holding the parent's
+   * unconditioned `Create PlayerProfile` and association rights, which is the
+   * exact combination US-01.06 forbids.
+   *
+   * Everything here keys on `childPlayerProfileId`: the one profile this login
+   * *is*. There is no rule that can reach a sibling, because no rule mentions
+   * the parent's other profiles at all.
+   */
+  private applyChildRules(principal: Principal, can: Can, cannot: Cannot): void {
+    const ownProfile: MongoQuery = { id: principal.childPlayerProfileId } as MongoQuery;
+    const ownAssociations: MongoQuery = {
+      playerProfileId: principal.childPlayerProfileId,
+    } as MongoQuery;
+
+    // "View own training progress", "Update basic profile info".
+    can(Action.Read, 'PlayerProfile', ownProfile);
+    can(Action.Update, 'PlayerProfile', ownProfile);
+    // "Switch between trainer contexts (if trains with multiple trainers)",
+    // read-only: the child sees their own contexts and cannot change them.
+    can(Action.Read, 'TrainerPlayerAssociation', ownAssociations);
+    can(Action.Read, 'Branding');
+    // Availability is unconditioned for the same reason as the parent branch —
+    // availability_slots stores playerProfileId, and the owning check lives in
+    // AvailabilityService, which for a child resolves to their one profile.
+    can(Action.Manage, 'Availability');
+
+    // "Add new trainers (ShareLink registration blocked)" and "Change trainer
+    // associations". Written as explicit `cannot` rather than simply omitted:
+    // a later `can` added to a shared branch cannot silently grant these.
+    cannot(Action.Create, 'TrainerPlayerAssociation');
+    cannot(Action.Update, 'TrainerPlayerAssociation');
+    cannot(Action.Delete, 'TrainerPlayerAssociation');
+    // "Delete their account", and no creating siblings or sub-profiles.
+    cannot(Action.Create, 'PlayerProfile');
+    cannot(Action.Delete, 'PlayerProfile');
+    cannot(Action.Manage, 'User');
+    cannot(Action.Manage, 'ShareLink');
+    cannot(Action.Manage, 'CoachProfile');
+    // "Purchase tokens", "Complete purchases without parent approval".
+    cannot(Action.Create, 'PurchaseApproval');
+    cannot(Action.Update, 'PurchaseApproval');
+  }
+
   createForPrincipal(principal: Principal): AppAbility {
     const { can, cannot, build } = new AbilityBuilder<AppAbility>(createMongoAbility);
 
@@ -93,6 +144,11 @@ export class AbilityFactory {
       }
 
       case Role.PlayerParent: {
+        if (principal.isChild) {
+          this.applyChildRules(principal, can, cannot);
+          break;
+        }
+
         // Self-service over the profiles this account owns — the parent's own
         // profile and each child's (US-01.03 / US-01.04).
         const owned: MongoQuery = { ownerUserId: principal.userId } as MongoQuery;

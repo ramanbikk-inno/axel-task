@@ -13,6 +13,13 @@ export interface Mailer {
     acceptUrl: string;
     message?: string;
   }): Promise<void>;
+  /** US-01.06: a child tried to join a trainer; the parent must complete it. */
+  sendChildJoinRequest(input: {
+    to: string;
+    childName: string;
+    trainerName: string;
+    joinUrl: string;
+  }): Promise<void>;
   sendCoachAvailabilityOverride(input: {
     to: string;
     trainerName: string;

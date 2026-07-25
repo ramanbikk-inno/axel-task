@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
+import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -65,6 +66,7 @@ function build(
   userRow: User | null,
   trainerProfileRow: { id: string } | null = null,
   coachProfileRow: { id: string; trainerProfileId: string } | null = null,
+  playerProfileRow: { id: string; ownerUserId: string } | null = null,
 ): SessionValidatorService {
   const sessions = {
     findOne: jest.fn().mockResolvedValue(sessionRow),
@@ -76,11 +78,15 @@ function build(
   const coachProfiles = {
     findOne: jest.fn().mockResolvedValue(coachProfileRow),
   } as unknown as Repository<CoachProfile>;
+  const playerProfiles = {
+    findOne: jest.fn().mockResolvedValue(playerProfileRow ?? null),
+  } as unknown as Repository<PlayerProfile>;
   return new SessionValidatorService(
     sessions,
     users,
     trainerProfiles,
     coachProfiles,
+    playerProfiles,
     new FixedClock(),
   );
 }

@@ -13,6 +13,9 @@ describe('AbilityFactory', () => {
     activePlayerProfileId: null,
     trainerOrgId: null,
     coachProfileId: null,
+    isChild: false,
+    childPlayerProfileId: null,
+    parentUserId: null,
     tokenVersion: 0,
     scope: 'platform',
     impersonating: false,
@@ -221,6 +224,105 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.Manage, { __type: 'ShareLink', trainerOrgId: 'org-1' })).toBe(
         false,
       );
+    });
+  });
+
+  /**
+   * US-01.06. The trap here is that a child shares the PlayerParent role, so
+   * without a dedicated branch they inherit rules scoped by `ownerUserId` —
+   * which for a child login matches nothing, since their profile belongs to
+   * the parent. They would see none of their own data while still holding the
+   * parent's unconditioned Create/associate rights.
+   */
+  describe('child account', () => {
+    const CHILD = 'pp-child';
+    const SIBLING = 'pp-sibling';
+
+    const childAbility = (): AppAbility =>
+      factory.createForPrincipal(
+        principalFor({
+          userId: 'child-user-1',
+          role: Role.PlayerParent,
+          scope: 'trainer',
+          isChild: true,
+          childPlayerProfileId: CHILD,
+          parentUserId: 'parent-1',
+        }),
+      );
+
+    it('can read and update its own profile', () => {
+      const ability = childAbility();
+      expect(ability.can(Action.Read, { __type: 'PlayerProfile', id: CHILD })).toBe(true);
+      expect(ability.can(Action.Update, { __type: 'PlayerProfile', id: CHILD })).toBe(true);
+    });
+
+    it.each([Action.Read, Action.Update, Action.Delete])(
+      'cannot %s a sibling profile',
+      (action: Action) => {
+        // The sibling is owned by the same parent, which is exactly why the
+        // parent branch would have granted this.
+        const ability = childAbility();
+        expect(
+          ability.can(action, {
+            __type: 'PlayerProfile',
+            id: SIBLING,
+            ownerUserId: 'parent-1',
+          }),
+        ).toBe(false);
+      },
+    );
+
+    it('cannot create a profile', () => {
+      expect(childAbility().can(Action.Create, 'PlayerProfile')).toBe(false);
+    });
+
+    it('cannot add or change trainer associations', () => {
+      const ability = childAbility();
+      expect(ability.can(Action.Create, 'TrainerPlayerAssociation')).toBe(false);
+      expect(ability.can(Action.Update, 'TrainerPlayerAssociation')).toBe(false);
+      expect(
+        ability.can(Action.Delete, {
+          __type: 'TrainerPlayerAssociation',
+          playerProfileId: CHILD,
+        }),
+      ).toBe(false);
+    });
+
+    it('can read its own associations, for the context selector', () => {
+      const ability = childAbility();
+      expect(
+        ability.can(Action.Read, { __type: 'TrainerPlayerAssociation', playerProfileId: CHILD }),
+      ).toBe(true);
+      expect(
+        ability.can(Action.Read, { __type: 'TrainerPlayerAssociation', playerProfileId: SIBLING }),
+      ).toBe(false);
+    });
+
+    it('cannot purchase or approve', () => {
+      const ability = childAbility();
+      expect(ability.can(Action.Create, 'PurchaseApproval')).toBe(false);
+      expect(ability.can(Action.Update, 'PurchaseApproval')).toBe(false);
+    });
+
+    it.each(['User', 'ShareLink', 'CoachProfile'] as const)('cannot manage %s', (subject) => {
+      expect(childAbility().can(Action.Manage, subject)).toBe(false);
+    });
+
+    it('leaves the parent branch alone', () => {
+      // The same role, without the child flag, keeps everything it had.
+      const parent = factory.createForPrincipal(
+        principalFor({ userId: 'parent-1', role: Role.PlayerParent, scope: 'trainer' }),
+      );
+      expect(parent.can(Action.Create, 'PlayerProfile')).toBe(true);
+      expect(parent.can(Action.Update, { __type: 'PlayerProfile', ownerUserId: 'parent-1' })).toBe(
+        true,
+      );
+      expect(
+        parent.can(Action.Create, {
+          __type: 'TrainerPlayerAssociation',
+          ownerUserId: 'parent-1',
+        }),
+      ).toBe(true);
     });
   });
 });
