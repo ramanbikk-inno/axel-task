@@ -26,9 +26,14 @@ function validatorReturning(validated: ValidatedSession): SessionValidatorServic
 }
 
 function rows(
-  over: { session?: Partial<AuthSession>; user?: Partial<User> } = {},
+  over: {
+    session?: Partial<AuthSession>;
+    user?: Partial<User>;
+    trainerOrgId?: string | null;
+  } = {},
 ): ValidatedSession {
   return {
+    trainerOrgId: over.trainerOrgId ?? null,
     session: {
       id: 'session-1',
       userId: 'u-1',
@@ -157,6 +162,7 @@ describe('JwtStrategy', () => {
         rows({
           session: { activeTrainerProfileId: 'trainer-profile-7' },
           user: { role: Role.Trainer },
+          trainerOrgId: 'trainer-profile-7',
         }),
       ),
     );
@@ -171,5 +177,6 @@ describe('JwtStrategy', () => {
 
     expect(principal.role).toBe(Role.Trainer);
     expect(principal.activeTrainerProfileId).toBe('trainer-profile-7');
+    expect(principal.trainerOrgId).toBe('trainer-profile-7');
   });
 });

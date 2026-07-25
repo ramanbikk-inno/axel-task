@@ -4,14 +4,21 @@ import { Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
-import { UserStatus } from '../users/entities/user.enums';
+import { Role, UserStatus } from '../users/entities/user.enums';
 import { AccessClaims } from './auth.types';
 import { AuthSession } from './entities/auth-session.entity';
 
 export interface ValidatedSession {
   session: AuthSession;
   user: User;
+  /**
+   * The trainer organisation this principal belongs to, or null for everyone
+   * who is not a Trainer. This is the key every org-scoped authorization rule
+   * compares against.
+   */
+  trainerOrgId: string | null;
 }
 
 function reject(errorCode: ErrorCode, message: string): UnauthorizedException {
@@ -36,8 +43,26 @@ export class SessionValidatorService {
   constructor(
     @InjectRepository(AuthSession) private readonly sessions: Repository<AuthSession>,
     @InjectRepository(User) private readonly users: Repository<User>,
+    @InjectRepository(TrainerProfile)
+    private readonly trainerProfiles: Repository<TrainerProfile>,
     private readonly clock: ClockService,
   ) {}
+
+  /**
+   * Resolved per request rather than baked into the token: it is the tenancy
+   * key, so it must reflect the database now, not whenever the token happened
+   * to be minted. Only Trainers pay for the extra indexed lookup.
+   */
+  private async resolveTrainerOrgId(user: User): Promise<string | null> {
+    if (user.role !== Role.Trainer) {
+      return null;
+    }
+    const profile = await this.trainerProfiles.findOne({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+    return profile?.id ?? null;
+  }
 
   async validate(claims: AccessClaims): Promise<ValidatedSession> {
     const session: AuthSession | null = await this.sessions.findOne({
@@ -84,6 +109,6 @@ export class SessionValidatorService {
       throw reject(ErrorCode.CREDENTIALS_CHANGED, 'Credentials changed. Sign in again.');
     }
 
-    return { session, user };
+    return { session, user, trainerOrgId: await this.resolveTrainerOrgId(user) };
   }
 }
