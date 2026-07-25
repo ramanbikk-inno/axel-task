@@ -3,6 +3,7 @@ import request from 'supertest';
 
 import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
+import { oversizedPngBase64, PNG_1X1_BASE64 } from './helpers/image.fixtures';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
@@ -55,7 +56,7 @@ describe('Trainer portal branding (e2e, US-01.14)', () => {
       .send({
         fileName: 'logo.png',
         mimeType: 'image/png',
-        dataBase64: Buffer.from('fake-logo').toString('base64'),
+        dataBase64: PNG_1X1_BASE64,
       })
       .expect(200);
     expect(logo.body.logoUrl).toBe('https://storage.test/uploads/mock.png');
@@ -106,7 +107,7 @@ describe('Trainer portal branding (e2e, US-01.14)', () => {
       .send({
         fileName: 'big.png',
         mimeType: 'image/png',
-        dataBase64: Buffer.alloc(2 * 1024 * 1024 + 16).toString('base64'),
+        dataBase64: oversizedPngBase64(2 * 1024 * 1024),
       })
       .expect(400)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.FILE_TOO_LARGE));

@@ -3,6 +3,7 @@ import request from 'supertest';
 
 import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
+import { oversizedPngBase64, PNG_1X1_BASE64 } from './helpers/image.fixtures';
 import { AuditLog } from '../src/modules/audit/entities/audit-log.entity';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
 import { User } from '../src/modules/users/entities/user.entity';
@@ -82,7 +83,7 @@ describe('Profile editing (e2e, US-01.11)', () => {
       .send({
         fileName: 'me.png',
         mimeType: 'image/png',
-        dataBase64: Buffer.from('fake-image-bytes').toString('base64'),
+        dataBase64: PNG_1X1_BASE64,
       })
       .expect(200);
     expect(res.body.photoUrl).toBe('https://storage.test/uploads/mock.png');
@@ -98,7 +99,7 @@ describe('Profile editing (e2e, US-01.11)', () => {
       .send({
         fileName: 'big.png',
         mimeType: 'image/png',
-        dataBase64: Buffer.alloc(2 * 1024 * 1024 + 16).toString('base64'),
+        dataBase64: oversizedPngBase64(2 * 1024 * 1024),
       })
       .expect(400)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.FILE_TOO_LARGE));

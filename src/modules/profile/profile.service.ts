@@ -1,14 +1,10 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
+import { decodeImageUpload } from '../../shared/files/image-content';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { TrainersService } from '../trainers/trainers.service';
@@ -52,27 +48,14 @@ export class ProfileService {
   async uploadPhoto(userId: string, dto: UploadPhotoDto): Promise<MyProfileView> {
     await this.requireUser(userId);
 
-    let buffer: Buffer;
-    try {
-      buffer = Buffer.from(dto.dataBase64, 'base64');
-    } catch {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
-        message: 'Invalid base64 image data.',
-      });
-    }
-    if (buffer.length === 0) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
-        message: 'Empty image data.',
-      });
-    }
-    if (buffer.length > MAX_PHOTO_BYTES) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.FILE_TOO_LARGE,
-        message: 'Profile photo must be 2MB or smaller.',
-      });
-    }
+    // Verifies the bytes really are an image of the declared type — the
+    // client-supplied mimeType alone would let a script through as image/png.
+    const { buffer } = decodeImageUpload({
+      dataBase64: dto.dataBase64,
+      declaredMimeType: dto.mimeType,
+      maxBytes: MAX_PHOTO_BYTES,
+      label: 'Profile photo',
+    });
 
     const { url } = await this.storage.upload({
       buffer,

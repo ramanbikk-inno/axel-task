@@ -19,6 +19,7 @@ export interface E2EContext {
   app: INestApplication;
   dataSource: DataSource;
   mailer: jest.Mocked<Mailer>;
+  storage: jest.Mocked<StorageService>;
   clock: { set(d: Date): void; advance(ms: number): void };
   resetDb(): Promise<void>;
   seedSuperAdmin(): Promise<{ email: string; password: string }>;
@@ -207,6 +208,7 @@ export async function bootstrapE2E(): Promise<E2EContext> {
     app,
     dataSource,
     mailer,
+    storage,
     clock,
     resetDb,
     seedSuperAdmin,
