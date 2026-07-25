@@ -56,6 +56,14 @@ export class User {
   @Column({ name: 'photo_url', type: 'text', nullable: true })
   photoUrl!: string | null;
 
+  /**
+   * The storage provider's handle for the current photo. The URL is what gets
+   * served; this is what is needed to *delete* the previous asset when one is
+   * replaced, which storing only the URL made impossible.
+   */
+  @Column({ name: 'photo_public_id', type: 'text', nullable: true })
+  photoPublicId!: string | null;
+
   @Column({ name: 'token_version', type: 'int', default: 0 })
   tokenVersion!: number;
 

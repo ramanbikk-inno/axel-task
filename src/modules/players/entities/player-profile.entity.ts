@@ -13,6 +13,16 @@ import {
 import { User } from '../../users/entities/user.entity';
 
 /**
+ * Free-form by design: the spec asks for "emergency contact info" without
+ * fixing a shape, and nothing queries into it.
+ */
+export interface EmergencyContact {
+  name?: string;
+  phone?: string;
+  relationship?: string;
+}
+
+/**
  * A trainee profile owned by a user account. The account holder has one "self"
  * profile (isChild=false); parents additionally own one profile per child
  * (isChild=true) — see US-01.03. Associations to trainers live in
@@ -48,6 +58,29 @@ export class PlayerProfile {
 
   @Column({ name: 'jersey_number', type: 'text', nullable: true })
   jerseyNumber!: string | null;
+
+  /**
+   * The child's own login account, when one has been issued (US-01.06). Null
+   * for every adult profile and for children who only ever appear through
+   * their parent. A database CHECK keeps it null unless isChild is true.
+   */
+  @Column({ name: 'child_user_id', type: 'uuid', nullable: true })
+  childUserId!: string | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'child_user_id' })
+  childUser!: User | null;
+
+  /** US-01.05, per child, default OFF: tokens still need a parent's yes. */
+  @Column({ name: 'allow_child_token_spend_no_approval', type: 'boolean', default: false })
+  allowChildTokenSpendNoApproval!: boolean;
+
+  /** Set by the trainer, not by the player. */
+  @Column({ name: 'skill_level', type: 'text', nullable: true })
+  skillLevel!: string | null;
+
+  @Column({ name: 'emergency_contact', type: 'jsonb', nullable: true })
+  emergencyContact!: EmergencyContact | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

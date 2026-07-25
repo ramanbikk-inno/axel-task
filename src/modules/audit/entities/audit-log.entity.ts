@@ -23,6 +23,28 @@ export class AuditLog {
   @Column({ name: 'target_user_id', type: 'uuid', nullable: true })
   targetUserId!: string | null;
 
+  /**
+   * The admin who was really at the keyboard, when the action was taken inside
+   * an impersonation session (US-01.07). `actorUserId` stays the impersonated
+   * user — that is the truth about who the request claimed to be — so both
+   * questions can be answered from one row.
+   */
+  @Column({ name: 'on_behalf_of_admin_id', type: 'uuid', nullable: true })
+  onBehalfOfAdminId!: string | null;
+
+  @Column({ name: 'impersonation_session_id', type: 'uuid', nullable: true })
+  impersonationSessionId!: string | null;
+
+  /**
+   * A target that is not a user — a coach profile, a share link, a player
+   * profile. Set together with targetId or not at all (CHECK-enforced).
+   */
+  @Column({ name: 'target_type', type: 'text', nullable: true })
+  targetType!: string | null;
+
+  @Column({ name: 'target_id', type: 'uuid', nullable: true })
+  targetId!: string | null;
+
   @Column({ type: 'jsonb', nullable: true })
   metadata!: Record<string, unknown> | null;
 

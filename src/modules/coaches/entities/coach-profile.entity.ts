@@ -12,6 +12,12 @@ import {
 import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
 import { User } from '../../users/entities/user.entity';
 
+/** Employment state. Off-boarding keeps the row so history survives (US-01.08). */
+export enum CoachStatus {
+  Active = 'Active',
+  Inactive = 'Inactive',
+}
+
 /**
  * A coach account's profile. Each coach works for exactly ONE trainer
  * (US-01.08), enforced by the unique user_id (one profile per coach account).
@@ -21,7 +27,14 @@ export class CoachProfile {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Index('uq_coach_profiles_user_id', { unique: true })
+  /**
+   * Uniqueness is enforced by a *partial* index on the active rows
+   * (uq_coach_profiles_active_user_id), not by a column-level unique here.
+   * "One trainer per coach" is a rule about current employment; a total unique
+   * index also forbade ever having worked for a previous trainer, so an
+   * off-boarded coach could never be re-hired without deleting their history.
+   */
+  @Index('idx_coach_profiles_user_id')
   @Column({ name: 'user_id', type: 'uuid' })
   userId!: string;
 
@@ -49,8 +62,15 @@ export class CoachProfile {
   @Column({ name: 'public_visible', type: 'boolean', default: false })
   publicVisible!: boolean;
 
+  @Column({ name: 'status', type: 'text', default: CoachStatus.Active })
+  status!: CoachStatus;
+
   @Column({ name: 'joined_at', type: 'timestamptz' })
   joinedAt!: Date;
+
+  /** Set exactly when status is Inactive; a CHECK keeps the two in step. */
+  @Column({ name: 'ended_at', type: 'timestamptz', nullable: true })
+  endedAt!: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
