@@ -122,6 +122,15 @@ export class AdminService {
       });
     }
 
+    // Without this, Deleted -> deactivate -> Inactive -> reactivate -> Active
+    // walks a GDPR-deleted account back to life past the guard on reactivate.
+    if (target.status === UserStatus.Deleted) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ACCOUNT_DELETED,
+        message: 'Deleted users cannot be deactivated.',
+      });
+    }
+
     if (target.status !== UserStatus.Inactive) {
       await this.usersService.setStatus(target.id, UserStatus.Inactive);
       await this.authService.revokeAllUserSessions(target.id, 'deactivated');

@@ -4,7 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
-import { Role } from '../../src/modules/users/entities/user.enums';
+import { Role, UserStatus } from '../../src/modules/users/entities/user.enums';
 import { AuthSession } from '../../src/modules/auth/entities/auth-session.entity';
 import { RefreshToken } from '../../src/modules/auth/entities/refresh-token.entity';
 import { EmailVerificationToken } from '../../src/modules/auth/entities/email-verification-token.entity';
@@ -156,6 +156,7 @@ describe('AuthService email verification', () => {
       id: 'user-new-1',
       email: 'new@example.com',
       firstName: 'Ada',
+      status: UserStatus.Active,
     } as User);
 
     await service.verifyEmail('plain-token-abc');
@@ -164,6 +165,38 @@ describe('AuthService email verification', () => {
     expect(usersService.markEmailVerified).toHaveBeenCalledWith('user-new-1', NOW);
     expect(mail.sendWelcomeEmail).toHaveBeenCalledWith('new@example.com', 'Ada');
   });
+
+  it.each([
+    [UserStatus.Inactive, ErrorCode.ACCOUNT_INACTIVE],
+    [UserStatus.Deleted, ErrorCode.ACCOUNT_DELETED],
+  ])(
+    'verifyEmail refuses to consume the token for a %s account',
+    async (status: UserStatus, errorCode: ErrorCode) => {
+      tokens.hashOpaqueToken.mockReturnValue('hash-abc');
+      emailVerifications.findOne.mockResolvedValue({
+        id: 'evt-1',
+        userId: 'user-new-1',
+        tokenHash: 'hash-abc',
+        consumedAt: null,
+        expiresAt: new Date(NOW.getTime() + 60 * 60 * 1000),
+      } as EmailVerificationToken);
+      usersService.findById.mockResolvedValue({
+        id: 'user-new-1',
+        email: 'new@example.com',
+        status,
+      } as User);
+
+      await expect(service.verifyEmail('plain-token-abc')).rejects.toMatchObject({
+        response: { errorCode },
+      });
+
+      // The token stays unconsumed and nothing is written, so the account keeps
+      // whatever status the Super Admin set.
+      expect(emailVerifications.update).not.toHaveBeenCalled();
+      expect(usersService.markEmailVerified).not.toHaveBeenCalled();
+      expect(mail.sendWelcomeEmail).not.toHaveBeenCalled();
+    },
+  );
 
   it('verifyEmail throws INVALID_TOKEN (401) when no row matches', async () => {
     tokens.hashOpaqueToken.mockReturnValue('hash-missing');
