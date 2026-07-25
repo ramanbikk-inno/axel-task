@@ -176,4 +176,74 @@ describe('AllExceptionsFilter', () => {
     const { body } = captured();
     expect(body.errorCode).toBe(ErrorCode.INTERNAL_ERROR);
   });
+  describe('database constraint violations', () => {
+    // A read-then-write existence check loses races; the loser used to get a
+    // 500 instead of the 409 the contract documents.
+    it('maps a unique-email violation to 409 EMAIL_ALREADY_EXISTS', () => {
+      const { host, captured } = makeHost('/api/v1/users', 'req-7');
+
+      filter.catch(
+        Object.assign(new Error('duplicate key value'), {
+          code: '23505',
+          constraint: 'uq_users_email',
+        }),
+        host,
+      );
+
+      const { status, body } = captured();
+      expect(status).toBe(409);
+      expect(body.errorCode).toBe(ErrorCode.EMAIL_ALREADY_EXISTS);
+      expect(body.message).toBe('An account with this email already exists.');
+    });
+
+    it('maps a non-email unique violation to a generic 409', () => {
+      const { host, captured } = makeHost('/api/v1/coaches', 'req-8');
+
+      filter.catch(
+        Object.assign(new Error('duplicate key value'), {
+          code: '23505',
+          constraint: 'uq_coach_profiles_user_id',
+        }),
+        host,
+      );
+
+      const { status, body } = captured();
+      expect(status).toBe(409);
+      expect(body.errorCode).toBe(ErrorCode.VALIDATION_ERROR);
+    });
+
+    it.each([
+      ['22P02', 400, 'malformed value'],
+      ['23503', 400, 'missing foreign key'],
+      ['23514', 400, 'check constraint'],
+    ])('maps pg %s to %i', (code: string, expected: number) => {
+      const { host, captured } = makeHost('/api/v1/x', 'req-9');
+
+      filter.catch(Object.assign(new Error('driver'), { code }), host);
+
+      const { status, body } = captured();
+      expect(status).toBe(expected);
+      expect(body.errorCode).toBe(ErrorCode.VALIDATION_ERROR);
+    });
+
+    it('still reports an unrecognised driver error as 500', () => {
+      // An unexpected database failure IS a server fault and must not be
+      // laundered into a 4xx.
+      const { host, captured } = makeHost('/api/v1/x', 'req-10');
+
+      filter.catch(Object.assign(new Error('connection reset'), { code: '08006' }), host);
+
+      const { status, body } = captured();
+      expect(status).toBe(500);
+      expect(body.errorCode).toBe(ErrorCode.INTERNAL_ERROR);
+    });
+
+    it('does not rewrite an HttpException that happens to carry a code', () => {
+      const { host, captured } = makeHost('/api/v1/x', 'req-11');
+
+      filter.catch(Object.assign(new InternalServerErrorException(), { code: '23505' }), host);
+
+      expect(captured().status).toBe(500);
+    });
+  });
 });

@@ -71,7 +71,12 @@ describe('Create Trainer + setup-password (e2e)', () => {
 
   it('returns 409 EMAIL_ALREADY_EXISTS on a duplicate trainer email', async () => {
     const token = await adminLogin();
-    const body = { email: 'dup@example.com', businessName: 'Dup Org' };
+    const body = {
+      email: 'dup@example.com',
+      businessName: 'Dup Org',
+      firstName: 'Dup',
+      lastName: 'Trainer',
+    };
 
     await request(app.getHttpServer())
       .post('/api/v1/users')
@@ -98,7 +103,7 @@ describe('Create Trainer + setup-password (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/v1/users')
       .set('Authorization', `Bearer ${playerToken}`)
-      .send({ email: 'x@example.com', businessName: 'X' })
+      .send({ email: 'x@example.com', businessName: 'X', firstName: 'X', lastName: 'Y' })
       .expect(403);
   });
 
@@ -108,7 +113,13 @@ describe('Create Trainer + setup-password (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/v1/users')
       .set('Authorization', `Bearer ${token}`)
-      .send({ email: 'evil@example.com', businessName: 'Evil', role: Role.SuperAdmin })
+      .send({
+        email: 'evil@example.com',
+        businessName: 'Evil',
+        firstName: 'E',
+        lastName: 'V',
+        role: Role.SuperAdmin,
+      })
       .expect(403)
       .expect((res) => expect(res.body.errorCode).toBe(ErrorCode.CANNOT_CREATE_SUPER_ADMIN));
   });

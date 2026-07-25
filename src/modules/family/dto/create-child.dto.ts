@@ -2,13 +2,14 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayUnique,
   IsArray,
-  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
+
+import { IsCalendarDate } from '../../../shared/validation/calendar-date';
 
 /**
  * Create a child player profile (US-01.03). `birthDate` encodes the child's
@@ -22,8 +23,11 @@ export class CreateChildDto {
   @MaxLength(120)
   displayName!: string;
 
-  @ApiProperty({ example: '2014-08-01', description: 'ISO date (YYYY-MM-DD); age must be 1-18' })
-  @IsISO8601()
+  @ApiProperty({
+    example: '2014-08-01',
+    description: 'Calendar date (YYYY-MM-DD), no time component; age must be 1-18',
+  })
+  @IsCalendarDate()
   birthDate!: string;
 
   @ApiProperty({ example: 'female' })

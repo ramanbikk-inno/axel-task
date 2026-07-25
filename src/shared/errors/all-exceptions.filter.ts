@@ -34,6 +34,29 @@ interface ObjectExceptionResponse {
   error?: string;
 }
 
+/**
+ * The subset of a driver error we can rely on. TypeORM re-throws the pg error
+ * with `code` intact on QueryFailedError.
+ */
+interface DriverErrorLike {
+  code?: string;
+  constraint?: string;
+}
+
+/**
+ * Postgres errors that represent a client mistake, not a server fault.
+ *
+ * Without this a lost race on a unique index surfaced as 500 INTERNAL_ERROR:
+ * two concurrent registrations both pass the read-then-write existence check,
+ * one insert violates uq_users_email, and the caller sees a server error
+ * instead of the 409 the contract promises. Same for a malformed uuid reaching
+ * the driver, which is a 400.
+ */
+const PG_UNIQUE_VIOLATION = '23505';
+const PG_INVALID_TEXT_REPRESENTATION = '22P02';
+const PG_FOREIGN_KEY_VIOLATION = '23503';
+const PG_CHECK_VIOLATION = '23514';
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private static readonly DEFAULT_CODE_BY_STATUS: Record<number, ErrorCode> = {
@@ -60,11 +83,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     [HttpStatus.INTERNAL_SERVER_ERROR]: 'Internal Server Error',
   };
 
-  catch(exception: unknown, host: ArgumentsHost): void {
+  catch(rawException: unknown, host: ArgumentsHost): void {
     const httpCtx = host.switchToHttp();
     const response = httpCtx.getResponse<HttpResponseLike>();
     const request = httpCtx.getRequest<HttpRequestLike>();
 
+    const exception = this.translateDriverError(rawException);
     const status = this.resolveStatus(exception);
     const objectResponse = this.extractObjectResponse(exception);
 
@@ -87,6 +111,60 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     response.status(status).json(envelope);
+  }
+
+  /**
+   * Map a database constraint violation onto the documented envelope. Anything
+   * not recognised falls through unchanged and is still reported as a 500,
+   * because an unexpected driver error IS a server fault.
+   */
+  private translateDriverError(exception: unknown): unknown {
+    if (exception instanceof HttpException || exception === null || typeof exception !== 'object') {
+      return exception;
+    }
+    const driver = exception as DriverErrorLike;
+    switch (driver.code) {
+      case PG_UNIQUE_VIOLATION:
+        return new HttpException(
+          {
+            errorCode: this.uniqueViolationCode(driver.constraint),
+            message: this.uniqueViolationMessage(driver.constraint),
+          },
+          HttpStatus.CONFLICT,
+        );
+      case PG_INVALID_TEXT_REPRESENTATION:
+        return new HttpException(
+          { errorCode: ErrorCode.VALIDATION_ERROR, message: 'Malformed value in request.' },
+          HttpStatus.BAD_REQUEST,
+        );
+      case PG_FOREIGN_KEY_VIOLATION:
+        return new HttpException(
+          {
+            errorCode: ErrorCode.VALIDATION_ERROR,
+            message: 'Referenced record does not exist.',
+          },
+          HttpStatus.BAD_REQUEST,
+        );
+      case PG_CHECK_VIOLATION:
+        return new HttpException(
+          { errorCode: ErrorCode.VALIDATION_ERROR, message: 'Value failed a database constraint.' },
+          HttpStatus.BAD_REQUEST,
+        );
+      default:
+        return exception;
+    }
+  }
+
+  private uniqueViolationCode(constraint: string | undefined): ErrorCode {
+    return constraint !== undefined && constraint.includes('email')
+      ? ErrorCode.EMAIL_ALREADY_EXISTS
+      : ErrorCode.VALIDATION_ERROR;
+  }
+
+  private uniqueViolationMessage(constraint: string | undefined): string {
+    return constraint !== undefined && constraint.includes('email')
+      ? 'An account with this email already exists.'
+      : 'That record already exists.';
   }
 
   private resolveStatus(exception: unknown): number {

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
+import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 import { Role } from '../../users/entities/user.enums';
 
 export class CreateTrainerDto {
@@ -14,25 +15,33 @@ export class CreateTrainerDto {
   @MaxLength(200)
   businessName!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  // Required: the acceptance criteria list trainer name alongside business
+  // name and email, and the invite email greets by first name — a nameless
+  // trainer rendered as "Hi ,".
+  @ApiProperty({ example: 'Tess' })
   @IsString()
+  @MinLength(1)
   @MaxLength(100)
-  firstName?: string;
+  firstName!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty({ example: 'Fletcher' })
   @IsString()
+  @MinLength(1)
   @MaxLength(100)
-  lastName?: string;
+  lastName!: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '+1 555 123 4567' })
   @IsOptional()
-  @IsString()
-  @MaxLength(30)
+  @IsPhoneNumberLoose()
   phone?: string;
 
-  @ApiPropertyOptional({ enum: Role })
+  /**
+   * Optional, and only ever `Trainer`. It stays in the contract because the
+   * spec documents a 403 CANNOT_CREATE_SUPER_ADMIN response for this endpoint,
+   * but the service now rejects every other value instead of accepting it and
+   * silently creating a Trainer anyway.
+   */
+  @ApiPropertyOptional({ enum: Role, default: Role.Trainer })
   @IsOptional()
   @IsEnum(Role)
   role?: Role;

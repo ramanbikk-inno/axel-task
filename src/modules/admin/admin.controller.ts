@@ -27,7 +27,7 @@ import { AdminService } from './admin.service';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
-import { UserStatusChangeDto } from './dto/user-status-change.dto';
+import { DeleteUserDto, UserStatusChangeDto } from './dto/user-status-change.dto';
 import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
 
 @ApiTags('admin')
@@ -117,7 +117,7 @@ export class AdminController {
   @ApiOkResponse({ type: UserSummaryDto })
   async deleteUser(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UserStatusChangeDto,
+    @Body() dto: DeleteUserDto,
     @Req() req: Request,
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;

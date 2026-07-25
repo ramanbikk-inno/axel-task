@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -41,10 +42,20 @@ export class AdminService {
     input: CreateTrainerDto,
     actorUserId?: string,
   ): Promise<{ id: string; email: string; role: Role }> {
-    if (input.role !== undefined && input.role === Role.SuperAdmin) {
+    if (input.role === Role.SuperAdmin) {
       throw new ForbiddenException({
         errorCode: ErrorCode.CANNOT_CREATE_SUPER_ADMIN,
         message: 'A Super Admin cannot be created through this endpoint.',
+      });
+    }
+    // Previously any non-SuperAdmin role was accepted and then quietly
+    // overwritten with Trainer, so POST /users {role:'Coach'} returned 201
+    // describing an account that was never created. Coaches are invited by
+    // their trainer, not minted here.
+    if (input.role !== undefined && input.role !== Role.Trainer) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        message: 'This endpoint creates Trainer accounts only.',
       });
     }
 

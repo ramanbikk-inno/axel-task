@@ -99,6 +99,7 @@ describe('Super Admin GDPR delete (e2e, US-01.13)', () => {
     await request(app.getHttpServer())
       .delete(`/api/v1/users/${player.userId}`)
       .set('Authorization', `Bearer ${token}`)
+      .send({ reason: 'GDPR erasure request.' })
       .expect(200);
 
     await request(app.getHttpServer())
@@ -111,6 +112,7 @@ describe('Super Admin GDPR delete (e2e, US-01.13)', () => {
     await request(app.getHttpServer())
       .delete(`/api/v1/users/${player.userId}`)
       .set('Authorization', `Bearer ${token}`)
+      .send({ reason: 'GDPR erasure request.' })
       .expect(409)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.ACCOUNT_DELETED));
   });
@@ -125,6 +127,7 @@ describe('Super Admin GDPR delete (e2e, US-01.13)', () => {
     await request(app.getHttpServer())
       .delete(`/api/v1/users/${other.id}`)
       .set('Authorization', `Bearer ${token}`)
+      .send({ reason: 'GDPR erasure request.' })
       .expect(403)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.CANNOT_DELETE_SUPER_ADMIN));
   });
@@ -150,6 +153,7 @@ describe('Super Admin GDPR delete (e2e, US-01.13)', () => {
     await request(app.getHttpServer())
       .delete(`/api/v1/users/${target.userId}`)
       .set('Authorization', `Bearer ${login.body.accessToken as string}`)
+      .send({ reason: 'GDPR erasure request.' })
       .expect(403);
   });
 });

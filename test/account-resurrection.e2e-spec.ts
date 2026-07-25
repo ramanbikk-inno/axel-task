@@ -86,7 +86,12 @@ describe('Deactivated and deleted accounts cannot be resurrected (e2e)', () => {
     const created = await request(app.getHttpServer())
       .post('/api/v1/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: trainerEmail, businessName: 'Invited Org' })
+      .send({
+        email: trainerEmail,
+        businessName: 'Invited Org',
+        firstName: 'Inv',
+        lastName: 'Ited',
+      })
       .expect(201);
     const trainerId = created.body.id as string;
 
