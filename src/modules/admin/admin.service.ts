@@ -9,6 +9,7 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -40,7 +41,7 @@ export class AdminService {
 
   async createTrainer(
     input: CreateTrainerDto,
-    actorUserId?: string,
+    actor: Principal,
   ): Promise<{ id: string; email: string; role: Role }> {
     if (input.role === Role.SuperAdmin) {
       throw new ForbiddenException({
@@ -94,7 +95,7 @@ export class AdminService {
       await this.audit.record(
         {
           action: AUDIT_TRAINER_CREATED,
-          actorUserId: actorUserId ?? null,
+          actor,
           targetUserId: created.id,
           metadata: {
             email: input.email,
@@ -121,7 +122,7 @@ export class AdminService {
    */
   async deactivateUser(
     targetUserId: string,
-    actorUserId: string,
+    actor: Principal,
     reason?: string,
   ): Promise<UserSummaryDto> {
     const target = await this.requireUser(targetUserId);
@@ -147,7 +148,7 @@ export class AdminService {
       await this.authService.revokeAllUserSessions(target.id, 'deactivated');
       await this.audit.record({
         action: AUDIT_USER_DEACTIVATED,
-        actorUserId,
+        actor,
         targetUserId: target.id,
         metadata: { reason: reason ?? null },
       });
@@ -163,7 +164,7 @@ export class AdminService {
    */
   async reactivateUser(
     targetUserId: string,
-    actorUserId: string,
+    actor: Principal,
     reason?: string,
   ): Promise<UserSummaryDto> {
     const target = await this.requireUser(targetUserId);
@@ -179,7 +180,7 @@ export class AdminService {
       await this.usersService.setStatus(target.id, UserStatus.Active);
       await this.audit.record({
         action: AUDIT_USER_REACTIVATED,
-        actorUserId,
+        actor,
         targetUserId: target.id,
         metadata: { reason: reason ?? null },
       });
@@ -192,7 +193,7 @@ export class AdminService {
   /** Super Admin edits any user's common profile fields (US-01.11). */
   async updateUser(
     targetUserId: string,
-    actorUserId: string,
+    actor: Principal,
     input: { firstName?: string; lastName?: string; phone?: string },
   ): Promise<UserSummaryDto> {
     await this.requireUser(targetUserId);
@@ -203,7 +204,7 @@ export class AdminService {
     });
     await this.audit.record({
       action: AUDIT_USER_UPDATED,
-      actorUserId,
+      actor,
       targetUserId,
       metadata: {
         fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
@@ -220,7 +221,7 @@ export class AdminService {
    */
   async deleteUser(
     targetUserId: string,
-    actorUserId: string,
+    actor: Principal,
     reason?: string,
   ): Promise<UserSummaryDto> {
     const target = await this.requireUser(targetUserId);
@@ -250,7 +251,7 @@ export class AdminService {
       await this.audit.record(
         {
           action: AUDIT_USER_DELETED,
-          actorUserId,
+          actor,
           targetUserId: target.id,
           metadata: { originalEmail, originalName, originalPhone, reason: reason ?? null },
         },

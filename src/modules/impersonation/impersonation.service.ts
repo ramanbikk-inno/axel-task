@@ -5,6 +5,7 @@ import { IsNull, Repository } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { Action, AbilityFactory } from '../ability/ability.factory';
+import { AuditService } from '../audit/audit.service';
 import { AuthSession } from '../auth/entities/auth-session.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { Principal } from '../auth/principal';
@@ -12,6 +13,7 @@ import { TokenService } from '../auth/token.service';
 import { User } from '../users/entities/user.entity';
 import { UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
+import { ImpersonationHistoryView } from './dto/impersonation-history.dto';
 import { ImpersonationLog } from './entities/impersonation-log.entity';
 
 /** Impersonation sessions are hard-capped at one hour (US-01.07). */
@@ -47,6 +49,7 @@ export class ImpersonationService {
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
     private readonly abilityFactory: AbilityFactory,
+    private readonly audit: AuditService,
   ) {}
 
   async start(
@@ -189,6 +192,70 @@ export class ImpersonationService {
       { sessionId: principal.sessionId, revokedAt: IsNull() },
       { revokedAt: now },
     );
+  }
+
+  /**
+   * The "Impersonation History" compliance report US-01.07 asks for: who
+   * impersonated whom, when, for how long, why — and what they did.
+   *
+   * The actions come from `audit_logs.impersonation_session_id`, which is why
+   * that column exists: `actor_user_id` on those rows is the *impersonated*
+   * user, so without it there is no way to attribute anything an admin did
+   * while wearing someone else's identity.
+   */
+  async history(query: {
+    adminUserId?: string;
+    targetUserId?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<ImpersonationHistoryView> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+
+    const where: Record<string, string> = {};
+    if (query.adminUserId !== undefined) {
+      where.adminUserId = query.adminUserId;
+    }
+    if (query.targetUserId !== undefined) {
+      where.targetUserId = query.targetUserId;
+    }
+
+    const [logs, total] = await this.logs.findAndCount({
+      where,
+      order: { startedAt: 'DESC', id: 'DESC' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    });
+
+    const actionsBySession = await this.audit.findByImpersonationSessions(
+      logs.map((l) => l.sessionId),
+    );
+    // Emails are resolved in one lookup for the whole page rather than per row.
+    const userIds = [...new Set(logs.flatMap((l) => [l.adminUserId, l.targetUserId]))];
+    const users = await this.usersService.findByIds(userIds);
+    const emailById = new Map(users.map((u) => [u.id, u.email]));
+
+    return {
+      items: logs.map((log) => ({
+        sessionId: log.sessionId,
+        adminUserId: log.adminUserId,
+        adminEmail: emailById.get(log.adminUserId) ?? null,
+        targetUserId: log.targetUserId,
+        targetEmail: emailById.get(log.targetUserId) ?? null,
+        startedAt: log.startedAt.toISOString(),
+        endedAt: log.endedAt?.toISOString() ?? null,
+        durationSeconds: log.durationSeconds,
+        reason: log.reason,
+        actions: (actionsBySession.get(log.sessionId) ?? []).map((row) => ({
+          action: row.action,
+          at: row.createdAt.toISOString(),
+          metadata: row.metadata,
+        })),
+      })),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   async banner(

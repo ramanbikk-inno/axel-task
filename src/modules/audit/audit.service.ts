@@ -3,12 +3,33 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { Principal } from '../auth/principal';
 import { AuditLog } from './entities/audit-log.entity';
+
+/** What an audited action was done *to*, when that is not a user. */
+export interface AuditTarget {
+  type: string;
+  id: string;
+}
 
 export interface RecordAuditInput {
   action: string;
-  actorUserId?: string | null;
+  /**
+   * The principal that performed the action.
+   *
+   * Deliberately the whole principal rather than a user id. US-01.07 requires
+   * that actions taken during an impersonation are attributable to the admin
+   * behind them, and a bare `actorUserId: string` gave every call site the
+   * chance to forget that — silently, since the row still looked complete.
+   * Passing the principal makes attribution structural: there is no way to
+   * record an action from inside an impersonation session and lose the admin.
+   *
+   * Use `recordSystemAction` for something with no user behind it, so "no
+   * actor" is always a decision rather than an omission.
+   */
+  actor: Principal;
   targetUserId?: string | null;
+  target?: AuditTarget | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -21,16 +42,55 @@ export class AuditService {
   ) {}
 
   async record(input: RecordAuditInput, manager?: EntityManager): Promise<AuditLog> {
+    const actor = input.actor;
+    // actorUserId stays the identity the request was made *as* — for an
+    // impersonation that is the target, which is the truth about what the
+    // system saw. The admin behind it goes in its own column, so both
+    // questions can be answered from one row without reinterpreting either.
+    const impersonating = actor.impersonating && actor.actor !== undefined;
+
+    return this.write(
+      {
+        action: input.action,
+        actorUserId: actor.userId,
+        onBehalfOfAdminId: impersonating ? (actor.actor as { userId: string }).userId : null,
+        impersonationSessionId: impersonating ? actor.sessionId : null,
+        targetUserId: input.targetUserId ?? null,
+        targetType: input.target?.type ?? null,
+        targetId: input.target?.id ?? null,
+        metadata: input.metadata ?? null,
+      },
+      manager,
+    );
+  }
+
+  /** Something the system did with no user behind it (a job, a seed). */
+  async recordSystemAction(
+    input: Omit<RecordAuditInput, 'actor'>,
+    manager?: EntityManager,
+  ): Promise<AuditLog> {
+    return this.write(
+      {
+        action: input.action,
+        actorUserId: null,
+        onBehalfOfAdminId: null,
+        impersonationSessionId: null,
+        targetUserId: input.targetUserId ?? null,
+        targetType: input.target?.type ?? null,
+        targetId: input.target?.id ?? null,
+        metadata: input.metadata ?? null,
+      },
+      manager,
+    );
+  }
+
+  private async write(
+    row: Omit<AuditLog, 'id' | 'createdAt'>,
+    manager?: EntityManager,
+  ): Promise<AuditLog> {
     const repository: Repository<AuditLog> =
       manager !== undefined ? manager.getRepository(AuditLog) : this.auditRepository;
-    const row: AuditLog = repository.create({
-      action: input.action,
-      actorUserId: input.actorUserId ?? null,
-      targetUserId: input.targetUserId ?? null,
-      metadata: input.metadata ?? null,
-      createdAt: this.clock.now(),
-    });
-    return repository.save(row);
+    return repository.save(repository.create({ ...row, createdAt: this.clock.now() }));
   }
 
   async findByTarget(targetUserId: string): Promise<AuditLog[]> {
@@ -38,5 +98,22 @@ export class AuditService {
       where: { targetUserId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /** Everything recorded during a set of impersonation sessions, oldest first. */
+  async findByImpersonationSessions(sessionIds: string[]): Promise<Map<string, AuditLog[]>> {
+    const bySession = new Map<string, AuditLog[]>();
+    if (sessionIds.length === 0) {
+      return bySession;
+    }
+    const rows = await this.auditRepository.find({
+      where: sessionIds.map((id) => ({ impersonationSessionId: id })),
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+    for (const row of rows) {
+      const key = row.impersonationSessionId as string;
+      bySession.set(key, [...(bySession.get(key) ?? []), row]);
+    }
+    return bySession;
   }
 }
