@@ -125,7 +125,9 @@ describe('Trainer invites coach (e2e, US-01.08)', () => {
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.SHARE_LINK_EXPIRED));
   });
 
-  it('enforces one trainer per coach: a second trainer cannot re-home an existing coach', async () => {
+  // Still a 409 refusal; the code is now specific about *why*, because an
+  // off-boarded coach with the same email is a case that must succeed.
+  it('enforces one ACTIVE trainer per coach: a second trainer cannot poach one', async () => {
     const trainerA = await makeTrainer('ta@example.com', 'Alpha');
     const trainerB = await makeTrainer('tb@example.com', 'Beta');
     const codeA = await invite(trainerA.token, 'shared@example.com');
@@ -139,7 +141,7 @@ describe('Trainer invites coach (e2e, US-01.08)', () => {
       .post(`/api/v1/coaches/invitations/${codeB}/accept`)
       .send({ password: COACH_PASSWORD })
       .expect(409)
-      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.EMAIL_ALREADY_EXISTS));
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.COACH_ACTIVE_ELSEWHERE));
   });
 
   it('expires after 7 days', async () => {
