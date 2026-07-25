@@ -34,14 +34,14 @@ export class ProfileController {
   @HttpCode(200)
   @ApiOkResponse({ type: MyProfileView })
   async updateMe(@Body() dto: UpdateProfileDto, @Req() req: Request): Promise<MyProfileView> {
-    return this.profile.updateCommon((req.user as Principal).userId, dto);
+    return this.profile.updateCommon(req.user as Principal, dto);
   }
 
   @Post('me/photo')
   @HttpCode(200)
   @ApiOkResponse({ type: MyProfileView })
   async uploadPhoto(@Body() dto: UploadPhotoDto, @Req() req: Request): Promise<MyProfileView> {
-    return this.profile.uploadPhoto((req.user as Principal).userId, dto);
+    return this.profile.uploadPhoto(req.user as Principal, dto);
   }
 
   @Patch('me/trainer')
@@ -53,7 +53,7 @@ export class ProfileController {
     @Body() dto: UpdateTrainerProfileDto,
     @Req() req: Request,
   ): Promise<MyProfileView> {
-    return this.profile.updateTrainer((req.user as Principal).userId, dto);
+    return this.profile.updateTrainer(req.user as Principal, dto);
   }
 
   @Patch('me/player')
@@ -65,6 +65,6 @@ export class ProfileController {
     @Body() dto: UpdatePlayerProfileDto,
     @Req() req: Request,
   ): Promise<MyProfileView> {
-    return this.profile.updatePlayer((req.user as Principal).userId, dto);
+    return this.profile.updatePlayer(req.user as Principal, dto);
   }
 }

@@ -3,6 +3,7 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { AdminService } from './admin.service';
 import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
 import { PlayersService } from '../players/players.service';
@@ -72,14 +73,32 @@ describe('AdminService.createTrainer', () => {
     businessName: 'New Org',
   };
 
+  /** A plain, non-impersonating Super Admin. */
+  const admin = (over: Partial<Principal> = {}): Principal => ({
+    userId: 'admin-1',
+    role: Role.SuperAdmin,
+    sessionId: 'session-1',
+    activeTrainerProfileId: null,
+    activePlayerProfileId: null,
+    trainerOrgId: null,
+    coachProfileId: null,
+    isChild: false,
+    childPlayerProfileId: null,
+    parentUserId: null,
+    tokenVersion: 0,
+    scope: 'platform',
+    impersonating: false,
+    ...over,
+  });
+
   it('rejects creating a SuperAdmin with CANNOT_CREATE_SUPER_ADMIN (403)', async () => {
     const { service } = makeService();
 
-    await expect(service.createTrainer({ ...dto, role: Role.SuperAdmin })).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
+    await expect(
+      service.createTrainer({ ...dto, role: Role.SuperAdmin }, admin()),
+    ).rejects.toBeInstanceOf(ForbiddenException);
     try {
-      await service.createTrainer({ ...dto, role: Role.SuperAdmin });
+      await service.createTrainer({ ...dto, role: Role.SuperAdmin }, admin());
       fail('expected throw');
     } catch (err) {
       expect((err as ForbiddenException).getResponse()).toMatchObject({
@@ -93,7 +112,7 @@ describe('AdminService.createTrainer', () => {
     findByEmail.mockResolvedValue({ id: 'existing' } as User);
 
     try {
-      await service.createTrainer(dto);
+      await service.createTrainer(dto, admin());
       fail('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(ConflictException);
@@ -117,7 +136,7 @@ describe('AdminService.createTrainer', () => {
     usersCreate.mockResolvedValue({ id: 'user-1', email: dto.email } as User);
     trainersCreate.mockResolvedValue({ id: 'tp-1' });
 
-    const result = await service.createTrainer(dto, 'admin-1');
+    const result = await service.createTrainer(dto, admin());
 
     expect(usersCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -138,7 +157,7 @@ describe('AdminService.createTrainer', () => {
     expect(auditRecord).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'trainer.created',
-        actorUserId: 'admin-1',
+        actor: expect.objectContaining({ userId: 'admin-1' }),
         targetUserId: 'user-1',
       }),
       expect.anything(),

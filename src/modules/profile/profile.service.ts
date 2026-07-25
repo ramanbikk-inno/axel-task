@@ -2,6 +2,8 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { Inject } from '@nestjs/common';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
 import { decodeImageUpload } from '../../shared/files/image-content';
@@ -21,6 +23,26 @@ import {
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 
+/**
+ * US-01.07 requires every action taken during an impersonation to be
+ * attributable to the admin behind it. Self-service profile edits were not
+ * audited at all, so an admin could change a user's name, phone or photo while
+ * impersonating them and leave nothing behind — the one place the requirement
+ * most obviously applies, since these are exactly the endpoints an
+ * impersonation session can reach.
+ */
+export const AUDIT_PROFILE_UPDATED = 'profile.updated';
+export const AUDIT_PROFILE_PHOTO_UPDATED = 'profile.photo-updated';
+export const AUDIT_TRAINER_PROFILE_UPDATED = 'profile.trainer-updated';
+export const AUDIT_PLAYER_PROFILE_UPDATED = 'profile.player-updated';
+
+/** The field names that were actually supplied, for the audit metadata. */
+function changedFields(dto: object): string[] {
+  return Object.entries(dto)
+    .filter(([, value]) => value !== undefined)
+    .map(([key]) => key);
+}
+
 @Injectable()
 export class ProfileService {
   constructor(
@@ -28,6 +50,7 @@ export class ProfileService {
     private readonly trainersService: TrainersService,
     private readonly playersService: PlayersService,
     @Inject(STORAGE) private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   async getMe(userId: string): Promise<MyProfileView> {
@@ -35,17 +58,24 @@ export class ProfileService {
     return this.buildView(user);
   }
 
-  async updateCommon(userId: string, dto: UpdateProfileDto): Promise<MyProfileView> {
-    await this.requireUser(userId);
-    const user = await this.usersService.updateProfile(userId, {
+  async updateCommon(actor: Principal, dto: UpdateProfileDto): Promise<MyProfileView> {
+    await this.requireUser(actor.userId);
+    const user = await this.usersService.updateProfile(actor.userId, {
       firstName: dto.firstName,
       lastName: dto.lastName,
       phone: dto.phone,
     });
+    await this.audit.record({
+      action: AUDIT_PROFILE_UPDATED,
+      actor,
+      targetUserId: actor.userId,
+      metadata: { fields: changedFields(dto) },
+    });
     return this.buildView(user);
   }
 
-  async uploadPhoto(userId: string, dto: UploadPhotoDto): Promise<MyProfileView> {
+  async uploadPhoto(actor: Principal, dto: UploadPhotoDto): Promise<MyProfileView> {
+    const userId = actor.userId;
     await this.requireUser(userId);
 
     // Verifies the bytes really are an image of the declared type — the
@@ -64,10 +94,17 @@ export class ProfileService {
       folder: 'avatars',
     });
     const user = await this.usersService.setPhotoUrl(userId, url);
+    await this.audit.record({
+      action: AUDIT_PROFILE_PHOTO_UPDATED,
+      actor,
+      targetUserId: userId,
+      metadata: { fileName: dto.fileName },
+    });
     return this.buildView(user);
   }
 
-  async updateTrainer(userId: string, dto: UpdateTrainerProfileDto): Promise<MyProfileView> {
+  async updateTrainer(actor: Principal, dto: UpdateTrainerProfileDto): Promise<MyProfileView> {
+    const userId = actor.userId;
     const updated = await this.trainersService.updateProfileByUserId(userId, {
       businessName: dto.businessName,
       website: dto.website,
@@ -80,10 +117,18 @@ export class ProfileService {
         message: 'No trainer profile for this account.',
       });
     }
+    await this.audit.record({
+      action: AUDIT_TRAINER_PROFILE_UPDATED,
+      actor,
+      targetUserId: userId,
+      target: { type: 'TrainerProfile', id: updated.id },
+      metadata: { fields: changedFields(dto) },
+    });
     return this.getMe(userId);
   }
 
-  async updatePlayer(userId: string, dto: UpdatePlayerProfileDto): Promise<MyProfileView> {
+  async updatePlayer(actor: Principal, dto: UpdatePlayerProfileDto): Promise<MyProfileView> {
+    const userId = actor.userId;
     const user = await this.requireUser(userId);
     let profile = await this.playersService.updateSelfProfile(userId, {
       displayName: dto.displayName,
@@ -102,6 +147,13 @@ export class ProfileService {
         gender: dto.gender ?? null,
       });
     }
+    await this.audit.record({
+      action: AUDIT_PLAYER_PROFILE_UPDATED,
+      actor,
+      targetUserId: userId,
+      target: { type: 'PlayerProfile', id: profile.id },
+      metadata: { fields: changedFields(dto) },
+    });
     return this.getMe(userId);
   }
 

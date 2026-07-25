@@ -46,7 +46,7 @@ export class AdminController {
     @Req() req: Request,
   ): Promise<{ id: string; email: string; role: Role }> {
     const principal = req.user as Principal;
-    return this.adminService.createTrainer(dto, principal.userId);
+    return this.adminService.createTrainer(dto, principal);
   }
 
   @Get()
@@ -73,7 +73,7 @@ export class AdminController {
     @Req() req: Request,
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;
-    return this.adminService.deactivateUser(id, principal.userId, dto.reason);
+    return this.adminService.deactivateUser(id, principal, dto.reason);
   }
 
   @Post(':id/reactivate')
@@ -89,7 +89,7 @@ export class AdminController {
     @Req() req: Request,
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;
-    return this.adminService.reactivateUser(id, principal.userId, dto.reason);
+    return this.adminService.reactivateUser(id, principal, dto.reason);
   }
 
   @Patch(':id')
@@ -105,7 +105,7 @@ export class AdminController {
     @Req() req: Request,
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;
-    return this.adminService.updateUser(id, principal.userId, dto);
+    return this.adminService.updateUser(id, principal, dto);
   }
 
   @Delete(':id')
@@ -121,6 +121,6 @@ export class AdminController {
     @Req() req: Request,
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;
-    return this.adminService.deleteUser(id, principal.userId, dto.reason);
+    return this.adminService.deleteUser(id, principal, dto.reason);
   }
 }

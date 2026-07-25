@@ -6,10 +6,11 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 
@@ -22,6 +23,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { ImpersonateDto } from './dto/impersonate.dto';
+import {
+  ImpersonationHistoryQueryDto,
+  ImpersonationHistoryView,
+} from './dto/impersonation-history.dto';
 import { ImpersonationService, StartImpersonationResult } from './impersonation.service';
 
 @ApiTags('impersonation')
@@ -60,6 +65,17 @@ export class ImpersonationController {
   async exit(@Req() req: Request): Promise<{ message: string }> {
     await this.impersonation.exit(req.user as Principal);
     return { message: 'Exited impersonation.' };
+  }
+
+  /** US-01.07: "Audit report available: Impersonation History for compliance". */
+  @Get('impersonation/history')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.SuperAdmin)
+  @ApiOkResponse({ type: ImpersonationHistoryView })
+  @ApiBearerAuth()
+  async history(@Query() query: ImpersonationHistoryQueryDto): Promise<ImpersonationHistoryView> {
+    return this.impersonation.history(query);
   }
 
   @Get('impersonation/context')

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AbilityModule } from '../ability/ability.module';
+import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { AuthSession } from '../auth/entities/auth-session.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
@@ -16,6 +17,7 @@ import { ImpersonationLog } from './entities/impersonation-log.entity';
     AuthModule,
     UsersModule,
     AbilityModule,
+    AuditModule,
   ],
   controllers: [ImpersonationController],
   providers: [ImpersonationService],
