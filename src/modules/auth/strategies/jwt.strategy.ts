@@ -36,6 +36,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       role: user.role,
       sessionId: session.id,
       activeTrainerProfileId: session.activeTrainerProfileId,
+      activePlayerProfileId: session.activePlayerProfileId,
       trainerOrgId,
       coachProfileId,
       tokenVersion: user.tokenVersion,

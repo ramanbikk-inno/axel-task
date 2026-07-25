@@ -9,8 +9,17 @@ export class AuthSession {
   @Column({ name: 'user_id', type: 'uuid' })
   userId!: string;
 
+  /**
+   * The selected context, as a pair. A context in Epic-01 is "which of my
+   * profiles, with which trainer" — the trainer alone is ambiguous for a parent
+   * whose children share one. Both null means nothing is selected yet; a
+   * CHECK forbids setting only one.
+   */
   @Column({ name: 'active_trainer_profile_id', type: 'uuid', nullable: true })
   activeTrainerProfileId!: string | null;
+
+  @Column({ name: 'active_player_profile_id', type: 'uuid', nullable: true })
+  activePlayerProfileId!: string | null;
 
   /**
    * When set, this session is a Super Admin impersonation session and this

@@ -10,6 +10,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { parseCalendarDate } from '../../shared/validation/calendar-date';
+import { ContextService } from '../auth/context.service';
 import { AssociationsService } from '../enrollment/associations.service';
 import { ShareLinkType } from '../enrollment/entities/share-link.entity';
 import { AssociationStatus } from '../enrollment/entities/trainer-player-association.entity';
@@ -29,6 +30,7 @@ export class FamilyService {
     private readonly associations: AssociationsService,
     private readonly shareLinks: ShareLinksService,
     private readonly trainersService: TrainersService,
+    private readonly context: ContextService,
     private readonly clock: ClockService,
   ) {}
 
@@ -184,6 +186,11 @@ export class FamilyService {
         message: 'This profile is not connected to that trainer.',
       });
     }
+
+    // Any session sitting in this context is now pointed at a trainer the
+    // profile is no longer connected to. Drop it rather than leave the
+    // selection dangling until the user happens to switch again.
+    await this.context.clearForAssociation(profile.id, trainerProfileId);
 
     const [view] = await this.buildViews([profile]);
     return view;
