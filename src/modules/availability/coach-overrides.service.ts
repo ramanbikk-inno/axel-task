@@ -1,6 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
@@ -8,7 +8,13 @@ import { MailService } from '../mail/mail.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { UsersService } from '../users/users.service';
 import { AvailabilityService, toHHMM, toMinutes } from './availability.service';
-import { CoachOverrideView, RecordCoachOverrideDto } from './dto/availability.dto';
+import { CoachLookupService } from './coach-lookup.service';
+import {
+  CoachOverrideView,
+  ListCoachOverridesQuery,
+  PagedCoachOverrides,
+  RecordCoachOverrideDto,
+} from './dto/availability.dto';
 import { CoachAvailabilityOverride } from './entities/coach-availability-override.entity';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -23,6 +29,7 @@ function toView(row: CoachAvailabilityOverride): CoachOverrideView {
     startTime: toHHMM(row.startMinute),
     endTime: toHHMM(row.endMinute),
     overrideReason: row.overrideReason,
+    hadConflict: row.hadConflict,
     overriddenByUserId: row.overriddenByUserId,
     createdAt: row.createdAt,
   };
@@ -30,8 +37,10 @@ function toView(row: CoachAvailabilityOverride): CoachOverrideView {
 
 /**
  * US-01.10: a trainer may schedule a coach outside their stated availability,
- * but the reason is mandatory and the decision is logged and disclosed to the
- * coach (Q-01.06: the coach IS notified).
+ * but the reason is mandatory and the decision is logged. Q-01.06 — the coach
+ * IS notified — applies to rows that actually overrode something: when the
+ * server recomputes no conflict, nothing was overridden and an email claiming
+ * otherwise would be false. `hadConflict` records which case each row was.
  */
 @Injectable()
 export class CoachOverridesService {
@@ -40,16 +49,15 @@ export class CoachOverridesService {
   constructor(
     @InjectRepository(CoachAvailabilityOverride)
     private readonly overrides: Repository<CoachAvailabilityOverride>,
-    @InjectRepository(CoachProfile)
-    private readonly coachProfiles: Repository<CoachProfile>,
     private readonly availability: AvailabilityService,
+    private readonly coachLookup: CoachLookupService,
     private readonly trainersService: TrainersService,
     private readonly usersService: UsersService,
     private readonly mail: MailService,
   ) {}
 
   async record(trainerUserId: string, dto: RecordCoachOverrideDto): Promise<CoachOverrideView> {
-    const coach = await this.availability.resolveCoachInOwnOrg(trainerUserId, dto.coachProfileId);
+    const coach = await this.coachLookup.requireInOwnOrg(trainerUserId, dto.coachProfileId);
     const startMinute = toMinutes(dto.startTime);
     const endMinute = toMinutes(dto.endTime);
     if (endMinute <= startMinute) {
@@ -58,6 +66,17 @@ export class CoachOverridesService {
         message: 'endTime must be after startTime.',
       });
     }
+
+    // A client can legitimately race stale availability, so a non-conflicting
+    // window is recorded rather than rejected — but the row says which it was,
+    // otherwise the trail cannot distinguish a real override from a no-op and
+    // "the trainer overrode me" becomes unfalsifiable.
+    const hadConflict = !(await this.availability.isCoachFreeFor(
+      coach.id,
+      dto.dayOfWeek,
+      startMinute,
+      endMinute,
+    ));
 
     const saved = await this.overrides.save(
       this.overrides.create({
@@ -68,11 +87,15 @@ export class CoachOverridesService {
         startMinute,
         endMinute,
         overrideReason: dto.overrideReason,
+        hadConflict,
         overriddenByUserId: trainerUserId,
       }),
     );
 
-    await this.notifyCoach(coach, saved);
+    // Nothing was overridden, so there is nothing to tell the coach about.
+    if (hadConflict) {
+      await this.notifyCoach(coach, saved);
+    }
     return toView(saved);
   }
 
@@ -81,34 +104,38 @@ export class CoachOverridesService {
    * every override their organisation recorded; a coach sees the ones filed
    * against them, which is the disclosure half of Q-01.06.
    */
-  async listForTrainer(trainerUserId: string): Promise<CoachOverrideView[]> {
-    const trainer = await this.trainersService.findByUserId(trainerUserId);
-    if (!trainer) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
-        message: 'No trainer profile for this account.',
-      });
-    }
-    const rows = await this.overrides.find({
-      where: { trainerProfileId: trainer.id },
-      order: { createdAt: 'DESC' },
-    });
-    return rows.map(toView);
+  async listForTrainer(
+    trainerUserId: string,
+    query: ListCoachOverridesQuery,
+  ): Promise<PagedCoachOverrides> {
+    const trainer = await this.coachLookup.requireTrainer(trainerUserId);
+    return this.page({ trainerProfileId: trainer.id }, query);
   }
 
-  async listForCoach(coachUserId: string): Promise<CoachOverrideView[]> {
-    const coach = await this.coachProfiles.findOne({ where: { userId: coachUserId } });
-    if (!coach) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
-        message: 'No coach profile for this account.',
-      });
-    }
-    const rows = await this.overrides.find({
-      where: { coachProfileId: coach.id },
-      order: { createdAt: 'DESC' },
+  async listForCoach(
+    coachUserId: string,
+    query: ListCoachOverridesQuery,
+  ): Promise<PagedCoachOverrides> {
+    const coach = await this.coachLookup.requireOwnProfile(coachUserId);
+    return this.page({ coachProfileId: coach.id }, query);
+  }
+
+  /** Platform-wide read for a Super Admin, who is not scoped to one org. */
+  async listAll(query: ListCoachOverridesQuery): Promise<PagedCoachOverrides> {
+    return this.page({}, query);
+  }
+
+  private async page(
+    where: FindOptionsWhere<CoachAvailabilityOverride>,
+    query: ListCoachOverridesQuery,
+  ): Promise<PagedCoachOverrides> {
+    const [rows, total] = await this.overrides.findAndCount({
+      where,
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: (query.page - 1) * query.limit,
+      take: query.limit,
     });
-    return rows.map(toView);
+    return { items: rows.map(toView), total, page: query.page, limit: query.limit };
   }
 
   /**

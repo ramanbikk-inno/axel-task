@@ -6,7 +6,6 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
-  UpdateDateColumn,
 } from 'typeorm';
 
 import { CoachProfile } from '../../coaches/entities/coach-profile.entity';
@@ -60,9 +59,11 @@ export class AvailabilitySlot {
   @Column({ name: 'is_available', type: 'boolean', default: true })
   isAvailable!: boolean;
 
+  /**
+   * Rows are immutable: changing availability replaces the whole set, so this
+   * is also the "last updated" time. A separate updated_at would only ever
+   * equal it.
+   */
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
-
-  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
-  updatedAt!: Date;
 }

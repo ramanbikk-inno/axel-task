@@ -10,8 +10,7 @@ import {
 } from '../enrollment/entities/trainer-player-association.entity';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
-import { TrainersService } from '../trainers/trainers.service';
-import { CoachProfile } from '../coaches/entities/coach-profile.entity';
+import { CoachLookupService } from './coach-lookup.service';
 import { UsersService } from '../users/users.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AvailabilitySlotInput } from './dto/availability.dto';
@@ -74,6 +73,7 @@ const makeService = (): {
   findByTrainer: jest.Mock;
   coachFindOne: jest.Mock;
   userFindById: jest.Mock;
+  lockFindOne: jest.Mock;
 } => {
   const slotsFind = jest.fn().mockResolvedValue([]);
   const txDelete = jest.fn().mockResolvedValue(undefined);
@@ -87,25 +87,51 @@ const makeService = (): {
   const userFindById = jest.fn().mockResolvedValue(null);
 
   const slots = { find: slotsFind } as unknown as Repository<AvailabilitySlot>;
-  const coachProfiles = { findOne: coachFindOne } as unknown as Repository<CoachProfile>;
-  const txRepo = { delete: txDelete, save: txSave, create: txCreate };
+  const coachLookup = {
+    requireOwnProfile: jest.fn(async (userId: string) => {
+      const row = await coachFindOne({ where: { userId } });
+      if (!row) {
+        throw new ForbiddenException({ errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND });
+      }
+      return row;
+    }),
+    requireInOwnOrg: jest.fn(async (_trainerUserId: string, coachProfileId: string) => {
+      await findByUserId();
+      const row = await coachFindOne({ where: { id: coachProfileId } });
+      if (!row) {
+        throw new NotFoundException({ errorCode: ErrorCode.NOT_FOUND });
+      }
+      return row;
+    }),
+    requireTrainer: jest.fn(async (userId: string) => {
+      const row = await findByUserId(userId);
+      if (!row) {
+        throw new ForbiddenException({ errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND });
+      }
+      return row;
+    }),
+  } as unknown as CoachLookupService;
+  // find() too: the replace now reads its result back inside the transaction.
+  const txRepo = { delete: txDelete, save: txSave, create: txCreate, find: slotsFind };
+  const lockFindOne = jest.fn().mockResolvedValue({ id: 'owner' });
   const dataSource = {
     transaction: async <T>(cb: (mgr: EntityManager) => Promise<T>): Promise<T> =>
-      cb({ getRepository: () => txRepo } as unknown as EntityManager),
+      cb({
+        getRepository: (target: unknown) =>
+          target === AvailabilitySlot ? txRepo : { findOne: lockFindOne },
+      } as unknown as EntityManager),
   } as unknown as DataSource;
   const playersService = { findById, findByIds } as unknown as PlayersService;
-  const trainersService = { findByUserId } as unknown as TrainersService;
   const associations = { findByTrainer } as unknown as AssociationsService;
 
   const usersService = { findById: userFindById } as unknown as UsersService;
 
   const service = new AvailabilityService(
     slots,
-    coachProfiles,
     dataSource,
     playersService,
-    trainersService,
     usersService,
+    coachLookup,
     associations,
   );
 
@@ -121,6 +147,7 @@ const makeService = (): {
     findByTrainer,
     coachFindOne,
     userFindById,
+    lockFindOne,
   };
 };
 

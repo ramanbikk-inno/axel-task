@@ -168,6 +168,23 @@ export class RecordCoachOverrideDto {
   overrideReason!: string;
 }
 
+export class ListCoachOverridesQuery {
+  @ApiPropertyOptional({ default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page: number = 1;
+
+  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit: number = 20;
+}
+
 export class CoachOverrideView {
   @ApiProperty() id!: string;
   @ApiProperty({ nullable: true }) eventId!: string | null;
@@ -177,6 +194,20 @@ export class CoachOverrideView {
   @ApiProperty() startTime!: string;
   @ApiProperty() endTime!: string;
   @ApiProperty() overrideReason!: string;
+
+  @ApiProperty({
+    description:
+      'Whether the window actually conflicted with the coach schedule when recorded. False means nothing was overridden.',
+  })
+  hadConflict!: boolean;
+
   @ApiProperty() overriddenByUserId!: string;
   @ApiProperty() createdAt!: Date;
+}
+
+export class PagedCoachOverrides {
+  @ApiProperty({ type: [CoachOverrideView] }) items!: CoachOverrideView[];
+  @ApiProperty() total!: number;
+  @ApiProperty() page!: number;
+  @ApiProperty() limit!: number;
 }

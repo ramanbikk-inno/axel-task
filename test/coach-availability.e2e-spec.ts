@@ -273,6 +273,7 @@ describe('Coach My Times + override log (e2e, US-01.10)', () => {
         trainerProfileId: trainer.trainerProfileId,
         overriddenByUserId: trainer.userId,
         overrideReason: 'Only coach certified for this age group.',
+        hadConflict: true,
         eventId: null,
       });
 
@@ -298,14 +299,17 @@ describe('Coach My Times + override log (e2e, US-01.10)', () => {
         .get('/api/v1/coach-overrides')
         .set('Authorization', `Bearer ${trainer.token}`)
         .expect(200);
-      expect(trainerList.body).toHaveLength(1);
+      expect(trainerList.body).toMatchObject({ total: 1, page: 1, limit: 20 });
+      expect(trainerList.body.items).toHaveLength(1);
 
       const coachList = await request(app.getHttpServer())
         .get('/api/v1/coaches/me/availability/overrides')
         .set('Authorization', `Bearer ${coach.token}`)
         .expect(200);
-      expect(coachList.body).toHaveLength(1);
-      expect(coachList.body[0].overrideReason).toBe('Only coach certified for this age group.');
+      expect(coachList.body.items).toHaveLength(1);
+      expect(coachList.body.items[0].overrideReason).toBe(
+        'Only coach certified for this age group.',
+      );
     });
 
     it('requires a reason', async () => {
@@ -396,6 +400,290 @@ describe('Coach My Times + override log (e2e, US-01.10)', () => {
         displayName: 'Sam Coach',
       });
       expect(res.body.slots).toHaveLength(1);
+    });
+  });
+  describe('review regressions', () => {
+    it('serialises concurrent replaces so overlapping windows cannot persist', async () => {
+      const trainer = await makeTrainer('tr1@example.com', 'Elite Hoops');
+      const coach = await makeCoach('cr1@example.com', trainer.trainerProfileId);
+
+      // Each set is individually valid; together they overlap. Before the owner
+      // lock all four landed, leaving the DB in a state the API rejects.
+      await Promise.all(
+        [16, 17, 18, 19].map((h) =>
+          request(app.getHttpServer())
+            .put('/api/v1/coaches/me/availability')
+            .set('Authorization', `Bearer ${coach.token}`)
+            .send({ slots: [{ dayOfWeek: 1, startTime: `${h}:00`, endTime: `${h + 2}:00` }] }),
+        ),
+      );
+
+      const rows = await ctx.dataSource
+        .getRepository(AvailabilitySlot)
+        .find({ where: { coachProfileId: coach.coachProfileId } });
+      expect(rows).toHaveLength(1);
+    });
+
+    it('a blackout hides a player from the trainer time filter', async () => {
+      const trainer = await makeTrainer('tr2@example.com', 'Elite Hoops');
+      const parent = await ctx.registerVerifiedPlayer({ email: 'pr2@example.com' });
+      const parentToken = await login(parent.email);
+      const playerRepo = ctx.dataSource.getRepository(PlayerProfile);
+      const player = await playerRepo.save(
+        playerRepo.create({ ownerUserId: parent.userId, displayName: 'Amy' }),
+      );
+      await ctx.dataSource.query(
+        `INSERT INTO trainer_player_associations (trainer_profile_id, player_profile_id, status, connected_at)
+         VALUES ($1, $2, 'active', now())`,
+        [trainer.trainerProfileId, player.id],
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/v1/players/${player.id}/availability`)
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({
+          slots: [
+            { dayOfWeek: 1, startTime: '16:00', endTime: '20:00' },
+            { dayOfWeek: 1, startTime: '17:00', endTime: '18:00', isAvailable: false },
+          ],
+        })
+        .expect(200);
+
+      const blacked = await request(app.getHttpServer())
+        .get('/api/v1/trainers/me/players/availability?dayOfWeek=1&time=17:30')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(blacked.body).toHaveLength(0);
+
+      // Still free either side of the hole.
+      const free = await request(app.getHttpServer())
+        .get('/api/v1/trainers/me/players/availability?dayOfWeek=1&time=18:30')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(free.body).toHaveLength(1);
+    });
+
+    it('a blackout on one day does not suppress a match on another', async () => {
+      const trainer = await makeTrainer('tr3@example.com', 'Elite Hoops');
+      const parent = await ctx.registerVerifiedPlayer({ email: 'pr3@example.com' });
+      const parentToken = await login(parent.email);
+      const playerRepo = ctx.dataSource.getRepository(PlayerProfile);
+      const player = await playerRepo.save(
+        playerRepo.create({ ownerUserId: parent.userId, displayName: 'Amy' }),
+      );
+      await ctx.dataSource.query(
+        `INSERT INTO trainer_player_associations (trainer_profile_id, player_profile_id, status, connected_at)
+         VALUES ($1, $2, 'active', now())`,
+        [trainer.trainerProfileId, player.id],
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/v1/players/${player.id}/availability`)
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({
+          slots: [
+            { dayOfWeek: 1, startTime: '16:00', endTime: '20:00' },
+            { dayOfWeek: 2, startTime: '17:00', endTime: '18:00', isAvailable: false },
+          ],
+        })
+        .expect(200);
+
+      // No dayOfWeek filter: Tuesday's blackout must not veto Monday.
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/trainers/me/players/availability?time=17:30')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(res.body).toHaveLength(1);
+    });
+
+    it('flags an override that did not actually conflict, and skips the email', async () => {
+      const trainer = await makeTrainer('tr4@example.com', 'Elite Hoops');
+      const coach = await makeCoach('cr4@example.com', trainer.trainerProfileId);
+      await request(app.getHttpServer())
+        .put('/api/v1/coaches/me/availability')
+        .set('Authorization', `Bearer ${coach.token}`)
+        .send({ slots: [MON_4_TO_8] })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/coach-overrides')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .send({
+          coachProfileId: coach.coachProfileId,
+          dayOfWeek: 1,
+          startTime: '17:00',
+          endTime: '18:00',
+          overrideReason: 'Client thought this clashed but it does not.',
+        })
+        .expect(201);
+
+      expect(res.body.hadConflict).toBe(false);
+      expect(ctx.mailer.sendCoachAvailabilityOverride).not.toHaveBeenCalled();
+    });
+
+    it('lets a Super Admin read the trail across organisations but not write to it', async () => {
+      const trainer = await makeTrainer('tr5@example.com', 'Elite Hoops');
+      const coach = await makeCoach('cr5@example.com', trainer.trainerProfileId);
+      await request(app.getHttpServer())
+        .post('/api/v1/coach-overrides')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .send({
+          coachProfileId: coach.coachProfileId,
+          dayOfWeek: 1,
+          startTime: '21:00',
+          endTime: '22:00',
+          overrideReason: 'Only coach certified for this age group.',
+        })
+        .expect(201);
+
+      await ctx.seedSuperAdmin();
+      const adminLogin = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: ctx.superAdminEmail, password: ctx.superAdminPassword })
+        .expect(200);
+      const adminToken = adminLogin.body.accessToken as string;
+
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/coach-overrides')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(list.body.total).toBe(1);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/coach-overrides')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          coachProfileId: coach.coachProfileId,
+          dayOfWeek: 1,
+          startTime: '21:00',
+          endTime: '22:00',
+          overrideReason: 'Platform admin should not schedule.',
+        })
+        .expect(403);
+    });
+
+    it('pages the override trail', async () => {
+      const trainer = await makeTrainer('tr6@example.com', 'Elite Hoops');
+      const coach = await makeCoach('cr6@example.com', trainer.trainerProfileId);
+      for (const hour of [21, 22]) {
+        await request(app.getHttpServer())
+          .post('/api/v1/coach-overrides')
+          .set('Authorization', `Bearer ${trainer.token}`)
+          .send({
+            coachProfileId: coach.coachProfileId,
+            dayOfWeek: 1,
+            startTime: `${hour}:00`,
+            endTime: `${hour}:30`,
+            overrideReason: 'Short-notice cover needed.',
+          })
+          .expect(201);
+      }
+
+      const firstPage = await request(app.getHttpServer())
+        .get('/api/v1/coach-overrides?page=1&limit=1')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(firstPage.body).toMatchObject({ total: 2, page: 1, limit: 1 });
+      expect(firstPage.body.items).toHaveLength(1);
+
+      const secondPage = await request(app.getHttpServer())
+        .get('/api/v1/coach-overrides?page=2&limit=1')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(secondPage.body.items).toHaveLength(1);
+      expect(secondPage.body.items[0].id).not.toBe(firstPage.body.items[0].id);
+    });
+    it('a fully blacked-out day is not offered by the day-only filter either', async () => {
+      const trainer = await makeTrainer('tr7@example.com', 'Elite Hoops');
+      const parent = await ctx.registerVerifiedPlayer({ email: 'pr7@example.com' });
+      const parentToken = await login(parent.email);
+      const playerRepo = ctx.dataSource.getRepository(PlayerProfile);
+      const player = await playerRepo.save(
+        playerRepo.create({ ownerUserId: parent.userId, displayName: 'Amy' }),
+      );
+      await ctx.dataSource.query(
+        `INSERT INTO trainer_player_associations (trainer_profile_id, player_profile_id, status, connected_at)
+         VALUES ($1, $2, 'active', now())`,
+        [trainer.trainerProfileId, player.id],
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/v1/players/${player.id}/availability`)
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({
+          slots: [
+            { dayOfWeek: 1, startTime: '16:00', endTime: '20:00' },
+            { dayOfWeek: 1, startTime: '16:00', endTime: '20:00', isAvailable: false },
+          ],
+        })
+        .expect(200);
+
+      // Day-only and day+time must agree: neither should offer this player.
+      const dayOnly = await request(app.getHttpServer())
+        .get('/api/v1/trainers/me/players/availability?dayOfWeek=1')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(dayOnly.body).toHaveLength(0);
+
+      const withTime = await request(app.getHttpServer())
+        .get('/api/v1/trainers/me/players/availability?dayOfWeek=1&time=17:00')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(withTime.body).toHaveLength(0);
+    });
+
+    it('a partially blacked-out day is still offered by the day-only filter', async () => {
+      const trainer = await makeTrainer('tr8@example.com', 'Elite Hoops');
+      const parent = await ctx.registerVerifiedPlayer({ email: 'pr8@example.com' });
+      const parentToken = await login(parent.email);
+      const playerRepo = ctx.dataSource.getRepository(PlayerProfile);
+      const player = await playerRepo.save(
+        playerRepo.create({ ownerUserId: parent.userId, displayName: 'Amy' }),
+      );
+      await ctx.dataSource.query(
+        `INSERT INTO trainer_player_associations (trainer_profile_id, player_profile_id, status, connected_at)
+         VALUES ($1, $2, 'active', now())`,
+        [trainer.trainerProfileId, player.id],
+      );
+
+      await request(app.getHttpServer())
+        .put(`/api/v1/players/${player.id}/availability`)
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({
+          slots: [
+            { dayOfWeek: 1, startTime: '16:00', endTime: '20:00' },
+            { dayOfWeek: 1, startTime: '17:00', endTime: '18:00', isAvailable: false },
+          ],
+        })
+        .expect(200);
+
+      const dayOnly = await request(app.getHttpServer())
+        .get('/api/v1/trainers/me/players/availability?dayOfWeek=1')
+        .set('Authorization', `Bearer ${trainer.token}`)
+        .expect(200);
+      expect(dayOnly.body).toHaveLength(1);
+    });
+
+    it("hands the writer back its own set, not a concurrent writer's", async () => {
+      const trainer = await makeTrainer('tr9@example.com', 'Elite Hoops');
+      const coach = await makeCoach('cr9@example.com', trainer.trainerProfileId);
+
+      const responses = await Promise.all(
+        [16, 17, 18, 19].map((h) =>
+          request(app.getHttpServer())
+            .put('/api/v1/coaches/me/availability')
+            .set('Authorization', `Bearer ${coach.token}`)
+            .send({ slots: [{ dayOfWeek: 1, startTime: `${h}:00`, endTime: `${h + 2}:00` }] })
+            .then((res) => ({ sent: `${h}:00`, body: res.body })),
+        ),
+      );
+
+      // The read-back runs in the writing transaction, so each caller sees the
+      // set it submitted even though only the last one survives.
+      for (const r of responses) {
+        expect(r.body).toHaveLength(1);
+        expect(r.body[0].startTime).toBe(r.sent);
+      }
     });
   });
 });

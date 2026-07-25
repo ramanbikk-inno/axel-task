@@ -14,6 +14,7 @@ import {
   TrainerAvailabilityController,
 } from './availability.controller';
 import { AvailabilityService } from './availability.service';
+import { CoachLookupService } from './coach-lookup.service';
 import { CoachOverridesService } from './coach-overrides.service';
 import { AvailabilitySlot } from './entities/availability-slot.entity';
 import { CoachAvailabilityOverride } from './entities/coach-availability-override.entity';
@@ -35,7 +36,7 @@ import { CoachAvailabilityOverride } from './entities/coach-availability-overrid
     TrainerAvailabilityController,
     CoachOverridesController,
   ],
-  providers: [AvailabilityService, CoachOverridesService],
+  providers: [AvailabilityService, CoachOverridesService, CoachLookupService],
   exports: [AvailabilityService, CoachOverridesService],
 })
 export class AvailabilityModule {}

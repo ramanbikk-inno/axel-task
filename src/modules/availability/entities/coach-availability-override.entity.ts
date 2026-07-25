@@ -61,6 +61,15 @@ export class CoachAvailabilityOverride {
   @Column({ name: 'override_reason', type: 'text' })
   overrideReason!: string;
 
+  /**
+   * Whether the window actually clashed with the coach's stated availability at
+   * the moment it was recorded. Without it the trail cannot tell a real
+   * override from a no-op, and the coach's "I was scheduled over" claim is
+   * unfalsifiable.
+   */
+  @Column({ name: 'had_conflict', type: 'boolean' })
+  hadConflict!: boolean;
+
   @Column({ name: 'overridden_by_user_id', type: 'uuid' })
   overriddenByUserId!: string;
 

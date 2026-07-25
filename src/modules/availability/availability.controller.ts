@@ -27,6 +27,8 @@ import {
   CoachOverrideView,
   ConflictCheckQuery,
   ConflictCheckView,
+  ListCoachOverridesQuery,
+  PagedCoachOverrides,
   PlayerAvailabilityView,
   RecordCoachOverrideDto,
   SetAvailabilityDto,
@@ -92,9 +94,12 @@ export class CoachAvailabilityController {
   /** The coach's side of Q-01.06: they can see every override filed against them. */
   @Get('availability/overrides')
   @HttpCode(200)
-  @ApiOkResponse({ type: [CoachOverrideView] })
-  async listOverrides(@Req() req: Request): Promise<CoachOverrideView[]> {
-    return this.overrides.listForCoach((req.user as Principal).userId);
+  @ApiOkResponse({ type: PagedCoachOverrides })
+  async listOverrides(
+    @Query() query: ListCoachOverridesQuery,
+    @Req() req: Request,
+  ): Promise<PagedCoachOverrides> {
+    return this.overrides.listForCoach((req.user as Principal).userId, query);
   }
 }
 
@@ -150,13 +155,19 @@ export class TrainerAvailabilityController {
 @ApiTags('availability')
 @Controller('coach-overrides')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.Trainer)
+// Class-level roles are the safety net: RolesGuard allows a request when it
+// finds no @Roles metadata at all, so a handler added here without its own
+// decorator would otherwise be open to every authenticated principal.
+@Roles(Role.Trainer, Role.SuperAdmin)
 @ApiBearerAuth()
 export class CoachOverridesController {
   constructor(private readonly overrides: CoachOverridesService) {}
 
+  // Recording is a trainer action: a Super Admin does not run an organisation's
+  // schedule, so they can read the trail but not write to it.
   @Post()
   @HttpCode(201)
+  @Roles(Role.Trainer)
   @ApiCreatedResponse({ type: CoachOverrideView })
   async record(
     @Body() dto: RecordCoachOverrideDto,
@@ -167,8 +178,16 @@ export class CoachOverridesController {
 
   @Get()
   @HttpCode(200)
-  @ApiOkResponse({ type: [CoachOverrideView] })
-  async list(@Req() req: Request): Promise<CoachOverrideView[]> {
-    return this.overrides.listForTrainer((req.user as Principal).userId);
+  @ApiOkResponse({ type: PagedCoachOverrides })
+  async list(
+    @Query() query: ListCoachOverridesQuery,
+    @Req() req: Request,
+  ): Promise<PagedCoachOverrides> {
+    const principal = req.user as Principal;
+    // A Super Admin is not scoped to one org, so they see the platform-wide
+    // trail rather than being asked for a trainer profile they do not have.
+    return principal.role === Role.SuperAdmin
+      ? this.overrides.listAll(query)
+      : this.overrides.listForTrainer(principal.userId, query);
   }
 }

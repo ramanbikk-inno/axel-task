@@ -3,6 +3,7 @@ import { Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
+import { CoachLookupService } from './coach-lookup.service';
 import { MailService } from '../mail/mail.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { UsersService } from '../users/users.service';
@@ -15,28 +16,34 @@ const COACH = { id: 'c1', userId: 'coach-user', trainerProfileId: 't1' } as Coac
 const makeService = (): {
   service: CoachOverridesService;
   save: jest.Mock;
-  find: jest.Mock;
-  coachFindOne: jest.Mock;
-  resolveCoachInOwnOrg: jest.Mock;
-  findByUserId: jest.Mock;
+  findAndCount: jest.Mock;
+  requireOwnProfile: jest.Mock;
+  requireInOwnOrg: jest.Mock;
+  requireTrainer: jest.Mock;
+  isCoachFreeFor: jest.Mock;
   sendOverrideEmail: jest.Mock;
 } => {
   const save = jest.fn((row: CoachAvailabilityOverride) => Promise.resolve({ ...row, id: 'o1' }));
-  const find = jest.fn().mockResolvedValue([]);
-  const coachFindOne = jest.fn().mockResolvedValue(null);
-  const resolveCoachInOwnOrg = jest.fn().mockResolvedValue(COACH);
-  const findByUserId = jest.fn().mockResolvedValue({ id: 't1' });
+  const findAndCount = jest.fn().mockResolvedValue([[], 0]);
+  const requireOwnProfile = jest.fn().mockResolvedValue(COACH);
+  const requireInOwnOrg = jest.fn().mockResolvedValue(COACH);
+  const requireTrainer = jest.fn().mockResolvedValue({ id: 't1' });
+  // Default: the window clashes, which is the case an override exists for.
+  const isCoachFreeFor = jest.fn().mockResolvedValue(false);
   const sendOverrideEmail = jest.fn().mockResolvedValue(undefined);
 
   const overrides = {
     save,
-    find,
+    findAndCount,
     create: (row: Partial<CoachAvailabilityOverride>) => row as CoachAvailabilityOverride,
   } as unknown as Repository<CoachAvailabilityOverride>;
-  const coachProfiles = { findOne: coachFindOne } as unknown as Repository<CoachProfile>;
-  const availability = { resolveCoachInOwnOrg } as unknown as AvailabilityService;
+  const availability = { isCoachFreeFor } as unknown as AvailabilityService;
+  const coachLookup = {
+    requireOwnProfile,
+    requireInOwnOrg,
+    requireTrainer,
+  } as unknown as CoachLookupService;
   const trainersService = {
-    findByUserId,
     findById: jest.fn().mockResolvedValue({ id: 't1', businessName: 'Elite Soccer' }),
   } as unknown as TrainersService;
   const usersService = {
@@ -49,20 +56,23 @@ const makeService = (): {
   return {
     service: new CoachOverridesService(
       overrides,
-      coachProfiles,
       availability,
+      coachLookup,
       trainersService,
       usersService,
       mail,
     ),
     save,
-    find,
-    coachFindOne,
-    resolveCoachInOwnOrg,
-    findByUserId,
+    findAndCount,
+    requireOwnProfile,
+    requireInOwnOrg,
+    requireTrainer,
+    isCoachFreeFor,
     sendOverrideEmail,
   };
 };
+
+const PAGE = { page: 1, limit: 20 };
 
 const dto = {
   coachProfileId: 'c1',
@@ -102,16 +112,16 @@ describe('CoachOverridesService (US-01.10)', () => {
   });
 
   it('goes through the tenancy gate before writing', async () => {
-    const { service, resolveCoachInOwnOrg } = makeService();
+    const { service, requireInOwnOrg } = makeService();
 
     await service.record('trainer-user', dto);
 
-    expect(resolveCoachInOwnOrg).toHaveBeenCalledWith('trainer-user', 'c1');
+    expect(requireInOwnOrg).toHaveBeenCalledWith('trainer-user', 'c1');
   });
 
   it('never writes an override for a coach outside the caller org', async () => {
-    const { service, resolveCoachInOwnOrg, save } = makeService();
-    resolveCoachInOwnOrg.mockRejectedValue(new ForbiddenException());
+    const { service, requireInOwnOrg, save } = makeService();
+    requireInOwnOrg.mockRejectedValue(new ForbiddenException());
 
     await expect(service.record('trainer-user', dto)).rejects.toBeInstanceOf(ForbiddenException);
     expect(save).not.toHaveBeenCalled();
@@ -150,22 +160,23 @@ describe('CoachOverridesService (US-01.10)', () => {
   });
 
   it('lists a trainer own organisation overrides', async () => {
-    const { service, find } = makeService();
+    const { service, findAndCount } = makeService();
 
-    await service.listForTrainer('trainer-user');
+    await service.listForTrainer('trainer-user', PAGE);
 
-    expect(find).toHaveBeenCalledWith({
-      where: { trainerProfileId: 't1' },
-      order: { createdAt: 'DESC' },
-    });
+    expect(findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { trainerProfileId: 't1' }, skip: 0, take: 20 }),
+    );
   });
 
   it('refuses to list for an account with no trainer profile', async () => {
-    const { service, findByUserId } = makeService();
-    findByUserId.mockResolvedValue(null);
+    const { service, requireTrainer } = makeService();
+    requireTrainer.mockRejectedValue(
+      new ForbiddenException({ errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND }),
+    );
 
     try {
-      await service.listForTrainer('nobody');
+      await service.listForTrainer('nobody', PAGE);
       fail('expected throw');
     } catch (err) {
       expect((err as ForbiddenException).getResponse()).toMatchObject({
@@ -175,28 +186,77 @@ describe('CoachOverridesService (US-01.10)', () => {
   });
 
   it('lets a coach read the overrides filed against them', async () => {
-    const { service, find, coachFindOne } = makeService();
-    coachFindOne.mockResolvedValue(COACH);
+    const { service, findAndCount } = makeService();
 
-    await service.listForCoach('coach-user');
+    await service.listForCoach('coach-user', PAGE);
 
-    expect(find).toHaveBeenCalledWith({
-      where: { coachProfileId: 'c1' },
-      order: { createdAt: 'DESC' },
-    });
+    expect(findAndCount).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { coachProfileId: 'c1' }, skip: 0, take: 20 }),
+    );
   });
 
   it('refuses to list for an account with no coach profile', async () => {
-    const { service, coachFindOne } = makeService();
-    coachFindOne.mockResolvedValue(null);
+    const { service, requireOwnProfile } = makeService();
+    requireOwnProfile.mockRejectedValue(
+      new ForbiddenException({ errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND }),
+    );
 
     try {
-      await service.listForCoach('nobody');
+      await service.listForCoach('nobody', PAGE);
       fail('expected throw');
     } catch (err) {
       expect((err as ForbiddenException).getResponse()).toMatchObject({
         errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
       });
     }
+  });
+  it('records that the window actually conflicted', async () => {
+    const { service, save, isCoachFreeFor } = makeService();
+    isCoachFreeFor.mockResolvedValue(false);
+
+    const result = await service.record('trainer-user', dto);
+
+    expect(isCoachFreeFor).toHaveBeenCalledWith('c1', 1, 960, 1080);
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ hadConflict: true }));
+    expect(result.hadConflict).toBe(true);
+  });
+
+  it('marks a no-op override rather than silently logging it as a real one', async () => {
+    // The coach was free the whole time: a client racing stale availability.
+    const { service, save, isCoachFreeFor } = makeService();
+    isCoachFreeFor.mockResolvedValue(true);
+
+    const result = await service.record('trainer-user', dto);
+
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ hadConflict: false }));
+    expect(result.hadConflict).toBe(false);
+  });
+
+  it('does not email the coach when nothing was actually overridden', async () => {
+    const { service, sendOverrideEmail, isCoachFreeFor } = makeService();
+    isCoachFreeFor.mockResolvedValue(true);
+
+    await service.record('trainer-user', dto);
+
+    expect(sendOverrideEmail).not.toHaveBeenCalled();
+  });
+
+  it('offsets by page for the trainer trail', async () => {
+    const { service, findAndCount } = makeService();
+
+    await service.listForTrainer('trainer-user', { page: 3, limit: 10 });
+
+    expect(findAndCount).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
+  });
+
+  it('returns the platform-wide trail unscoped for a Super Admin', async () => {
+    const { service, findAndCount, requireTrainer } = makeService();
+    findAndCount.mockResolvedValue([[], 7]);
+
+    const result = await service.listAll(PAGE);
+
+    expect(requireTrainer).not.toHaveBeenCalled();
+    expect(findAndCount).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+    expect(result).toMatchObject({ total: 7, page: 1, limit: 20 });
   });
 });
