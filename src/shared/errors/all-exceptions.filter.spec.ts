@@ -202,7 +202,7 @@ describe('AllExceptionsFilter', () => {
       filter.catch(
         Object.assign(new Error('duplicate key value'), {
           code: '23505',
-          constraint: 'uq_coach_profiles_user_id',
+          constraint: 'uq_coach_profiles_active_user_id',
         }),
         host,
       );

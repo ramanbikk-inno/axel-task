@@ -49,6 +49,10 @@ export class TrainerProfile {
   @Column({ name: 'logo_url', type: 'text', nullable: true })
   logoUrl!: string | null;
 
+  /** Provider handle for the current logo, so a replacement can delete the old one. */
+  @Column({ name: 'logo_public_id', type: 'text', nullable: true })
+  logoPublicId!: string | null;
+
   @Column({ name: 'primary_color', type: 'text', nullable: true })
   primaryColor!: string | null;
 
