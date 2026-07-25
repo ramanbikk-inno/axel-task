@@ -98,8 +98,23 @@ export class PlayersService {
         jerseyNumber: null,
         gender: null,
         birthDate: null,
+        // Third-party PII: an emergency contact is somebody else's name and
+        // phone number, which has no business surviving this account.
+        emergencyContact: null,
+        skillLevel: null,
       },
     );
+  }
+
+  /** The child login accounts attached to a user's profiles, if any. */
+  async childUserIdsByOwner(ownerUserId: string, manager?: EntityManager): Promise<string[]> {
+    const rows = await this.repo(manager).find({
+      where: { ownerUserId },
+      select: { id: true, childUserId: true },
+    });
+    return rows
+      .map((r) => r.childUserId)
+      .filter((id): id is string => id !== null && id !== undefined);
   }
 
   /** All profiles (self + children) owned by an account. */

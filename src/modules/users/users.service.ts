@@ -171,6 +171,11 @@ export class UsersService {
         email: `deleted_${id}@example.com`,
         phone: null,
         photoUrl: null,
+        // Nulling only photoUrl left the stored image in place with its handle
+        // still on the row — the person's face, still served, after an
+        // erasure request. The caller deletes the asset itself; this makes
+        // sure nothing in the database can find it again either way.
+        photoPublicId: null,
         passwordHash: null,
         status: UserStatus.Deleted,
       },

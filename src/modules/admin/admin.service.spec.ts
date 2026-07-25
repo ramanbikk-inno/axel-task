@@ -2,7 +2,9 @@ import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { AdminService } from './admin.service';
+import { ClockService } from '../../shared/clock/clock.service';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../storage/storage.service';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
@@ -45,6 +47,12 @@ describe('AdminService.createTrainer', () => {
         cb({} as EntityManager),
     } as unknown as DataSource;
 
+    const storage = {
+      upload: jest.fn(),
+      delete: jest.fn().mockResolvedValue(undefined),
+    } as unknown as StorageService;
+    const clock = { now: (): Date => new Date('2026-05-01T00:00:00.000Z') } as ClockService;
+
     const service = new AdminService(
       dataSource,
       usersService,
@@ -53,6 +61,8 @@ describe('AdminService.createTrainer', () => {
       mail,
       audit,
       playersService,
+      storage,
+      clock,
     );
 
     return {
