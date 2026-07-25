@@ -14,6 +14,12 @@ export const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(16),
   JWT_ACCESS_TTL: z.string().min(1).default('15m'),
   JWT_REFRESH_TTL: z.string().min(1).default('7d'),
+  /**
+   * Bound into every token and checked on the way back in, so a token minted
+   * by a different deployment that happens to share a secret is rejected.
+   */
+  JWT_ISSUER: z.string().min(1).default('axel-api'),
+  JWT_AUDIENCE: z.string().min(1).default('axel-app'),
 
   SUPER_ADMIN_EMAIL: z.string().email(),
   SUPER_ADMIN_PASSWORD: z.string().min(12),

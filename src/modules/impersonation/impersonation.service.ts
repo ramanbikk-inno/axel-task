@@ -16,7 +16,6 @@ import { ImpersonationLog } from './entities/impersonation-log.entity';
 
 /** Impersonation sessions are hard-capped at one hour (US-01.07). */
 export const IMPERSONATION_TTL_MS = 60 * 60 * 1000;
-const ACCESS_TTL_SECONDS = 900;
 
 export interface ImpersonationBanner {
   impersonatedUserId: string;
@@ -114,7 +113,15 @@ export class ImpersonationService {
       actorUserId: principal.userId,
     });
 
-    const refresh = this.tokens.signRefresh({ userId: target.id, sessionId: session.id });
+    // Capped to the session, not the ordinary seven days. `refresh()` already
+    // refuses a token whose session has expired, but that is one runtime check
+    // standing between a live seven-day credential and an account; the JWT's
+    // own `exp` should say the same thing the session row does.
+    const refresh = this.tokens.signRefresh({
+      userId: target.id,
+      sessionId: session.id,
+      notAfter: sessionExpiresAt,
+    });
     await this.refreshTokens.save(
       this.refreshTokens.create({
         id: refresh.jti,
@@ -144,7 +151,7 @@ export class ImpersonationService {
       accessToken,
       refreshToken: refresh.token,
       tokenType: 'Bearer',
-      expiresIn: ACCESS_TTL_SECONDS,
+      expiresIn: this.tokens.accessTtlSeconds(),
       sessionExpiresAt: sessionExpiresAt.toISOString(),
       banner: {
         impersonatedUserId: target.id,

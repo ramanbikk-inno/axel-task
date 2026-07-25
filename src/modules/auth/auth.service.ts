@@ -23,10 +23,10 @@ import { AuthSession } from './entities/auth-session.entity';
 import { EmailVerificationToken } from './entities/email-verification-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
+import { Principal } from './principal';
 import { TokenService } from './token.service';
 
 const REGISTER_MESSAGE = 'Registration received. Check your email to verify your account.';
-const ACCESS_TTL_SECONDS = 900;
 
 @Injectable()
 export class AuthService {
@@ -144,6 +144,17 @@ export class AuthService {
       });
     }
 
+    // Login is the only moment we hold the plaintext, so it is the only chance
+    // to migrate a hash made under weaker argon2 parameters. Without this,
+    // raising ARGON_MEMORY_KIB only protects accounts created afterwards.
+    //
+    // Deliberately not setPasswordAndBumpVersion: the password did not change,
+    // only its cost parameters, so bumping tokenVersion would sign the user out
+    // of every other device for an upgrade they never asked for.
+    if (this.passwords.needsRehash(user.passwordHash)) {
+      await this.usersService.updatePasswordHash(user.id, await this.passwords.hash(dto.password));
+    }
+
     const pair = await this.issueTokensForSession(user, meta);
     await this.usersService.touchLastLogin(user.id, this.clock.now());
 
@@ -151,7 +162,7 @@ export class AuthService {
       accessToken: pair.accessToken,
       refreshToken: pair.refreshToken,
       tokenType: 'Bearer',
-      expiresIn: ACCESS_TTL_SECONDS,
+      expiresIn: this.tokens.accessTtlSeconds(),
     };
   }
 
@@ -371,7 +382,7 @@ export class AuthService {
       accessToken,
       refreshToken: newRefresh.token,
       tokenType: 'Bearer',
-      expiresIn: ACCESS_TTL_SECONDS,
+      expiresIn: this.tokens.accessTtlSeconds(),
     };
   }
 
@@ -457,11 +468,31 @@ export class AuthService {
     }
   }
 
+  /**
+   * Note the `principal`, not just a user id: this is one of the few endpoints
+   * that must refuse to run inside an impersonation session.
+   *
+   * It ends by revoking every session and minting a *fresh, non-impersonated*
+   * one. Reached while impersonating, that converts a one-hour supervised
+   * session into an ordinary durable login as the target, with no
+   * `impersonated_by` on the new row and nothing in the impersonation log to
+   * show for it. The current-password check is not the safeguard people assume:
+   * on a support call the user often reads their own password out, and the
+   * admin may have just set it themselves.
+   */
   async changePassword(
-    userId: string,
+    principal: Principal,
     input: { currentPassword: string; newPassword: string },
     meta: { ip?: string; userAgent?: string },
   ): Promise<AuthTokens> {
+    if (principal.impersonating) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.FORBIDDEN_DURING_IMPERSONATION,
+        message: 'Passwords cannot be changed while impersonating a user.',
+      });
+    }
+
+    const userId = principal.userId;
     const user = await this.usersService.findByIdWithPassword(userId);
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException({
@@ -498,7 +529,7 @@ export class AuthService {
       accessToken: pair.accessToken,
       refreshToken: pair.refreshToken,
       tokenType: 'Bearer',
-      expiresIn: ACCESS_TTL_SECONDS,
+      expiresIn: this.tokens.accessTtlSeconds(),
     };
   }
 
@@ -624,7 +655,7 @@ export class AuthService {
       accessToken: pair.accessToken,
       refreshToken: pair.refreshToken,
       tokenType: 'Bearer',
-      expiresIn: ACCESS_TTL_SECONDS,
+      expiresIn: this.tokens.accessTtlSeconds(),
     };
   }
 }

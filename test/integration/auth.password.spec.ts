@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { IsNull } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { Principal } from '../../src/modules/auth/principal';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../../src/modules/users/entities/user.enums';
@@ -18,6 +19,21 @@ import { ClockService } from '../../src/shared/clock/clock.service';
 import { ErrorCode } from '../../src/shared/errors/error-codes';
 
 const NOW = new Date('2026-06-08T00:00:00.000Z');
+
+function principal(over: Partial<Principal> = {}): Principal {
+  return {
+    userId: 'user-1',
+    role: Role.PlayerParent,
+    sessionId: 'session-1',
+    activeTrainerProfileId: null,
+    trainerOrgId: null,
+    coachProfileId: null,
+    tokenVersion: 0,
+    scope: 'trainer',
+    impersonating: false,
+    ...over,
+  };
+}
 
 class FakeClock {
   now(): Date {
@@ -36,7 +52,10 @@ describe('AuthService password reset & change', () => {
   let passwordResets: { save: jest.Mock; create: jest.Mock; findOne: jest.Mock; update: jest.Mock };
   let sessions: { update: jest.Mock; save: jest.Mock; create: jest.Mock };
   let tokens: jest.Mocked<
-    Pick<TokenService, 'generateOpaqueToken' | 'hashOpaqueToken' | 'signAccess' | 'signRefresh'>
+    Pick<
+      TokenService,
+      'generateOpaqueToken' | 'hashOpaqueToken' | 'signAccess' | 'signRefresh' | 'accessTtlSeconds'
+    >
   >;
   let passwords: jest.Mocked<Pick<PasswordService, 'hash' | 'verify'>>;
   let mail: jest.Mocked<Pick<MailService, 'sendPasswordResetEmail' | 'sendPasswordChangedEmail'>>;
@@ -61,6 +80,7 @@ describe('AuthService password reset & change', () => {
     };
     tokens = {
       generateOpaqueToken: jest.fn(),
+      accessTtlSeconds: jest.fn().mockReturnValue(900),
       hashOpaqueToken: jest.fn().mockReturnValue('refresh-hash'),
       signAccess: jest.fn().mockReturnValue('new-access-token'),
       signRefresh: jest.fn().mockReturnValue({
@@ -195,7 +215,7 @@ describe('AuthService password reset & change', () => {
     passwords.hash.mockResolvedValue('rehashed');
 
     const result = await service.changePassword(
-      'user-1',
+      principal(),
       { currentPassword: 'OldStr0ng!Pass', newPassword: 'NewStr0ng!Pass' },
       { ip: '203.0.113.5', userAgent: 'jest' },
     );
@@ -227,7 +247,7 @@ describe('AuthService password reset & change', () => {
 
     await expect(
       service.changePassword(
-        'user-1',
+        principal(),
         { currentPassword: 'WrongPass!123', newPassword: 'NewStr0ng!Pass' },
         {},
       ),
@@ -235,5 +255,38 @@ describe('AuthService password reset & change', () => {
       status: 401,
       response: { errorCode: ErrorCode.INVALID_CREDENTIALS },
     });
+  });
+
+  /**
+   * changePassword revokes every session and mints a fresh, non-impersonated
+   * one. Reached from inside an impersonation session that would hand the admin
+   * an ordinary durable login as the target — no `impersonated_by`, no
+   * one-hour cap, nothing in the impersonation log after the exit.
+   */
+  it('refuses to change a password from inside an impersonation session', async () => {
+    usersService.findByIdWithPassword.mockResolvedValue({
+      id: 'user-1',
+      email: 'u@example.com',
+      passwordHash: 'old-hash',
+    } as User);
+    passwords.verify.mockResolvedValue(true);
+    passwords.hash.mockResolvedValue('rehashed');
+
+    await expect(
+      service.changePassword(
+        principal({ impersonating: true, actor: { userId: 'admin-1' } }),
+        { currentPassword: 'OldStr0ng!Pass', newPassword: 'NewStr0ng!Pass' },
+        {},
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      response: { errorCode: ErrorCode.FORBIDDEN_DURING_IMPERSONATION },
+    });
+
+    // Refused before any of it happened, not merely reported afterwards.
+    expect(usersService.setPasswordAndBumpVersion).not.toHaveBeenCalled();
+    expect(sessions.update).not.toHaveBeenCalled();
+    expect(sessions.save).not.toHaveBeenCalled();
+    expect(mail.sendPasswordChangedEmail).not.toHaveBeenCalled();
   });
 });

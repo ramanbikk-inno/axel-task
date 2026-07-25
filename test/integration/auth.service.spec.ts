@@ -36,9 +36,12 @@ describe('AuthService (login + register)', () => {
   let usersService: jest.Mocked<
     Pick<UsersService, 'findByEmail' | 'findByEmailWithPassword' | 'create' | 'touchLastLogin'>
   >;
-  let passwords: jest.Mocked<Pick<PasswordService, 'hash' | 'verify'>>;
+  let passwords: jest.Mocked<Pick<PasswordService, 'hash' | 'verify' | 'needsRehash'>>;
   let tokens: jest.Mocked<
-    Pick<TokenService, 'signAccess' | 'signRefresh' | 'hashOpaqueToken' | 'generateOpaqueToken'>
+    Pick<
+      TokenService,
+      'signAccess' | 'signRefresh' | 'hashOpaqueToken' | 'generateOpaqueToken' | 'accessTtlSeconds'
+    >
   >;
   let mail: jest.Mocked<Pick<MailService, 'sendVerificationEmail'>>;
   let sessions: RepoMock;
@@ -75,11 +78,13 @@ describe('AuthService (login + register)', () => {
     passwords = {
       hash: jest.fn(),
       verify: jest.fn(),
+      needsRehash: jest.fn().mockReturnValue(false),
     };
     passwords.hash.mockResolvedValue('argon-dummy');
     tokens = {
       signAccess: jest.fn(),
       signRefresh: jest.fn(),
+      accessTtlSeconds: jest.fn().mockReturnValue(900),
       hashOpaqueToken: jest.fn(),
       generateOpaqueToken: jest.fn(),
     };
