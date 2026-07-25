@@ -108,27 +108,33 @@ export class CoachesService {
 
   /** New coach accepts an invite: creates the Coach account + profile. */
   async accept(code: string, dto: AcceptCoachInviteDto): Promise<{ message: string }> {
-    const link = await this.shareLinks.requireUsable(code);
-    if (link.type !== ShareLinkType.CoachUnique || !link.targetEmail) {
-      throw new NotFoundException({
-        errorCode: ErrorCode.SHARE_LINK_INVALID,
-        message: 'This coaching invite is invalid.',
-      });
-    }
-
-    const email = link.targetEmail;
-    const existing = await this.usersService.findByEmail(email);
-    if (existing) {
-      // A coach can be active under only one trainer; existing accounts must be
-      // handled by support rather than silently re-homed.
-      throw new ConflictException({
-        errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
-        message: 'An account with this email already exists. Contact support to switch trainers.',
-      });
-    }
-
     let verificationToken = '';
     const user = await this.dataSource.transaction(async (manager: EntityManager) => {
+      // Locked inside the transaction so two people cannot accept the same
+      // single-use invite concurrently.
+      const link = await this.shareLinks.lockForRedemption(
+        code,
+        ShareLinkType.CoachUnique,
+        manager,
+      );
+      if (!link.targetEmail) {
+        throw new NotFoundException({
+          errorCode: ErrorCode.SHARE_LINK_INVALID,
+          message: 'This coaching invite is invalid.',
+        });
+      }
+
+      const email = link.targetEmail;
+      const existing = await this.usersService.findByEmail(email);
+      if (existing) {
+        // A coach can be active under only one trainer; existing accounts must
+        // be handled by support rather than silently re-homed.
+        throw new ConflictException({
+          errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
+          message: 'An account with this email already exists. Contact support to switch trainers.',
+        });
+      }
+
       const created = await this.authService.createUnverifiedAccount(
         {
           email,
