@@ -14,9 +14,13 @@ const uploadMock = cloudinary.uploader.upload as unknown as jest.Mock;
 const destroyMock = cloudinary.uploader.destroy as unknown as jest.Mock;
 
 function service(cloudinaryUrl: string): CloudinaryStorageService {
-  return new CloudinaryStorageService(
-    new ConfigService({ CLOUDINARY_URL: cloudinaryUrl }) as ConfigService,
-  );
+  // Deliberately a stub, not a real ConfigService: ConfigService.get() prefers
+  // process.env over the values it was constructed with, and CI exports
+  // CLOUDINARY_URL — so the "unconfigured" case silently became configured and
+  // this suite passed locally while failing in CI.
+  return new CloudinaryStorageService({
+    get: <T>(): T => cloudinaryUrl as unknown as T,
+  } as unknown as ConfigService);
 }
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
