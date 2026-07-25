@@ -169,13 +169,19 @@ export class UsersService {
     );
   }
 
+  /**
+   * Records email verification only. This deliberately does NOT touch `status`:
+   * accounts are created Active already, so writing Active here let a
+   * deactivated or GDPR-deleted user restore themselves by redeeming an
+   * outstanding verification or setup token. Status transitions belong to the
+   * Super Admin lifecycle endpoints (US-01.12 / US-01.13).
+   */
   async markEmailVerified(id: string, at: Date): Promise<void> {
     await this.usersRepository.update(
       { id },
       {
         emailVerified: true,
         emailVerifiedAt: at,
-        status: UserStatus.Active,
       },
     );
   }

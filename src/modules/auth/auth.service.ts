@@ -208,18 +208,47 @@ export class AuthService {
       });
     }
 
+    const user = await this.usersService.findById(row.userId);
+    if (!user) {
+      throw new UnauthorizedException({
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Invalid verification token.',
+      });
+    }
+    this.assertAccountUsable(user);
+
     await this.emailVerifications.update({ id: row.id }, { consumedAt: now });
     await this.usersService.markEmailVerified(row.userId, now);
 
-    const user = await this.usersService.findById(row.userId);
-    if (user) {
-      await this.mail.sendWelcomeEmail(user.email, user.firstName ?? '');
+    await this.mail.sendWelcomeEmail(user.email, user.firstName ?? '');
+  }
+
+  /**
+   * A token issued while an account was healthy must not become a way back in
+   * after a Super Admin deactivates or deletes it.
+   */
+  private assertAccountUsable(user: User): void {
+    if (user.status === UserStatus.Deleted) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.ACCOUNT_DELETED,
+        message: 'This account has been deleted.',
+      });
+    }
+    if (user.status !== UserStatus.Active) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.ACCOUNT_INACTIVE,
+        message: 'This account is inactive. Contact support.',
+      });
     }
   }
 
   async resendVerification(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
-    if (!user || user.emailVerified) {
+    // Silent no-op rather than an error, to stay enumeration-safe. Deactivated
+    // and deleted accounts get no new token: redeeming one is pointless now
+    // that verification no longer reactivates, and it would mean mailing a
+    // `deleted_<id>@example.com` address.
+    if (!user || user.emailVerified || user.status !== UserStatus.Active) {
       return;
     }
 
@@ -379,7 +408,7 @@ export class AuthService {
 
   async forgotPassword(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
-    if (!user) {
+    if (!user || user.status !== UserStatus.Active) {
       return;
     }
 
@@ -575,6 +604,7 @@ export class AuthService {
         message: 'Invalid setup token.',
       });
     }
+    this.assertAccountUsable(user);
 
     const passwordHash = await this.passwords.hash(input.newPassword);
     await this.accountSetups.update({ id: row.id }, { consumedAt: now });

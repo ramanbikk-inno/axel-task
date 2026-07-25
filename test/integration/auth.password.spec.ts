@@ -5,7 +5,7 @@ import { IsNull } from 'typeorm';
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
-import { Role } from '../../src/modules/users/entities/user.enums';
+import { Role, UserStatus } from '../../src/modules/users/entities/user.enums';
 import { AuthSession } from '../../src/modules/auth/entities/auth-session.entity';
 import { RefreshToken } from '../../src/modules/auth/entities/refresh-token.entity';
 import { EmailVerificationToken } from '../../src/modules/auth/entities/email-verification-token.entity';
@@ -110,7 +110,11 @@ describe('AuthService password reset & change', () => {
   });
 
   it('forgotPassword issues a hashed reset token (1h) + sends email when the user exists', async () => {
-    usersService.findByEmail.mockResolvedValue({ id: 'user-1', email: 'u@example.com' } as User);
+    usersService.findByEmail.mockResolvedValue({
+      id: 'user-1',
+      email: 'u@example.com',
+      status: UserStatus.Active,
+    } as User);
     tokens.generateOpaqueToken.mockReturnValue({ token: 'reset-plain', tokenHash: 'reset-hash' });
 
     await service.forgotPassword('u@example.com');
