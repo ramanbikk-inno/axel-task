@@ -22,6 +22,7 @@ import { ProfileModule } from './modules/profile/profile.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 import { AvailabilityModule } from './modules/availability/availability.module';
 import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
+import { identityTracker, ipTracker } from './modules/auth/guards/throttle-trackers';
 
 @Module({
   imports: [
@@ -43,7 +44,23 @@ import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
     ProfileModule,
     CoachesModule,
     AvailabilityModule,
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 60 }]),
+    /**
+     * Two independent buckets, because one cannot cover both attacks:
+     *
+     * - `default` keys on IP + submitted email and protects a single account
+     *   from targeted brute force. On its own it is useless against spraying:
+     *   an attacker trying one password against thousands of addresses gets a
+     *   fresh bucket for every address.
+     * - `ip` keys on IP alone and catches exactly that. Kept deliberately
+     *   looser than the per-account limit so that a gym or school behind one
+     *   NAT does not lock its own families out.
+     *
+     * A request must satisfy both.
+     */
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60000, limit: 60, getTracker: identityTracker },
+      { name: 'ip', ttl: 60000, limit: 100, getTracker: ipTracker },
+    ]),
   ],
   controllers: [],
   providers: [

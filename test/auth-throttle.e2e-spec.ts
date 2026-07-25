@@ -35,4 +35,21 @@ describe('Auth rate limiting (e2e)', () => {
     expect(blocked.body.errorCode).toBe(ErrorCode.RATE_LIMITED);
     expect(blocked.headers['retry-after']).toBeDefined();
   });
+
+  it('throttles password spraying across many different accounts from one IP', async () => {
+    // Every attempt uses a different address, so the per-account bucket never
+    // fills — this used to run unbounded. The per-IP bucket (20/min on login)
+    // is what stops it.
+    let blocked = 0;
+    for (let attempt = 1; attempt <= 25; attempt += 1) {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: `victim-${attempt}@example.com`, password: 'C0mmon!Passw0rd' });
+      if (res.status === 429) {
+        blocked += 1;
+      }
+    }
+
+    expect(blocked).toBeGreaterThan(0);
+  });
 });

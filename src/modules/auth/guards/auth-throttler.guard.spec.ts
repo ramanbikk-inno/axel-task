@@ -9,8 +9,8 @@ describe('AuthThrottlerGuard', () => {
   const makeGuard = (): AuthThrottlerGuard =>
     Object.create(AuthThrottlerGuard.prototype) as AuthThrottlerGuard;
 
-  describe('getTracker', () => {
-    it('keys on x-forwarded-for IP plus the email identifier from the body', async () => {
+  describe('getTracker (fallback for a throttler configured without one)', () => {
+    it('keys on the proxy-resolved IP', async () => {
       const guard = makeGuard();
       const req: Partial<Request> = {
         ips: ['203.0.113.7'],
@@ -18,18 +18,14 @@ describe('AuthThrottlerGuard', () => {
         body: { email: 'User@Example.com' },
       };
 
-      const tracker = await guard['getTracker'](req as Request);
-
-      expect(tracker).toBe('203.0.113.7|user@example.com');
+      expect(await guard['getTracker'](req as Request)).toBe('203.0.113.7');
     });
 
-    it('falls back to req.ip and empty identifier when no proxy IP / no email', async () => {
+    it('falls back to req.ip when there is no trusted proxy chain', async () => {
       const guard = makeGuard();
       const req: Partial<Request> = { ips: [], ip: '10.0.0.1', body: {} };
 
-      const tracker = await guard['getTracker'](req as Request);
-
-      expect(tracker).toBe('10.0.0.1|');
+      expect(await guard['getTracker'](req as Request)).toBe('10.0.0.1');
     });
   });
 

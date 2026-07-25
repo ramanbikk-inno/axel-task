@@ -26,6 +26,13 @@ export const envSchema = z.object({
   CORS_ORIGINS: z.string().min(1),
   APP_URL: z.string().url(),
 
+  /**
+   * Number of reverse-proxy hops in front of the app, or empty/0 when it is
+   * exposed directly. Anything above 0 makes Express believe X-Forwarded-For,
+   * so only set it when a proxy really does rewrite that header.
+   */
+  TRUST_PROXY: z.string().default(''),
+
   ARGON_MEMORY_KIB: z.coerce.number().int().positive().default(19456),
   ARGON_TIME_COST: z.coerce.number().int().positive().default(2),
   ARGON_PARALLELISM: z.coerce.number().int().positive().default(1),
