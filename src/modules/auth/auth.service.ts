@@ -460,7 +460,8 @@ export class AuthService {
   async changePassword(
     userId: string,
     input: { currentPassword: string; newPassword: string },
-  ): Promise<void> {
+    meta: { ip?: string; userAgent?: string },
+  ): Promise<AuthTokens> {
     const user = await this.usersService.findByIdWithPassword(userId);
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException({
@@ -479,7 +480,26 @@ export class AuthService {
 
     const passwordHash = await this.passwords.hash(input.newPassword);
     await this.usersService.setPasswordAndBumpVersion(userId, passwordHash);
+
+    // Changing your password is the standard remediation after a device is
+    // lost or a session is stolen, and it did nothing to existing sessions —
+    // the thief stayed logged in indefinitely via refresh rotation. Drop every
+    // session and hand the caller a fresh pair so they are not signed out by
+    // their own password change.
+    await this.revokeAllUserSessions(userId, 'password-change');
+
+    // Re-read so the new tokens carry the bumped tokenVersion.
+    const refreshed = (await this.usersService.findById(userId)) as User;
+    const pair = await this.issueTokensForSession(refreshed, meta);
+
     await this.mail.sendPasswordChangedEmail(user.email);
+
+    return {
+      accessToken: pair.accessToken,
+      refreshToken: pair.refreshToken,
+      tokenType: 'Bearer',
+      expiresIn: ACCESS_TTL_SECONDS,
+    };
   }
 
   /**

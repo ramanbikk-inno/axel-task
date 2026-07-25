@@ -7,7 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { Role } from '../users/entities/user.enums';
-import { AccessClaims, RefreshClaims, TenantScope } from './auth.types';
+import { AccessClaims, RefreshClaims } from './auth.types';
+import { scopeForRole } from './principal';
 
 const ACCESS_TTL = '15m';
 const REFRESH_TTL = '7d';
@@ -45,10 +46,6 @@ export class TokenService {
     return this.config.get<string>('JWT_REFRESH_SECRET') as string;
   }
 
-  private scopeForRole(role: Role): TenantScope {
-    return role === Role.SuperAdmin ? 'platform' : 'trainer';
-  }
-
   signAccess(input: SignAccessInput): string {
     const payload: AccessClaims = {
       sub: input.userId,
@@ -57,7 +54,7 @@ export class TokenService {
       tenant: {
         activeTrainerProfileId: input.activeTrainerProfileId,
         trainerOrgId: input.trainerOrgId,
-        scope: this.scopeForRole(input.role),
+        scope: scopeForRole(input.role),
       },
       tokenVersion: input.tokenVersion,
     };

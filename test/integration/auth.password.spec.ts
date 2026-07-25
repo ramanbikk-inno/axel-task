@@ -5,7 +5,7 @@ import { IsNull } from 'typeorm';
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
-import { UserStatus } from '../../src/modules/users/entities/user.enums';
+import { Role, UserStatus } from '../../src/modules/users/entities/user.enums';
 import { AuthSession } from '../../src/modules/auth/entities/auth-session.entity';
 import { RefreshToken } from '../../src/modules/auth/entities/refresh-token.entity';
 import { EmailVerificationToken } from '../../src/modules/auth/entities/email-verification-token.entity';
@@ -34,8 +34,10 @@ describe('AuthService password reset & change', () => {
     setPasswordAndBumpVersion: jest.Mock;
   };
   let passwordResets: { save: jest.Mock; create: jest.Mock; findOne: jest.Mock; update: jest.Mock };
-  let sessions: { update: jest.Mock };
-  let tokens: jest.Mocked<Pick<TokenService, 'generateOpaqueToken' | 'hashOpaqueToken'>>;
+  let sessions: { update: jest.Mock; save: jest.Mock; create: jest.Mock };
+  let tokens: jest.Mocked<
+    Pick<TokenService, 'generateOpaqueToken' | 'hashOpaqueToken' | 'signAccess' | 'signRefresh'>
+  >;
   let passwords: jest.Mocked<Pick<PasswordService, 'hash' | 'verify'>>;
   let mail: jest.Mocked<Pick<MailService, 'sendPasswordResetEmail' | 'sendPasswordChangedEmail'>>;
 
@@ -52,8 +54,22 @@ describe('AuthService password reset & change', () => {
       findOne: jest.fn(),
       update: jest.fn(async () => ({ affected: 1, raw: [], generatedMaps: [] })),
     };
-    sessions = { update: jest.fn(async () => ({ affected: 1, raw: [], generatedMaps: [] })) };
-    tokens = { generateOpaqueToken: jest.fn(), hashOpaqueToken: jest.fn() };
+    sessions = {
+      update: jest.fn(async () => ({ affected: 1, raw: [], generatedMaps: [] })),
+      create: jest.fn((x: unknown) => x),
+      save: jest.fn(async (x: Record<string, unknown>) => ({ ...x, id: 'new-session-1' })),
+    };
+    tokens = {
+      generateOpaqueToken: jest.fn(),
+      hashOpaqueToken: jest.fn().mockReturnValue('refresh-hash'),
+      signAccess: jest.fn().mockReturnValue('new-access-token'),
+      signRefresh: jest.fn().mockReturnValue({
+        token: 'new-refresh-token',
+        jti: 'jti-1',
+        familyId: 'fam-1',
+        expiresAt: new Date(NOW.getTime() + 1000),
+      }),
+    };
     passwords = { hash: jest.fn(), verify: jest.fn() };
     mail = { sendPasswordResetEmail: jest.fn(), sendPasswordChangedEmail: jest.fn() };
     mail.sendPasswordResetEmail.mockResolvedValue(undefined);
@@ -162,21 +178,42 @@ describe('AuthService password reset & change', () => {
     });
   });
 
-  it('changePassword verifies the current password, rehashes and bumps version', async () => {
+  it('changePassword verifies the current password, rehashes, bumps version, revokes every session and returns a fresh pair', async () => {
     usersService.findByIdWithPassword.mockResolvedValue({
       id: 'user-1',
       email: 'u@example.com',
       passwordHash: 'old-hash',
     } as User);
+    // Re-read after the bump, so the new tokens carry the new version.
+    usersService.findById.mockResolvedValue({
+      id: 'user-1',
+      email: 'u@example.com',
+      role: Role.PlayerParent,
+      tokenVersion: 1,
+    } as User);
     passwords.verify.mockResolvedValue(true);
     passwords.hash.mockResolvedValue('rehashed');
 
-    await service.changePassword('user-1', {
-      currentPassword: 'OldStr0ng!Pass',
-      newPassword: 'NewStr0ng!Pass',
-    });
+    const result = await service.changePassword(
+      'user-1',
+      { currentPassword: 'OldStr0ng!Pass', newPassword: 'NewStr0ng!Pass' },
+      { ip: '203.0.113.5', userAgent: 'jest' },
+    );
 
     expect(usersService.setPasswordAndBumpVersion).toHaveBeenCalledWith('user-1', 'rehashed');
+
+    // A stolen session must not survive the standard remediation.
+    expect(sessions.update).toHaveBeenCalledWith(
+      { userId: 'user-1', revokedAt: IsNull() },
+      { revokedAt: NOW, revokedReason: 'password-change' },
+    );
+
+    // ...and the caller is not signed out by their own password change.
+    expect(result.accessToken).toBe('new-access-token');
+    expect(result.refreshToken).toBe('new-refresh-token');
+    expect(tokens.signAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', tokenVersion: 1 }),
+    );
     expect(mail.sendPasswordChangedEmail).toHaveBeenCalledWith('u@example.com');
   });
 
@@ -189,10 +226,11 @@ describe('AuthService password reset & change', () => {
     passwords.verify.mockResolvedValue(false);
 
     await expect(
-      service.changePassword('user-1', {
-        currentPassword: 'WrongPass!123',
-        newPassword: 'NewStr0ng!Pass',
-      }),
+      service.changePassword(
+        'user-1',
+        { currentPassword: 'WrongPass!123', newPassword: 'NewStr0ng!Pass' },
+        {},
+      ),
     ).rejects.toMatchObject({
       status: 401,
       response: { errorCode: ErrorCode.INVALID_CREDENTIALS },

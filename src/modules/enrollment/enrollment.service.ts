@@ -56,7 +56,9 @@ export class EnrollmentService {
   /** Public: resolve a ShareLink for the join page (trainer name + validity). */
   async resolve(code: string): Promise<ResolvedShareLink> {
     const link = await this.shareLinks.findByCode(code);
-    if (!link || !link.active) {
+    // A coach invite is not a player join code; the join page must not preview
+    // one, let alone name the trainer behind it.
+    if (!link || !link.active || link.type !== ShareLinkType.PlayerStatic) {
       return { code, valid: false, trainer: null };
     }
     const usable =
@@ -70,8 +72,15 @@ export class EnrollmentService {
     };
   }
 
-  /** Generate a static player ShareLink for the calling trainer (US-01.02). */
-  async createTrainerShareLink(principal: Principal, type?: ShareLinkType): Promise<ShareLink> {
+  /**
+   * Generate a static player ShareLink for the calling trainer (US-01.02).
+   *
+   * Player links only. Coach invites are single-use, 7-day and bound to a
+   * target email, all of which this endpoint would leave unset — minting one
+   * here produced a "coach invite" that never expires and never runs out.
+   * They belong to POST /coaches/invitations (US-01.08).
+   */
+  async createTrainerShareLink(principal: Principal): Promise<ShareLink> {
     const trainerProfile = await this.trainersService.findByUserId(principal.userId);
     if (!trainerProfile) {
       throw new ForbiddenException({
@@ -81,7 +90,7 @@ export class EnrollmentService {
     }
     return this.shareLinks.create({
       trainerProfileId: trainerProfile.id,
-      type: type ?? ShareLinkType.PlayerStatic,
+      type: ShareLinkType.PlayerStatic,
       createdByUserId: principal.userId,
     });
   }
@@ -103,18 +112,24 @@ export class EnrollmentService {
    * join confirmation.
    */
   async registerViaShareLink(code: string, dto: JoinRegisterDto): Promise<JoinResult> {
-    const link = await this.shareLinks.requireUsable(code);
-
-    const existing = await this.usersService.findByEmail(dto.email);
-    if (existing) {
-      throw new ConflictException({
-        errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
-        message: 'An account with this email already exists. Log in to join this trainer.',
-      });
-    }
-
     let verificationToken = '';
     const result = await this.dataSource.transaction(async (manager: EntityManager) => {
+      // Locked and type-checked inside the transaction: a coach invite must not
+      // be spendable here, and the single-use count must not be racy.
+      const link = await this.shareLinks.lockForRedemption(
+        code,
+        ShareLinkType.PlayerStatic,
+        manager,
+      );
+
+      const existing = await this.usersService.findByEmail(dto.email);
+      if (existing) {
+        throw new ConflictException({
+          errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
+          message: 'An account with this email already exists. Log in to join this trainer.',
+        });
+      }
+
       const { user, verificationToken: token } = await this.authService.createUnverifiedPlayer(
         {
           email: dto.email,
@@ -149,17 +164,17 @@ export class EnrollmentService {
 
       await this.shareLinks.incrementUse(link.id, manager);
 
-      return { user, profile, association };
+      return { user, profile, association, trainerProfileId: link.trainerProfileId };
     });
 
-    const trainerName = await this.trainerName(link.trainerProfileId);
+    const trainerName = await this.trainerName(result.trainerProfileId);
     await this.mail.sendVerificationEmail(result.user.email, verificationToken);
     await this.mail.sendJoinConfirmationEmail(result.user.email, trainerName);
 
     return {
       message: 'Registration received. Verify your email to finish joining.',
       associationId: result.association.id,
-      trainerProfileId: link.trainerProfileId,
+      trainerProfileId: result.trainerProfileId,
       playerProfileId: result.profile.id,
     };
   }
@@ -169,9 +184,13 @@ export class EnrollmentService {
    * duplicate account, just a new association (multi-trainer support).
    */
   async joinAsExistingPlayer(code: string, principal: Principal): Promise<JoinResult> {
-    const link = await this.shareLinks.requireUsable(code);
-
     const result = await this.dataSource.transaction(async (manager: EntityManager) => {
+      const link = await this.shareLinks.lockForRedemption(
+        code,
+        ShareLinkType.PlayerStatic,
+        manager,
+      );
+
       let profile: PlayerProfile | null = await this.playersService.findSelfProfile(
         principal.userId,
         manager,
@@ -200,7 +219,7 @@ export class EnrollmentService {
         await this.shareLinks.incrementUse(link.id, manager);
       }
 
-      return { profile, association, created };
+      return { profile, association, created, trainerProfileId: link.trainerProfileId };
     });
 
     return {
@@ -208,7 +227,7 @@ export class EnrollmentService {
         ? 'You are now connected with this trainer.'
         : 'You are already connected with this trainer.',
       associationId: result.association.id,
-      trainerProfileId: link.trainerProfileId,
+      trainerProfileId: result.trainerProfileId,
       playerProfileId: result.profile.id,
     };
   }

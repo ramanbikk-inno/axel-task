@@ -4,11 +4,15 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 import { AccessClaims } from '../auth.types';
-import { Principal } from '../principal';
+import { Principal, scopeForRole } from '../principal';
+import { SessionValidatorService, ValidatedSession } from '../session-validator.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly sessionValidator: SessionValidatorService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -16,19 +20,26 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
   }
 
-  validate(payload: AccessClaims): Principal {
+  /**
+   * Claims are only a hint. Role, tenant context and impersonation state are all
+   * read back from the session and user rows so that a token minted before a
+   * change cannot keep asserting the stale value.
+   */
+  async validate(payload: AccessClaims): Promise<Principal> {
+    const { session, user }: ValidatedSession = await this.sessionValidator.validate(payload);
+
     const principal: Principal = {
-      userId: payload.sub,
-      role: payload.role,
-      sessionId: payload.sessionId,
-      activeTrainerProfileId: payload.tenant.activeTrainerProfileId,
+      userId: user.id,
+      role: user.role,
+      sessionId: session.id,
+      activeTrainerProfileId: session.activeTrainerProfileId,
       trainerOrgId: payload.tenant.trainerOrgId,
-      tokenVersion: payload.tokenVersion,
-      scope: payload.tenant.scope,
-      impersonating: Boolean(payload.act),
+      tokenVersion: user.tokenVersion,
+      scope: scopeForRole(user.role),
+      impersonating: session.impersonatedBy !== null,
     };
-    if (payload.act) {
-      principal.actor = { userId: payload.act.sub };
+    if (session.impersonatedBy !== null) {
+      principal.actor = { userId: session.impersonatedBy };
     }
     return principal;
   }
