@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -28,6 +29,7 @@ import {
   InviteCoachDto,
   ListCoachesQueryDto,
   ResolvedCoachInviteView,
+  UpdateCoachProfileDto,
 } from './dto/coach.dto';
 
 @ApiTags('coaches')
@@ -108,6 +110,30 @@ export class CoachesController {
     @Req() req: Request,
   ): Promise<CoachView> {
     return this.coaches.offboardCoach(req.user as Principal, id);
+  }
+
+  /** Spec section 6: a coach "may edit their own profile and availability". */
+  @Get('me')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Coach)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: CoachView })
+  async getOwnProfile(@Req() req: Request): Promise<CoachView> {
+    return this.coaches.getOwnProfile(req.user as Principal);
+  }
+
+  @Patch('me')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Coach)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: CoachView })
+  async updateOwnProfile(
+    @Body() dto: UpdateCoachProfileDto,
+    @Req() req: Request,
+  ): Promise<CoachView> {
+    return this.coaches.updateOwnProfile(req.user as Principal, dto);
   }
 
   // Public: resolve an invite for the accept page.

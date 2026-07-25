@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   NotFoundException,
@@ -77,6 +78,17 @@ export class TrainersController {
   @ApiOkResponse({ type: BrandingView })
   async uploadLogo(@Body() dto: UploadLogoDto, @Req() req: Request): Promise<BrandingView> {
     const profile = await this.trainers.setLogoFromUpload((req.user as Principal).userId, dto);
+    return toBranding(profile);
+  }
+
+  @Delete('me/logo')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Trainer)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: BrandingView })
+  async removeLogo(@Req() req: Request): Promise<BrandingView> {
+    const profile = await this.trainers.removeLogo((req.user as Principal).userId);
     return toBranding(profile);
   }
 

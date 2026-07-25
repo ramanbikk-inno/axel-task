@@ -26,6 +26,7 @@ import {
   CoachView,
   InviteCoachDto,
   ResolvedCoachInviteView,
+  UpdateCoachProfileDto,
 } from './dto/coach.dto';
 import { CoachProfile, CoachStatus } from './entities/coach-profile.entity';
 
@@ -37,6 +38,7 @@ export const AUDIT_COACH_INVITE_RESENT = 'coach.invite-resent';
 export const AUDIT_COACH_INVITE_REVOKED = 'coach.invite-revoked';
 export const AUDIT_COACH_OFFBOARDED = 'coach.offboarded';
 export const AUDIT_COACH_JOINED = 'coach.joined';
+export const AUDIT_COACH_PROFILE_UPDATED = 'coach.profile-updated';
 
 @Injectable()
 export class CoachesService {
@@ -202,6 +204,79 @@ export class CoachesService {
     const [view] = await this.buildCoachViews([
       { ...profile, status: CoachStatus.Inactive, endedAt: now },
     ]);
+    return view;
+  }
+
+  /**
+   * A coach edits their own profile (spec section 6).
+   *
+   * Resolved from `principal.coachProfileId`, which SessionValidatorService
+   * derives per request from the *active* engagement — so an off-boarded coach
+   * has none and cannot edit a profile that no longer represents anything.
+   * Never from a caller-supplied id: that would be the whole boundary.
+   */
+  async updateOwnProfile(principal: Principal, dto: UpdateCoachProfileDto): Promise<CoachView> {
+    if (principal.coachProfileId === null) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
+        message: 'No active coach profile for this account.',
+      });
+    }
+
+    const profile = await this.coaches.findOne({ where: { id: principal.coachProfileId } });
+    if (!profile) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
+        message: 'Coach profile not found.',
+      });
+    }
+
+    if (dto.bio !== undefined) {
+      profile.bio = dto.bio;
+    }
+    if (dto.credentials !== undefined) {
+      profile.credentials = dto.credentials;
+    }
+    if (dto.certifications !== undefined) {
+      profile.certifications = dto.certifications;
+    }
+    if (dto.publicVisible !== undefined) {
+      profile.publicVisible = dto.publicVisible;
+    }
+
+    const saved = await this.coaches.save(profile);
+    await this.audit.record({
+      action: AUDIT_COACH_PROFILE_UPDATED,
+      actor: principal,
+      targetUserId: profile.userId,
+      target: { type: 'CoachProfile', id: profile.id },
+      metadata: {
+        fields: Object.entries(dto)
+          .filter(([, v]) => v !== undefined)
+          .map(([k]) => k),
+      },
+    });
+
+    const [view] = await this.buildCoachViews([saved]);
+    return view;
+  }
+
+  /** A coach's own profile as they see it. */
+  async getOwnProfile(principal: Principal): Promise<CoachView> {
+    if (principal.coachProfileId === null) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
+        message: 'No active coach profile for this account.',
+      });
+    }
+    const profile = await this.coaches.findOne({ where: { id: principal.coachProfileId } });
+    if (!profile) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
+        message: 'Coach profile not found.',
+      });
+    }
+    const [view] = await this.buildCoachViews([profile]);
     return view;
   }
 
