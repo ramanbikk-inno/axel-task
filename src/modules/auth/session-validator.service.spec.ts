@@ -3,6 +3,7 @@ import { Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { AccessClaims } from './auth.types';
@@ -58,12 +59,19 @@ function claims(over: Partial<AccessClaims> = {}): AccessClaims {
   };
 }
 
-function build(sessionRow: AuthSession | null, userRow: User | null): SessionValidatorService {
+function build(
+  sessionRow: AuthSession | null,
+  userRow: User | null,
+  trainerProfileRow: { id: string } | null = null,
+): SessionValidatorService {
   const sessions = {
     findOne: jest.fn().mockResolvedValue(sessionRow),
   } as unknown as Repository<AuthSession>;
   const users = { findOne: jest.fn().mockResolvedValue(userRow) } as unknown as Repository<User>;
-  return new SessionValidatorService(sessions, users, new FixedClock());
+  const trainerProfiles = {
+    findOne: jest.fn().mockResolvedValue(trainerProfileRow),
+  } as unknown as Repository<TrainerProfile>;
+  return new SessionValidatorService(sessions, users, trainerProfiles, new FixedClock());
 }
 
 async function expectRejection(
@@ -136,6 +144,31 @@ describe('SessionValidatorService', () => {
 
     await expectRejection(service, claims(), ErrorCode.ACCOUNT_DELETED);
   });
+
+  it('resolves trainerOrgId from trainer_profiles for a Trainer', async () => {
+    const service = build(session(), user({ role: Role.Trainer }), { id: 'trainer-profile-7' });
+
+    const result = await service.validate(claims());
+
+    // This was hardcoded null at every token-issue site, so every org-scoped
+    // authorization rule compared against null and matched nothing.
+    expect(result.trainerOrgId).toBe('trainer-profile-7');
+  });
+
+  it('leaves trainerOrgId null for a Trainer with no profile row yet', async () => {
+    const service = build(session(), user({ role: Role.Trainer }), null);
+
+    expect((await service.validate(claims())).trainerOrgId).toBeNull();
+  });
+
+  it.each([Role.PlayerParent, Role.Coach, Role.SuperAdmin])(
+    'leaves trainerOrgId null for %s',
+    async (role: Role) => {
+      const service = build(session(), user({ role }), { id: 'should-not-be-used' });
+
+      expect((await service.validate(claims())).trainerOrgId).toBeNull();
+    },
+  );
 
   it('rejects a token minted before a credential change', async () => {
     const service = build(session(), user({ tokenVersion: 3 }));

@@ -74,19 +74,121 @@ describe('AbilityFactory', () => {
     });
   });
 
-  describe('Coach / PlayerParent (M1 skeleton: no broad grants yet)', () => {
-    it('Coach cannot manage all', () => {
-      const ability = factory.createForPrincipal(
-        principalFor({ role: Role.Coach, scope: 'trainer', trainerOrgId: 'org-1' }),
+  describe('Coach', () => {
+    let ability: AppAbility;
+    beforeEach(() => {
+      ability = factory.createForPrincipal(
+        principalFor({
+          userId: 'coach-user-1',
+          role: Role.Coach,
+          trainerOrgId: 'org-1',
+          scope: 'trainer',
+        }),
       );
-      expect(ability.can(Action.Manage, 'all')).toBe(false);
     });
 
-    it('PlayerParent cannot create a User', () => {
-      const ability = factory.createForPrincipal(
-        principalFor({ role: Role.PlayerParent, scope: 'trainer' }),
+    it('can read and update its own coach profile', () => {
+      const own = { __type: 'CoachProfile', userId: 'coach-user-1', trainerOrgId: 'org-1' };
+      expect(ability.can(Action.Read, own)).toBe(true);
+      expect(ability.can(Action.Update, own)).toBe(true);
+    });
+
+    it('cannot touch another coach’s profile in the same org', () => {
+      const other = { __type: 'CoachProfile', userId: 'coach-user-2', trainerOrgId: 'org-1' };
+      expect(ability.can(Action.Read, other)).toBe(false);
+      expect(ability.can(Action.Update, other)).toBe(false);
+    });
+
+    it('can manage its own availability only', () => {
+      expect(
+        ability.can(Action.Manage, { __type: 'Availability', coachUserId: 'coach-user-1' }),
+      ).toBe(true);
+      expect(
+        ability.can(Action.Manage, { __type: 'Availability', coachUserId: 'coach-user-2' }),
+      ).toBe(false);
+    });
+
+    it('is view-only over the roster of the trainer it works for', () => {
+      const player = { __type: 'PlayerProfile', trainerOrgId: 'org-1' };
+      expect(ability.can(Action.Read, player)).toBe(true);
+      expect(ability.can(Action.Update, player)).toBe(false);
+    });
+
+    it('cannot see another trainer’s roster', () => {
+      expect(ability.can(Action.Read, { __type: 'PlayerProfile', trainerOrgId: 'org-2' })).toBe(
+        false,
       );
+    });
+
+    it('cannot run the organisation', () => {
+      expect(ability.can(Action.Manage, 'ShareLink')).toBe(false);
+      expect(ability.can(Action.Manage, 'TrainerPlayerAssociation')).toBe(false);
+      expect(ability.can(Action.Manage, 'User')).toBe(false);
+      expect(ability.can(Action.Manage, 'all')).toBe(false);
+    });
+  });
+
+  describe('PlayerParent', () => {
+    let ability: AppAbility;
+    beforeEach(() => {
+      ability = factory.createForPrincipal(
+        principalFor({ userId: 'parent-1', role: Role.PlayerParent, scope: 'trainer' }),
+      );
+    });
+
+    it('can read and update the profiles it owns (self and children)', () => {
+      const own = { __type: 'PlayerProfile', ownerUserId: 'parent-1' };
+      expect(ability.can(Action.Read, own)).toBe(true);
+      expect(ability.can(Action.Update, own)).toBe(true);
+    });
+
+    it('cannot read another family’s profile', () => {
+      const other = { __type: 'PlayerProfile', ownerUserId: 'parent-2' };
+      expect(ability.can(Action.Read, other)).toBe(false);
+      expect(ability.can(Action.Update, other)).toBe(false);
+    });
+
+    it('can manage availability for its own profiles only', () => {
+      expect(ability.can(Action.Manage, { __type: 'Availability', ownerUserId: 'parent-1' })).toBe(
+        true,
+      );
+      expect(ability.can(Action.Manage, { __type: 'Availability', ownerUserId: 'parent-2' })).toBe(
+        false,
+      );
+    });
+
+    it('can join and leave trainers for its own profiles', () => {
+      const own = { __type: 'TrainerPlayerAssociation', ownerUserId: 'parent-1' };
+      expect(ability.can(Action.Create, own)).toBe(true);
+      expect(ability.can(Action.Delete, own)).toBe(true);
+    });
+
+    it('cannot alter another family’s association', () => {
+      expect(
+        ability.can(Action.Delete, { __type: 'TrainerPlayerAssociation', ownerUserId: 'parent-2' }),
+      ).toBe(false);
+    });
+
+    it('cannot mint ShareLinks, manage coaches or create users', () => {
+      expect(ability.can(Action.Manage, 'ShareLink')).toBe(false);
+      expect(ability.can(Action.Manage, 'CoachProfile')).toBe(false);
       expect(ability.can(Action.Create, 'User')).toBe(false);
+      expect(ability.can(Action.Manage, 'all')).toBe(false);
+    });
+  });
+
+  describe('org scoping depends on a real trainerOrgId', () => {
+    it('grants a Trainer nothing across orgs when their org is unresolved', () => {
+      // trainerOrgId used to be hardcoded null everywhere, so this was the
+      // ability every Trainer actually got.
+      const ability = factory.createForPrincipal(
+        principalFor({ role: Role.Trainer, trainerOrgId: null, scope: 'trainer' }),
+      );
+
+      expect(ability.can(Action.Read, { __type: 'User', trainerOrgId: 'org-1' })).toBe(false);
+      expect(ability.can(Action.Manage, { __type: 'ShareLink', trainerOrgId: 'org-1' })).toBe(
+        false,
+      );
     });
   });
 });

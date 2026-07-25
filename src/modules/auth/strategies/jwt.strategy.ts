@@ -26,14 +26,15 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    * change cannot keep asserting the stale value.
    */
   async validate(payload: AccessClaims): Promise<Principal> {
-    const { session, user }: ValidatedSession = await this.sessionValidator.validate(payload);
+    const { session, user, trainerOrgId }: ValidatedSession =
+      await this.sessionValidator.validate(payload);
 
     const principal: Principal = {
       userId: user.id,
       role: user.role,
       sessionId: session.id,
       activeTrainerProfileId: session.activeTrainerProfileId,
-      trainerOrgId: payload.tenant.trainerOrgId,
+      trainerOrgId,
       tokenVersion: user.tokenVersion,
       scope: scopeForRole(user.role),
       impersonating: session.impersonatedBy !== null,
