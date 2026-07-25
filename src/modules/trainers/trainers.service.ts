@@ -1,4 +1,4 @@
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
@@ -19,6 +19,8 @@ export interface CreateTrainerProfileInput {
 
 @Injectable()
 export class TrainersService {
+  private readonly logger = new Logger(TrainersService.name);
+
   constructor(
     @InjectRepository(TrainerProfile)
     private readonly trainersRepository: Repository<TrainerProfile>,
@@ -106,14 +108,56 @@ export class TrainersService {
       label: 'Logo',
     });
 
-    const { url } = await this.storage.upload({
+    const previousPublicId = profile.logoPublicId;
+    const stored = await this.storage.upload({
       buffer,
       fileName: input.fileName,
       mimeType: input.mimeType,
       folder: 'logos',
     });
-    profile.logoUrl = url;
-    return this.trainersRepository.save(profile);
+    profile.logoUrl = stored.url;
+    profile.logoPublicId = stored.publicId;
+    const saved = await this.trainersRepository.save(profile);
+
+    // After the row points at the new asset, never before: deleting first
+    // would leave the profile referencing nothing if the upload then failed.
+    if (previousPublicId !== null && previousPublicId !== stored.publicId) {
+      await this.discardAsset(previousPublicId);
+    }
+    return saved;
+  }
+
+  /** Remove the logo and the stored asset behind it (US-01.14). */
+  async removeLogo(userId: string): Promise<TrainerProfile> {
+    const profile = await this.requireOwnProfile(userId);
+    if (profile.logoUrl === null && profile.logoPublicId === null) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'There is no logo to remove.',
+      });
+    }
+
+    const previousPublicId = profile.logoPublicId;
+    profile.logoUrl = null;
+    profile.logoPublicId = null;
+    const saved = await this.trainersRepository.save(profile);
+    if (previousPublicId !== null) {
+      await this.discardAsset(previousPublicId);
+    }
+    return saved;
+  }
+
+  /** Best-effort: the row is already consistent, so an outage costs an orphan. */
+  private async discardAsset(publicId: string): Promise<void> {
+    try {
+      await this.storage.delete(publicId);
+    } catch (error) {
+      this.logger.warn(
+        `Orphaned stored asset ${publicId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private async requireOwnProfile(userId: string): Promise<TrainerProfile> {

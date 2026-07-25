@@ -63,6 +63,37 @@ export class CoachView {
   @ApiProperty({ nullable: true }) endedAt!: Date | null;
 }
 
+/**
+ * What a coach may change about themselves (spec section 6: "may edit their
+ * own profile and availability"). Deliberately does not include the trainer
+ * they work for or their status — employment is the trainer's to set.
+ */
+export class UpdateCoachProfileDto {
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  bio?: string;
+
+  @ApiPropertyOptional({ maxLength: 1000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  credentials?: string;
+
+  @ApiPropertyOptional({ maxLength: 1000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  certifications?: string;
+
+  @ApiPropertyOptional({ description: 'Show this profile on the trainer’s public page' })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  publicVisible?: boolean;
+}
+
 export class ListCoachesQueryDto {
   @ApiPropertyOptional({
     description: 'Include coaches whose engagement has ended (default false)',

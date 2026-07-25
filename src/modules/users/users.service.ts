@@ -136,8 +136,16 @@ export class UsersService {
     return (await this.findById(id)) as User;
   }
 
-  async setPhotoUrl(id: string, photoUrl: string): Promise<User> {
-    await this.usersRepository.update({ id }, { photoUrl });
+  /**
+   * Store the delivery URL together with the provider's handle for it. The URL
+   * is what gets served; the public id is the only thing that can delete the
+   * asset later, so writing one without the other orphans every replacement.
+   */
+  async setPhoto(id: string, photo: { url: string; publicId: string } | null): Promise<User> {
+    await this.usersRepository.update(
+      { id },
+      { photoUrl: photo?.url ?? null, photoPublicId: photo?.publicId ?? null },
+    );
     return (await this.findById(id)) as User;
   }
 

@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 
@@ -42,6 +52,13 @@ export class ProfileController {
   @ApiOkResponse({ type: MyProfileView })
   async uploadPhoto(@Body() dto: UploadPhotoDto, @Req() req: Request): Promise<MyProfileView> {
     return this.profile.uploadPhoto(req.user as Principal, dto);
+  }
+
+  @Delete('me/photo')
+  @HttpCode(200)
+  @ApiOkResponse({ type: MyProfileView })
+  async removePhoto(@Req() req: Request): Promise<MyProfileView> {
+    return this.profile.removePhoto(req.user as Principal);
   }
 
   @Patch('me/trainer')

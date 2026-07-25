@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
@@ -33,6 +33,7 @@ const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
  */
 export const AUDIT_PROFILE_UPDATED = 'profile.updated';
 export const AUDIT_PROFILE_PHOTO_UPDATED = 'profile.photo-updated';
+export const AUDIT_PROFILE_PHOTO_REMOVED = 'profile.photo-removed';
 export const AUDIT_TRAINER_PROFILE_UPDATED = 'profile.trainer-updated';
 export const AUDIT_PLAYER_PROFILE_UPDATED = 'profile.player-updated';
 
@@ -45,6 +46,8 @@ function changedFields(dto: object): string[] {
 
 @Injectable()
 export class ProfileService {
+  private readonly logger = new Logger(ProfileService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly trainersService: TrainersService,
@@ -87,18 +90,47 @@ export class ProfileService {
       label: 'Profile photo',
     });
 
-    const { url } = await this.storage.upload({
+    const previous = await this.requireUser(userId);
+    const stored = await this.storage.upload({
       buffer,
       fileName: dto.fileName,
       mimeType: dto.mimeType,
       folder: 'avatars',
     });
-    const user = await this.usersService.setPhotoUrl(userId, url);
+    const user = await this.usersService.setPhoto(userId, stored);
+
+    // Only after the row points at the new asset: deleting first would leave a
+    // profile referencing nothing if the upload then failed.
+    if (previous.photoPublicId !== null && previous.photoPublicId !== stored.publicId) {
+      await this.discardAsset(previous.photoPublicId);
+    }
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_UPDATED,
       actor,
       targetUserId: userId,
       metadata: { fileName: dto.fileName },
+    });
+    return this.buildView(user);
+  }
+
+  /** Remove the photo and the stored asset behind it. */
+  async removePhoto(actor: Principal): Promise<MyProfileView> {
+    const existing = await this.requireUser(actor.userId);
+    if (existing.photoUrl === null && existing.photoPublicId === null) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'There is no profile photo to remove.',
+      });
+    }
+
+    const user = await this.usersService.setPhoto(actor.userId, null);
+    if (existing.photoPublicId !== null) {
+      await this.discardAsset(existing.photoPublicId);
+    }
+    await this.audit.record({
+      action: AUDIT_PROFILE_PHOTO_REMOVED,
+      actor,
+      targetUserId: actor.userId,
     });
     return this.buildView(user);
   }
@@ -155,6 +187,25 @@ export class ProfileService {
       metadata: { fields: changedFields(dto) },
     });
     return this.getMe(userId);
+  }
+
+  /**
+   * Cleanup is best-effort by construction. The row is already consistent by
+   * the time this runs, so a storage outage should cost an orphaned file, not
+   * the user's request. Kept here rather than relying on the storage
+   * implementation to swallow its own errors — that is a property of one
+   * implementation, not of the contract.
+   */
+  private async discardAsset(publicId: string): Promise<void> {
+    try {
+      await this.storage.delete(publicId);
+    } catch (error) {
+      this.logger.warn(
+        `Orphaned stored asset ${publicId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private async buildView(user: User): Promise<MyProfileView> {
