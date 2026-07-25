@@ -60,6 +60,7 @@ function buildMockMailer(): jest.Mocked<Mailer> {
     sendTrainerInvite: jest.fn(),
     sendJoinConfirmation: jest.fn(),
     sendCoachInvite: jest.fn(),
+    sendChildJoinRequest: jest.fn(),
     sendCoachAvailabilityOverride: jest.fn(),
   } as unknown as jest.Mocked<Mailer>;
 }

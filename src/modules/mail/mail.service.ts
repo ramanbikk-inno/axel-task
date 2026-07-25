@@ -50,6 +50,23 @@ export class MailService {
     await this.mailer.sendCoachInvite({ to, trainerName, acceptUrl, message });
   }
 
+  /**
+   * US-01.06: "[Child Name] wants to join [Trainer Name]'s program", carrying
+   * the ShareLink so the parent can finish the registration themselves.
+   */
+  async sendChildJoinRequestEmail(
+    to: string,
+    input: { childName: string; trainerName: string; code: string },
+  ): Promise<void> {
+    const joinUrl = `${this.appUrl}/join/${input.code}`;
+    await this.mailer.sendChildJoinRequest({
+      to,
+      childName: input.childName,
+      trainerName: input.trainerName,
+      joinUrl,
+    });
+  }
+
   /** Q-01.06: the coach is told when a trainer schedules over their My Times. */
   async sendCoachAvailabilityOverrideEmail(
     to: string,

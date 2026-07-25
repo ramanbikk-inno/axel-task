@@ -31,15 +31,22 @@ function rows(
     user?: Partial<User>;
     trainerOrgId?: string | null;
     coachProfileId?: string | null;
+    isChild?: boolean;
+    childPlayerProfileId?: string | null;
+    parentUserId?: string | null;
   } = {},
 ): ValidatedSession {
   return {
     trainerOrgId: over.trainerOrgId ?? null,
     coachProfileId: over.coachProfileId ?? null,
+    isChild: over.isChild ?? false,
+    childPlayerProfileId: over.childPlayerProfileId ?? null,
+    parentUserId: over.parentUserId ?? null,
     session: {
       id: 'session-1',
       userId: 'u-1',
       activeTrainerProfileId: null,
+      activePlayerProfileId: null,
       impersonatedBy: null,
       expiresAt: null,
       revokedAt: null,
@@ -96,12 +103,40 @@ describe('JwtStrategy', () => {
       role: Role.PlayerParent,
       sessionId: 'session-1',
       activeTrainerProfileId: null,
+      activePlayerProfileId: null,
       trainerOrgId: null,
       coachProfileId: null,
+      isChild: false,
+      childPlayerProfileId: null,
+      parentUserId: null,
       tokenVersion: 0,
       scope: 'trainer',
       impersonating: false,
     });
+  });
+
+  it('carries the child identity the validator resolved', async () => {
+    const strategy = new JwtStrategy(
+      config,
+      validatorReturning(
+        rows({ isChild: true, childPlayerProfileId: 'pp-9', parentUserId: 'parent-1' }),
+      ),
+    );
+
+    const principal: Principal = await strategy.validate(
+      claimsFor({
+        userId: 'u-1',
+        role: Role.PlayerParent,
+        sessionId: 'session-1',
+        tokenVersion: 0,
+      }),
+    );
+
+    // Read from player_profiles.child_user_id on every request, never from a
+    // claim, so unlinking a child login takes effect immediately.
+    expect(principal.isChild).toBe(true);
+    expect(principal.childPlayerProfileId).toBe('pp-9');
+    expect(principal.parentUserId).toBe('parent-1');
   });
 
   it('carries the tenancy the validator resolved, not what the token claimed', async () => {

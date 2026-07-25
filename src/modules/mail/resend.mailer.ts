@@ -87,6 +87,21 @@ export class ResendMailer implements Mailer {
     );
   }
 
+  async sendChildJoinRequest(input: {
+    to: string;
+    childName: string;
+    trainerName: string;
+    joinUrl: string;
+  }): Promise<void> {
+    await this.send(
+      input.to,
+      `${input.childName} wants to join ${input.trainerName}'s program`,
+      `<p>${input.childName} opened a registration link for ${input.trainerName}. ` +
+        `Children cannot add trainers themselves, so nothing has changed yet.</p>` +
+        `<p><a href="${input.joinUrl}">Review registration</a></p>`,
+    );
+  }
+
   async sendCoachAvailabilityOverride(input: {
     to: string;
     trainerName: string;
