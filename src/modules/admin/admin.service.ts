@@ -2,11 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
+import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
 import { Principal } from '../auth/principal';
@@ -16,10 +19,12 @@ import { Role, UserStatus } from '../users/entities/user.enums';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { PlayersService } from '../players/players.service';
+import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
+import { UserDeletionLog } from './entities/user-deletion-log.entity';
 
 export const AUDIT_TRAINER_CREATED = 'trainer.created';
 export const AUDIT_USER_DEACTIVATED = 'user.deactivated';
@@ -29,6 +34,8 @@ export const AUDIT_USER_DELETED = 'user.deleted';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly usersService: UsersService,
@@ -37,6 +44,8 @@ export class AdminService {
     private readonly mail: MailService,
     private readonly audit: AuditService,
     private readonly playersService: PlayersService,
+    @Inject(STORAGE) private readonly storage: StorageService,
+    private readonly clock: ClockService,
   ) {}
 
   async createTrainer(
@@ -222,7 +231,7 @@ export class AdminService {
   async deleteUser(
     targetUserId: string,
     actor: Principal,
-    reason?: string,
+    reason: string,
   ): Promise<UserSummaryDto> {
     const target = await this.requireUser(targetUserId);
 
@@ -239,30 +248,74 @@ export class AdminService {
       });
     }
 
-    const originalEmail = target.email;
-    const originalName = [target.firstName, target.lastName]
-      .filter((v) => v !== null && v !== undefined && v.trim() !== '')
-      .join(' ');
-    const originalPhone = target.phone;
+    const now = this.clock.now();
+    const photoPublicId = target.photoPublicId;
+
+    // Cascades to the children's own logins. A parent's erasure that left
+    // their child's account signed-in-able, with the child's name and email
+    // still on it, would not be an erasure of the family's data at all.
+    const childUserIds = await this.playersService.childUserIdsByOwner(target.id);
 
     await this.dataSource.transaction(async (manager: EntityManager) => {
+      const deletionLogs = manager.getRepository(UserDeletionLog);
+      await deletionLogs.save(
+        deletionLogs.create({
+          userId: target.id,
+          originalEmail: target.email,
+          originalFirstName: target.firstName ?? null,
+          originalLastName: target.lastName ?? null,
+          originalPhone: target.phone ?? null,
+          originalRole: target.role,
+          deletedByUserId: actor.userId,
+          reason,
+          deletedAt: now,
+          originalData: { childUserIds, hadPhoto: photoPublicId !== null },
+        }),
+      );
+
       await this.usersService.anonymize(target.id, manager);
       await this.playersService.anonymizeByOwner(target.id, manager);
+      for (const childUserId of childUserIds) {
+        await this.usersService.anonymize(childUserId, manager);
+      }
+
       await this.audit.record(
         {
           action: AUDIT_USER_DELETED,
           actor,
           targetUserId: target.id,
-          metadata: { originalEmail, originalName, originalPhone, reason: reason ?? null },
+          metadata: { reason, childAccountsAnonymized: childUserIds.length },
         },
         manager,
       );
     });
 
     await this.authService.revokeAllUserSessions(target.id, 'deleted');
+    for (const childUserId of childUserIds) {
+      await this.authService.revokeAllUserSessions(childUserId, 'parent-deleted');
+    }
+
+    // Outside the transaction: the provider is not transactional, and an
+    // outage there must not roll back an erasure that is already recorded.
+    if (photoPublicId !== null) {
+      await this.discardAsset(photoPublicId);
+    }
 
     const updated = await this.requireUser(target.id);
     return UserSummaryDto.fromEntity(updated);
+  }
+
+  /** Best-effort: the erasure is already committed, so an outage costs an orphan. */
+  private async discardAsset(publicId: string): Promise<void> {
+    try {
+      await this.storage.delete(publicId);
+    } catch (error) {
+      this.logger.warn(
+        `Orphaned stored asset ${publicId} after GDPR deletion: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   private async requireUser(id: string): Promise<User> {

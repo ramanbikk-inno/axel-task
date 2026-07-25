@@ -1,14 +1,18 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { ClockModule } from '../../shared/clock/clock.module';
 import { AbilityModule } from '../ability/ability.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
 import { PlayersModule } from '../players/players.module';
+import { StorageModule } from '../storage/storage.module';
 import { TrainersModule } from '../trainers/trainers.module';
 import { UsersModule } from '../users/users.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { UserDeletionLog } from './entities/user-deletion-log.entity';
 
 @Module({
   imports: [
@@ -19,6 +23,9 @@ import { AdminService } from './admin.service';
     AbilityModule,
     AuditModule,
     PlayersModule,
+    StorageModule,
+    ClockModule,
+    TypeOrmModule.forFeature([UserDeletionLog]),
   ],
   controllers: [AdminController],
   providers: [AdminService],

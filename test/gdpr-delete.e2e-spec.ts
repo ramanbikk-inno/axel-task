@@ -3,6 +3,7 @@ import request from 'supertest';
 
 import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
+import { UserDeletionLog } from '../src/modules/admin/entities/user-deletion-log.entity';
 import { AuditLog } from '../src/modules/audit/entities/audit-log.entity';
 import { PlayerProfile } from '../src/modules/players/entities/player-profile.entity';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
@@ -81,12 +82,19 @@ describe('Super Admin GDPR delete (e2e, US-01.13)', () => {
       .send({ email: 'gone@example.com', password: player.password })
       .expect(401);
 
-    // Compliance record retains the original email/name.
+    // The audit log still records that it happened...
     const logs = await ctx.dataSource
       .getRepository(AuditLog)
       .find({ where: { action: 'user.deleted' } });
     expect(logs).toHaveLength(1);
-    expect(logs[0].metadata).toMatchObject({
+    expect(logs[0].metadata).toMatchObject({ reason: 'gdpr request #7' });
+
+    // ...but the PII it preserves now lives in its own table, which has a
+    // different retention decision attached to it than the activity feed.
+    const deletions = await ctx.dataSource.getRepository(UserDeletionLog).find();
+    expect(deletions).toHaveLength(1);
+    expect(deletions[0]).toMatchObject({
+      userId: player.userId,
       originalEmail: 'gone@example.com',
       reason: 'gdpr request #7',
     });
