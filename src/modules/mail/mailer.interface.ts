@@ -13,4 +13,12 @@ export interface Mailer {
     acceptUrl: string;
     message?: string;
   }): Promise<void>;
+  sendCoachAvailabilityOverride(input: {
+    to: string;
+    trainerName: string;
+    dayName: string;
+    startTime: string;
+    endTime: string;
+    reason: string;
+  }): Promise<void>;
 }

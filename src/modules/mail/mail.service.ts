@@ -49,4 +49,18 @@ export class MailService {
     const acceptUrl = `${this.appUrl}/coach-invite?token=${acceptToken}`;
     await this.mailer.sendCoachInvite({ to, trainerName, acceptUrl, message });
   }
+
+  /** Q-01.06: the coach is told when a trainer schedules over their My Times. */
+  async sendCoachAvailabilityOverrideEmail(
+    to: string,
+    input: {
+      trainerName: string;
+      dayName: string;
+      startTime: string;
+      endTime: string;
+      reason: string;
+    },
+  ): Promise<void> {
+    await this.mailer.sendCoachAvailabilityOverride({ to, ...input });
+  }
 }

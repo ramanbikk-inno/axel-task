@@ -17,6 +17,8 @@ export interface Principal {
   sessionId: string;
   activeTrainerProfileId: string | null;
   trainerOrgId: string | null;
+  /** Set only for Coach accounts; the row availability and profile rules key on. */
+  coachProfileId: string | null;
   tokenVersion: number;
   scope: TenantScope;
   impersonating: boolean;

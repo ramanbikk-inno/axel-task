@@ -30,10 +30,12 @@ function rows(
     session?: Partial<AuthSession>;
     user?: Partial<User>;
     trainerOrgId?: string | null;
+    coachProfileId?: string | null;
   } = {},
 ): ValidatedSession {
   return {
     trainerOrgId: over.trainerOrgId ?? null,
+    coachProfileId: over.coachProfileId ?? null,
     session: {
       id: 'session-1',
       userId: 'u-1',
@@ -95,10 +97,35 @@ describe('JwtStrategy', () => {
       sessionId: 'session-1',
       activeTrainerProfileId: null,
       trainerOrgId: null,
+      coachProfileId: null,
       tokenVersion: 0,
       scope: 'trainer',
       impersonating: false,
     });
+  });
+
+  it('carries the tenancy the validator resolved, not what the token claimed', async () => {
+    const strategy = new JwtStrategy(
+      config,
+      validatorReturning(
+        rows({
+          user: { role: Role.Coach },
+          trainerOrgId: 'org-1',
+          coachProfileId: 'coach-profile-1',
+        }),
+      ),
+    );
+    const claims = claimsFor({
+      userId: 'u-1',
+      role: Role.Coach,
+      sessionId: 'session-1',
+      tokenVersion: 0,
+    });
+
+    const principal: Principal = await strategy.validate(claims);
+
+    expect(principal.trainerOrgId).toBe('org-1');
+    expect(principal.coachProfileId).toBe('coach-profile-1');
   });
 
   it('maps a SuperAdmin to scope=platform', async () => {

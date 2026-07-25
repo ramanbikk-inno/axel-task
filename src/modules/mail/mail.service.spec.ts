@@ -18,6 +18,7 @@ describe('MailService (unit)', () => {
       sendTrainerInvite: jest.fn().mockResolvedValue(undefined),
       sendJoinConfirmation: jest.fn().mockResolvedValue(undefined),
       sendCoachInvite: jest.fn().mockResolvedValue(undefined),
+      sendCoachAvailabilityOverride: jest.fn().mockResolvedValue(undefined),
     };
 
     const moduleRef: TestingModule = await Test.createTestingModule({

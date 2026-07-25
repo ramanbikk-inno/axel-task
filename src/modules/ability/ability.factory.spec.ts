@@ -11,6 +11,7 @@ describe('AbilityFactory', () => {
     sessionId: 's1',
     activeTrainerProfileId: null,
     trainerOrgId: null,
+    coachProfileId: null,
     tokenVersion: 0,
     scope: 'platform',
     impersonating: false,
@@ -82,6 +83,7 @@ describe('AbilityFactory', () => {
           userId: 'coach-user-1',
           role: Role.Coach,
           trainerOrgId: 'org-1',
+          coachProfileId: 'coach-profile-1',
           scope: 'trainer',
         }),
       );
@@ -100,12 +102,39 @@ describe('AbilityFactory', () => {
     });
 
     it('can manage its own availability only', () => {
+      // Keyed on availability_slots.coach_profile_id, the column the row
+      // actually carries — a condition on a userId the table does not store
+      // would read like a scope but match nothing.
       expect(
-        ability.can(Action.Manage, { __type: 'Availability', coachUserId: 'coach-user-1' }),
+        ability.can(Action.Manage, { __type: 'Availability', coachProfileId: 'coach-profile-1' }),
       ).toBe(true);
       expect(
-        ability.can(Action.Manage, { __type: 'Availability', coachUserId: 'coach-user-2' }),
+        ability.can(Action.Manage, { __type: 'Availability', coachProfileId: 'coach-profile-2' }),
       ).toBe(false);
+    });
+
+    it('is granted nothing over availability when its profile is unresolved', () => {
+      const unresolved = factory.createForPrincipal(
+        principalFor({ userId: 'coach-user-1', role: Role.Coach, scope: 'trainer' }),
+      );
+
+      expect(
+        unresolved.can(Action.Manage, {
+          __type: 'Availability',
+          coachProfileId: 'coach-profile-1',
+        }),
+      ).toBe(false);
+    });
+
+    it('scopes org reads to the employer resolved from coach_profiles', () => {
+      // A Coach's trainerOrgId comes from their employer's row; when the
+      // session validator left it null every rule below silently matched
+      // nothing.
+      expect(ability.can(Action.Read, { __type: 'PlayerProfile', trainerOrgId: 'org-1' })).toBe(
+        true,
+      );
+      expect(ability.can(Action.Read, { __type: 'Branding', trainerOrgId: 'org-1' })).toBe(true);
+      expect(ability.can(Action.Read, { __type: 'TrainerOrg', id: 'org-1' })).toBe(true);
     });
 
     it('is view-only over the roster of the trainer it works for', () => {
@@ -148,12 +177,14 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.Update, other)).toBe(false);
     });
 
-    it('can manage availability for its own profiles only', () => {
-      expect(ability.can(Action.Manage, { __type: 'Availability', ownerUserId: 'parent-1' })).toBe(
+    it('can manage availability at type level, with row ownership left to the service', () => {
+      // availability_slots stores playerProfileId, not ownerUserId, so CASL
+      // cannot express the join to player_profiles. The previous condition on
+      // ownerUserId matched no real row. AvailabilityService.requireOwnedProfile
+      // is what actually enforces ownership.
+      expect(ability.can(Action.Manage, 'Availability')).toBe(true);
+      expect(ability.can(Action.Manage, { __type: 'Availability', playerProfileId: 'p1' })).toBe(
         true,
-      );
-      expect(ability.can(Action.Manage, { __type: 'Availability', ownerUserId: 'parent-2' })).toBe(
-        false,
       );
     });
 

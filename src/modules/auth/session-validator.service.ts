@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -14,11 +15,13 @@ export interface ValidatedSession {
   session: AuthSession;
   user: User;
   /**
-   * The trainer organisation this principal belongs to, or null for everyone
-   * who is not a Trainer. This is the key every org-scoped authorization rule
-   * compares against.
+   * The trainer organisation this principal belongs to: their own org for a
+   * Trainer, their employer's for a Coach, null for everyone else. This is the
+   * key every org-scoped authorization rule compares against.
    */
   trainerOrgId: string | null;
+  /** The Coach's own profile row id, or null for every other role. */
+  coachProfileId: string | null;
 }
 
 function reject(errorCode: ErrorCode, message: string): UnauthorizedException {
@@ -45,23 +48,41 @@ export class SessionValidatorService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(TrainerProfile)
     private readonly trainerProfiles: Repository<TrainerProfile>,
+    @InjectRepository(CoachProfile)
+    private readonly coachProfiles: Repository<CoachProfile>,
     private readonly clock: ClockService,
   ) {}
 
   /**
    * Resolved per request rather than baked into the token: it is the tenancy
    * key, so it must reflect the database now, not whenever the token happened
-   * to be minted. Only Trainers pay for the extra indexed lookup.
+   * to be minted. Only Trainers and Coaches pay for the extra indexed lookup.
+   *
+   * A Coach's tenancy comes from their employer, so their org-scoped rules key
+   * on `coach_profiles.trainer_profile_id`; leaving it null would silently
+   * scope every Coach rule to nothing.
    */
-  private async resolveTrainerOrgId(user: User): Promise<string | null> {
-    if (user.role !== Role.Trainer) {
-      return null;
+  private async resolveTenancy(
+    user: User,
+  ): Promise<{ trainerOrgId: string | null; coachProfileId: string | null }> {
+    if (user.role === Role.Trainer) {
+      const profile = await this.trainerProfiles.findOne({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+      return { trainerOrgId: profile?.id ?? null, coachProfileId: null };
     }
-    const profile = await this.trainerProfiles.findOne({
-      where: { userId: user.id },
-      select: { id: true },
-    });
-    return profile?.id ?? null;
+    if (user.role === Role.Coach) {
+      const profile = await this.coachProfiles.findOne({
+        where: { userId: user.id },
+        select: { id: true, trainerProfileId: true },
+      });
+      return {
+        trainerOrgId: profile?.trainerProfileId ?? null,
+        coachProfileId: profile?.id ?? null,
+      };
+    }
+    return { trainerOrgId: null, coachProfileId: null };
   }
 
   async validate(claims: AccessClaims): Promise<ValidatedSession> {
@@ -109,6 +130,6 @@ export class SessionValidatorService {
       throw reject(ErrorCode.CREDENTIALS_CHANGED, 'Credentials changed. Sign in again.');
     }
 
-    return { session, user, trainerOrgId: await this.resolveTrainerOrgId(user) };
+    return { session, user, ...(await this.resolveTenancy(user)) };
   }
 }

@@ -6,6 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { ClockModule } from '../../shared/clock/clock.module';
 import { CryptoModule } from '../../shared/crypto/crypto.module';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { MailModule } from '../mail/mail.module';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
@@ -38,6 +39,7 @@ import { TokenService } from './token.service';
       AccountSetupToken,
       User,
       TrainerProfile,
+      CoachProfile,
     ]),
   ],
   controllers: [AuthController],
