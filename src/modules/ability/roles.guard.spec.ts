@@ -25,6 +25,7 @@ describe('RolesGuard', () => {
     sessionId: 's1',
     activeTrainerProfileId: null,
     trainerOrgId: null,
+    coachProfileId: null,
     tokenVersion: 0,
     scope: role === Role.SuperAdmin ? 'platform' : 'trainer',
     impersonating: false,

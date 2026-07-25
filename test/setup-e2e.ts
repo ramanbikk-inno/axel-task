@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { json } from 'express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
@@ -57,6 +58,7 @@ function buildMockMailer(): jest.Mocked<Mailer> {
     sendTrainerInvite: jest.fn(),
     sendJoinConfirmation: jest.fn(),
     sendCoachInvite: jest.fn(),
+    sendCoachAvailabilityOverride: jest.fn(),
   } as unknown as jest.Mocked<Mailer>;
 }
 
@@ -118,6 +120,10 @@ export async function bootstrapE2E(): Promise<E2EContext> {
   const dataSource: DataSource = app.get(DataSource);
   const config: ConfigService = app.get(ConfigService);
   const passwords: PasswordService = app.get(PasswordService);
+  // The throttler counts hits in memory, so without clearing it every suite
+  // shares one per-IP budget: a test that logs in a few times poisons the ones
+  // that follow with 429s that have nothing to do with what they assert.
+  const throttlerStorage = app.get<ThrottlerStorageService>(ThrottlerStorage);
 
   const superAdminEmail: string = config.get<string>('SUPER_ADMIN_EMAIL') ?? 'admin@example.com';
   const superAdminPassword: string =
@@ -128,10 +134,12 @@ export async function bootstrapE2E(): Promise<E2EContext> {
       `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'migrations'`,
     );
     if (tableNames.length === 0) {
+      throttlerStorage.storage.clear();
       return;
     }
     const quoted: string = tableNames.map((t) => `"${t.tablename}"`).join(', ');
     await dataSource.query(`TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE`);
+    throttlerStorage.storage.clear();
     jest.clearAllMocks();
   }
 

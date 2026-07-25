@@ -3,6 +3,7 @@ import { Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -63,6 +64,7 @@ function build(
   sessionRow: AuthSession | null,
   userRow: User | null,
   trainerProfileRow: { id: string } | null = null,
+  coachProfileRow: { id: string; trainerProfileId: string } | null = null,
 ): SessionValidatorService {
   const sessions = {
     findOne: jest.fn().mockResolvedValue(sessionRow),
@@ -71,7 +73,16 @@ function build(
   const trainerProfiles = {
     findOne: jest.fn().mockResolvedValue(trainerProfileRow),
   } as unknown as Repository<TrainerProfile>;
-  return new SessionValidatorService(sessions, users, trainerProfiles, new FixedClock());
+  const coachProfiles = {
+    findOne: jest.fn().mockResolvedValue(coachProfileRow),
+  } as unknown as Repository<CoachProfile>;
+  return new SessionValidatorService(
+    sessions,
+    users,
+    trainerProfiles,
+    coachProfiles,
+    new FixedClock(),
+  );
 }
 
 async function expectRejection(
@@ -161,14 +172,40 @@ describe('SessionValidatorService', () => {
     expect((await service.validate(claims())).trainerOrgId).toBeNull();
   });
 
-  it.each([Role.PlayerParent, Role.Coach, Role.SuperAdmin])(
+  it.each([Role.PlayerParent, Role.SuperAdmin])(
     'leaves trainerOrgId null for %s',
     async (role: Role) => {
       const service = build(session(), user({ role }), { id: 'should-not-be-used' });
 
-      expect((await service.validate(claims())).trainerOrgId).toBeNull();
+      const result = await service.validate(claims());
+
+      expect(result.trainerOrgId).toBeNull();
+      expect(result.coachProfileId).toBeNull();
     },
   );
+
+  it("resolves a Coach's tenancy from their employer's coach_profiles row", async () => {
+    const service = build(session(), user({ role: Role.Coach }), null, {
+      id: 'coach-profile-3',
+      trainerProfileId: 'trainer-profile-7',
+    });
+
+    const result = await service.validate(claims());
+
+    // A Coach belongs to the org that employs them; without this their
+    // org-scoped ability rules would all compare against null.
+    expect(result.trainerOrgId).toBe('trainer-profile-7');
+    expect(result.coachProfileId).toBe('coach-profile-3');
+  });
+
+  it('leaves a Coach with no profile row unscoped rather than guessing', async () => {
+    const service = build(session(), user({ role: Role.Coach }), { id: 'should-not-be-used' });
+
+    const result = await service.validate(claims());
+
+    expect(result.trainerOrgId).toBeNull();
+    expect(result.coachProfileId).toBeNull();
+  });
 
   it('rejects a token minted before a credential change', async () => {
     const service = build(session(), user({ tokenVersion: 3 }));

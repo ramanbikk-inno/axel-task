@@ -87,6 +87,23 @@ export class ResendMailer implements Mailer {
     );
   }
 
+  async sendCoachAvailabilityOverride(input: {
+    to: string;
+    trainerName: string;
+    dayName: string;
+    startTime: string;
+    endTime: string;
+    reason: string;
+  }): Promise<void> {
+    await this.send(
+      input.to,
+      'You were scheduled outside your availability',
+      `<p>${input.trainerName} scheduled you on ${input.dayName} from ${input.startTime} to ${input.endTime}, which falls outside the availability you set.</p>` +
+        `<p>Reason given: ${input.reason}</p>` +
+        `<p>You are not blocked from this session — contact your trainer if you need the assignment changed.</p>`,
+    );
+  }
+
   private async send(to: string, subject: string, html: string): Promise<void> {
     const { error } = await this.getClient().emails.send({
       from: this.from,

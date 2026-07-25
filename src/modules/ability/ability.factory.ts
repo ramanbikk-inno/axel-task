@@ -67,12 +67,18 @@ export class AbilityFactory {
       case Role.Coach: {
         // Spec section 6: a Coach works for exactly one trainer, is view-only on
         // most features, and may edit their own profile and availability.
+        // A Coach's org is their employer's, resolved per request from
+        // coach_profiles.trainer_profile_id.
         const ownProfile: MongoQuery = { userId: principal.userId } as MongoQuery;
         const orgScope: MongoQuery = { trainerOrgId: principal.trainerOrgId } as MongoQuery;
 
         can(Action.Read, 'CoachProfile', ownProfile);
         can(Action.Update, 'CoachProfile', ownProfile);
-        can(Action.Manage, 'Availability', { coachUserId: principal.userId } as MongoQuery);
+        // Keyed on the real column (availability_slots.coach_profile_id), per
+        // design 15.3: conditions must match what the row actually stores.
+        can(Action.Manage, 'Availability', {
+          coachProfileId: principal.coachProfileId,
+        } as MongoQuery);
 
         // View-only over the trainer's roster they deliver sessions for.
         can(Action.Read, 'PlayerProfile', orgScope);
@@ -94,7 +100,11 @@ export class AbilityFactory {
         can(Action.Read, 'PlayerProfile', owned);
         can(Action.Update, 'PlayerProfile', owned);
         can(Action.Create, 'PlayerProfile');
-        can(Action.Manage, 'Availability', owned);
+        // Unconditioned on purpose: availability_slots stores playerProfileId,
+        // not ownerUserId, and CASL cannot express the join to player_profiles.
+        // A condition on ownerUserId would read as a scope but match no row.
+        // The owner check runs in AvailabilityService.requireOwnedProfile.
+        can(Action.Manage, 'Availability');
 
         // Joining a trainer is allowed; nothing here lets them read or alter
         // another family's association.

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 
 import { AvailabilityService } from './availability.service';
 import { AvailabilitySlot } from './entities/availability-slot.entity';
@@ -10,7 +10,8 @@ import {
 } from '../enrollment/entities/trainer-player-association.entity';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
-import { TrainersService } from '../trainers/trainers.service';
+import { CoachLookupService } from './coach-lookup.service';
+import { UsersService } from '../users/users.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AvailabilitySlotInput } from './dto/availability.dto';
 
@@ -19,7 +20,32 @@ const slotRow = (
   dayOfWeek: number,
   startMinute: number,
   endMinute: number,
-): AvailabilitySlot => ({ playerProfileId, dayOfWeek, startMinute, endMinute }) as AvailabilitySlot;
+  isAvailable = true,
+): AvailabilitySlot =>
+  ({
+    playerProfileId,
+    coachProfileId: null,
+    dayOfWeek,
+    startMinute,
+    endMinute,
+    isAvailable,
+  }) as AvailabilitySlot;
+
+const coachSlotRow = (
+  coachProfileId: string,
+  dayOfWeek: number,
+  startMinute: number,
+  endMinute: number,
+  isAvailable = true,
+): AvailabilitySlot =>
+  ({
+    playerProfileId: null,
+    coachProfileId,
+    dayOfWeek,
+    startMinute,
+    endMinute,
+    isAvailable,
+  }) as AvailabilitySlot;
 
 const profile = (id: string, displayName: string, ownerUserId = 'owner'): PlayerProfile =>
   ({ id, displayName, ownerUserId }) as PlayerProfile;
@@ -45,6 +71,9 @@ const makeService = (): {
   findByIds: jest.Mock;
   findByUserId: jest.Mock;
   findByTrainer: jest.Mock;
+  coachFindOne: jest.Mock;
+  userFindById: jest.Mock;
+  lockFindOne: jest.Mock;
 } => {
   const slotsFind = jest.fn().mockResolvedValue([]);
   const txDelete = jest.fn().mockResolvedValue(undefined);
@@ -54,22 +83,55 @@ const makeService = (): {
   const findByIds = jest.fn().mockResolvedValue([]);
   const findByUserId = jest.fn();
   const findByTrainer = jest.fn().mockResolvedValue([]);
+  const coachFindOne = jest.fn().mockResolvedValue(null);
+  const userFindById = jest.fn().mockResolvedValue(null);
 
   const slots = { find: slotsFind } as unknown as Repository<AvailabilitySlot>;
-  const txRepo = { delete: txDelete, save: txSave, create: txCreate };
+  const coachLookup = {
+    requireOwnProfile: jest.fn(async (userId: string) => {
+      const row = await coachFindOne({ where: { userId } });
+      if (!row) {
+        throw new ForbiddenException({ errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND });
+      }
+      return row;
+    }),
+    requireInOwnOrg: jest.fn(async (_trainerUserId: string, coachProfileId: string) => {
+      await findByUserId();
+      const row = await coachFindOne({ where: { id: coachProfileId } });
+      if (!row) {
+        throw new NotFoundException({ errorCode: ErrorCode.NOT_FOUND });
+      }
+      return row;
+    }),
+    requireTrainer: jest.fn(async (userId: string) => {
+      const row = await findByUserId(userId);
+      if (!row) {
+        throw new ForbiddenException({ errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND });
+      }
+      return row;
+    }),
+  } as unknown as CoachLookupService;
+  // find() too: the replace now reads its result back inside the transaction.
+  const txRepo = { delete: txDelete, save: txSave, create: txCreate, find: slotsFind };
+  const lockFindOne = jest.fn().mockResolvedValue({ id: 'owner' });
   const dataSource = {
     transaction: async <T>(cb: (mgr: EntityManager) => Promise<T>): Promise<T> =>
-      cb({ getRepository: () => txRepo } as unknown as EntityManager),
+      cb({
+        getRepository: (target: unknown) =>
+          target === AvailabilitySlot ? txRepo : { findOne: lockFindOne },
+      } as unknown as EntityManager),
   } as unknown as DataSource;
   const playersService = { findById, findByIds } as unknown as PlayersService;
-  const trainersService = { findByUserId } as unknown as TrainersService;
   const associations = { findByTrainer } as unknown as AssociationsService;
+
+  const usersService = { findById: userFindById } as unknown as UsersService;
 
   const service = new AvailabilityService(
     slots,
     dataSource,
     playersService,
-    trainersService,
+    usersService,
+    coachLookup,
     associations,
   );
 
@@ -83,6 +145,9 @@ const makeService = (): {
     findByIds,
     findByUserId,
     findByTrainer,
+    coachFindOne,
+    userFindById,
+    lockFindOne,
   };
 };
 
@@ -242,13 +307,15 @@ describe('AvailabilityService', () => {
 
       await service.setForProfile('owner', 'p1', [input(1, '17:00', '20:00')]);
 
-      expect(txDelete).toHaveBeenCalledWith({ playerProfileId: 'p1' });
+      expect(txDelete).toHaveBeenCalledWith({ playerProfileId: 'p1', coachProfileId: IsNull() });
       expect(txCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           playerProfileId: 'p1',
+          coachProfileId: null,
           dayOfWeek: 1,
           startMinute: 1020,
           endMinute: 1200,
+          isAvailable: true,
         }),
       );
       expect(txSave).toHaveBeenCalledWith([
@@ -262,7 +329,7 @@ describe('AvailabilityService', () => {
 
       const result = await service.setForProfile('owner', 'p1', []);
 
-      expect(txDelete).toHaveBeenCalledWith({ playerProfileId: 'p1' });
+      expect(txDelete).toHaveBeenCalledWith({ playerProfileId: 'p1', coachProfileId: IsNull() });
       expect(txSave).not.toHaveBeenCalled();
       expect(result).toEqual([]);
     });
@@ -274,7 +341,9 @@ describe('AvailabilityService', () => {
 
       const result = await service.setForProfile('owner', 'p1', [input(1, '17:00', '20:00')]);
 
-      expect(result).toEqual([{ dayOfWeek: 1, startTime: '17:00', endTime: '20:00' }]);
+      expect(result).toEqual([
+        { dayOfWeek: 1, startTime: '17:00', endTime: '20:00', isAvailable: true },
+      ]);
     });
   });
 
@@ -293,7 +362,9 @@ describe('AvailabilityService', () => {
 
       const result = await service.getForProfile('owner', 'p1');
 
-      expect(result).toEqual([{ dayOfWeek: 3, startTime: '18:00', endTime: '21:00' }]);
+      expect(result).toEqual([
+        { dayOfWeek: 3, startTime: '18:00', endTime: '21:00', isAvailable: true },
+      ]);
     });
   });
 
@@ -442,6 +513,265 @@ describe('AvailabilityService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].slots).toHaveLength(2);
+    });
+  });
+  describe('coach My Times (US-01.10)', () => {
+    const coachRow = { id: 'c1', userId: 'coach-user', trainerProfileId: 't1' };
+
+    it('throws Forbidden (COACH_PROFILE_NOT_FOUND) when the account is not a coach', async () => {
+      const { service, coachFindOne } = makeService();
+      coachFindOne.mockResolvedValue(null);
+
+      try {
+        await service.setForCoach('coach-user', [input(1, '16:00', '20:00')]);
+        fail('expected throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ForbiddenException);
+        expect((err as ForbiddenException).getResponse()).toMatchObject({
+          errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
+        });
+      }
+    });
+
+    it('writes slots owned by the coach, never by a player', async () => {
+      const { service, coachFindOne, txDelete, txCreate } = makeService();
+      coachFindOne.mockResolvedValue(coachRow);
+
+      await service.setForCoach('coach-user', [input(1, '16:00', '20:00')]);
+
+      // Both owner columns are pinned so a coach id can never delete or read
+      // rows that happen to share the value with a player id.
+      expect(txDelete).toHaveBeenCalledWith({ playerProfileId: IsNull(), coachProfileId: 'c1' });
+      expect(txCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ coachProfileId: 'c1', playerProfileId: null }),
+      );
+    });
+
+    it('applies the same overlap validation players get', async () => {
+      const { service, coachFindOne, txSave } = makeService();
+      coachFindOne.mockResolvedValue(coachRow);
+
+      await expect(
+        service.setForCoach('coach-user', [input(1, '16:00', '20:00'), input(1, '18:00', '21:00')]),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(txSave).not.toHaveBeenCalled();
+    });
+
+    it('supports multiple windows on one day (Monday 4-6pm AND 7-9pm)', async () => {
+      const { service, coachFindOne, txSave } = makeService();
+      coachFindOne.mockResolvedValue(coachRow);
+
+      await service.setForCoach('coach-user', [
+        input(1, '16:00', '18:00'),
+        input(1, '19:00', '21:00'),
+      ]);
+
+      expect(txSave).toHaveBeenCalledWith([
+        expect.objectContaining({ startMinute: 960, endMinute: 1080 }),
+        expect.objectContaining({ startMinute: 1140, endMinute: 1260 }),
+      ]);
+    });
+
+    it('lets a blackout overlap an available window — that is what carves the hole', async () => {
+      const { service, coachFindOne, txSave } = makeService();
+      coachFindOne.mockResolvedValue(coachRow);
+
+      await service.setForCoach('coach-user', [
+        input(1, '16:00', '20:00'),
+        { ...input(1, '17:00', '18:00'), isAvailable: false },
+      ]);
+
+      expect(txSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('still rejects two blackouts that overlap each other', async () => {
+      const { service, coachFindOne } = makeService();
+      coachFindOne.mockResolvedValue(coachRow);
+
+      await expect(
+        service.setForCoach('coach-user', [
+          { ...input(1, '17:00', '19:00'), isAvailable: false },
+          { ...input(1, '18:00', '20:00'), isAvailable: false },
+        ]),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('reads back only the coach own slots', async () => {
+      const { service, coachFindOne, slotsFind } = makeService();
+      coachFindOne.mockResolvedValue(coachRow);
+      slotsFind.mockResolvedValue([coachSlotRow('c1', 1, 960, 1200)]);
+
+      await expect(service.getForCoach('coach-user')).resolves.toEqual([
+        { dayOfWeek: 1, startTime: '16:00', endTime: '20:00', isAvailable: true },
+      ]);
+    });
+  });
+
+  describe('checkCoachConflict (US-01.10 trainer assignment flow)', () => {
+    const setup = (daySlots: AvailabilitySlot[]): ReturnType<typeof makeService> => {
+      const ctx = makeService();
+      ctx.findByUserId.mockResolvedValue({ id: 't1' });
+      ctx.coachFindOne.mockResolvedValue({
+        id: 'c1',
+        userId: 'coach-user',
+        trainerProfileId: 't1',
+      });
+      ctx.userFindById.mockResolvedValue({ firstName: 'Sam', lastName: 'Coach', email: 'c@x.io' });
+      ctx.slotsFind.mockResolvedValue(daySlots);
+      return ctx;
+    };
+
+    it('reports available when the window sits inside a stated slot', async () => {
+      const { service } = setup([coachSlotRow('c1', 1, 960, 1200)]); // Mon 16:00–20:00
+
+      const result = await service.checkCoachConflict('trainer-user', 'c1', {
+        dayOfWeek: 1,
+        startTime: '17:00',
+        endTime: '18:00',
+      });
+
+      expect(result).toMatchObject({ available: true, message: null });
+    });
+
+    it('reports available for an exact-boundary match', async () => {
+      const { service } = setup([coachSlotRow('c1', 1, 960, 1200)]);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'c1', {
+          dayOfWeek: 1,
+          startTime: '16:00',
+          endTime: '20:00',
+        }),
+      ).resolves.toMatchObject({ available: true });
+    });
+
+    it('reports a conflict when the window runs past the end of the slot', async () => {
+      const { service } = setup([coachSlotRow('c1', 1, 960, 1200)]);
+
+      const result = await service.checkCoachConflict('trainer-user', 'c1', {
+        dayOfWeek: 1,
+        startTime: '19:00',
+        endTime: '21:00',
+      });
+
+      expect(result.available).toBe(false);
+      expect(result.message).toBe(
+        'Coach Sam Coach is not available at this time per their schedule. Continue anyway?',
+      );
+    });
+
+    it('reports a conflict when the coach has stated nothing for that day', async () => {
+      const { service } = setup([]);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'c1', {
+          dayOfWeek: 4,
+          startTime: '10:00',
+          endTime: '11:00',
+        }),
+      ).resolves.toMatchObject({ available: false });
+    });
+
+    it('treats touching windows as one continuous block', async () => {
+      // 16:00–18:00 + 18:00–20:00 must cover a 17:00–19:00 request.
+      const { service } = setup([
+        coachSlotRow('c1', 1, 960, 1080),
+        coachSlotRow('c1', 1, 1080, 1200),
+      ]);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'c1', {
+          dayOfWeek: 1,
+          startTime: '17:00',
+          endTime: '19:00',
+        }),
+      ).resolves.toMatchObject({ available: true });
+    });
+
+    it('does not bridge a gap between two separate windows', async () => {
+      // 16:00–17:00 and 19:00–20:00 leave 17:00–19:00 uncovered.
+      const { service } = setup([
+        coachSlotRow('c1', 1, 960, 1020),
+        coachSlotRow('c1', 1, 1140, 1200),
+      ]);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'c1', {
+          dayOfWeek: 1,
+          startTime: '16:30',
+          endTime: '19:30',
+        }),
+      ).resolves.toMatchObject({ available: false });
+    });
+
+    it('lets a blackout override an otherwise-covering window', async () => {
+      const { service } = setup([
+        coachSlotRow('c1', 1, 960, 1200),
+        coachSlotRow('c1', 1, 1020, 1080, false), // 17:00–18:00 blocked
+      ]);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'c1', {
+          dayOfWeek: 1,
+          startTime: '17:30',
+          endTime: '17:45',
+        }),
+      ).resolves.toMatchObject({ available: false });
+    });
+
+    it('a blackout that only touches the edge is not a conflict', async () => {
+      const { service } = setup([
+        coachSlotRow('c1', 1, 960, 1200),
+        coachSlotRow('c1', 1, 1080, 1140, false), // 18:00–19:00 blocked
+      ]);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'c1', {
+          dayOfWeek: 1,
+          startTime: '17:00',
+          endTime: '18:00',
+        }),
+      ).resolves.toMatchObject({ available: true });
+    });
+
+    it('refuses a coach from another organisation as not found', async () => {
+      const { service, findByUserId, coachFindOne } = makeService();
+      findByUserId.mockResolvedValue({ id: 't1' });
+      // The id+trainerProfileId query returns nothing for a foreign coach.
+      coachFindOne.mockResolvedValue(null);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'other-org-coach', {
+          dayOfWeek: 1,
+          startTime: '16:00',
+          endTime: '17:00',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects an inverted window before touching the database', async () => {
+      const { service } = setup([]);
+
+      await expect(
+        service.checkCoachConflict('trainer-user', 'c1', {
+          dayOfWeek: 1,
+          startTime: '18:00',
+          endTime: '16:00',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('falls back to the email when the coach has no name set', async () => {
+      const ctx = setup([]);
+      ctx.userFindById.mockResolvedValue({ firstName: null, lastName: null, email: 'c@x.io' });
+
+      const result = await ctx.service.checkCoachConflict('trainer-user', 'c1', {
+        dayOfWeek: 1,
+        startTime: '10:00',
+        endTime: '11:00',
+      });
+
+      expect(result.message).toContain('c@x.io');
     });
   });
 });
