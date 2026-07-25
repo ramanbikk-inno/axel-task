@@ -1,4 +1,16 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
@@ -14,6 +26,7 @@ import {
   CoachInvitationView,
   CoachView,
   InviteCoachDto,
+  ListCoachesQueryDto,
   ResolvedCoachInviteView,
 } from './dto/coach.dto';
 
@@ -48,8 +61,53 @@ export class CoachesController {
   @Roles(Role.Trainer)
   @ApiBearerAuth()
   @ApiOkResponse({ type: [CoachView] })
-  async listCoaches(@Req() req: Request): Promise<CoachView[]> {
-    return this.coaches.listCoaches(req.user as Principal);
+  async listCoaches(
+    @Query() query: ListCoachesQueryDto,
+    @Req() req: Request,
+  ): Promise<CoachView[]> {
+    return this.coaches.listCoaches(req.user as Principal, query.includeInactive ?? false);
+  }
+
+  /** US-01.08: "Link expires: Clear message, option to resend invitation". */
+  @Post('invitations/:id/resend')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Trainer)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: CoachInvitationView })
+  async resendInvitation(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Req() req: Request,
+  ): Promise<CoachInvitationView> {
+    return this.coaches.resendInvitation(req.user as Principal, id);
+  }
+
+  @Delete('invitations/:id')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Trainer)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: CoachInvitationView })
+  async revokeInvitation(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Req() req: Request,
+  ): Promise<CoachInvitationView> {
+    return this.coaches.revokeInvitation(req.user as Principal, id);
+  }
+
+  /** End a coach's engagement. The row survives; the access does not. */
+  @Delete(':id')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Trainer)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: CoachView })
+  async offboard(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Req() req: Request,
+  ): Promise<CoachView> {
+    return this.coaches.offboardCoach(req.user as Principal, id);
   }
 
   // Public: resolve an invite for the accept page.

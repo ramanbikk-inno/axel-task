@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { EnrollmentModule } from '../enrollment/enrollment.module';
 import { MailModule } from '../mail/mail.module';
@@ -16,6 +17,7 @@ import { CoachProfile } from './entities/coach-profile.entity';
     TrainersModule,
     EnrollmentModule,
     AuthModule,
+    AuditModule,
     UsersModule,
     MailModule,
   ],

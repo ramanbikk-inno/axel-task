@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+
+import {
+  IsStrongPassword,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+} from '../../../shared/validation/password';
+import { CoachStatus } from '../entities/coach-profile.entity';
 
 export class InviteCoachDto {
   @ApiProperty({ example: 'coach@example.com' })
@@ -14,13 +22,8 @@ export class InviteCoachDto {
 }
 
 export class AcceptCoachInviteDto {
-  @ApiProperty({ minLength: 12, maxLength: 128 })
-  @IsString()
-  @MinLength(12)
-  @MaxLength(128)
-  @Matches(/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9])/, {
-    message: 'password must contain upper, lower, number and symbol',
-  })
+  @ApiProperty({ minLength: PASSWORD_MIN_LENGTH, maxLength: PASSWORD_MAX_LENGTH })
+  @IsStrongPassword()
   password!: string;
 
   @ApiPropertyOptional()
@@ -55,7 +58,19 @@ export class CoachView {
   @ApiProperty({ nullable: true }) lastName!: string | null;
   @ApiProperty({ nullable: true }) bio!: string | null;
   @ApiProperty() publicVisible!: boolean;
+  @ApiProperty({ enum: ['Active', 'Inactive'] }) status!: CoachStatus;
   @ApiProperty() joinedAt!: Date;
+  @ApiProperty({ nullable: true }) endedAt!: Date | null;
+}
+
+export class ListCoachesQueryDto {
+  @ApiPropertyOptional({
+    description: 'Include coaches whose engagement has ended (default false)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeInactive?: boolean;
 }
 
 export class ResolvedCoachInviteView {

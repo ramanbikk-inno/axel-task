@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
-import { CoachProfile } from '../coaches/entities/coach-profile.entity';
+import { CoachProfile, CoachStatus } from '../coaches/entities/coach-profile.entity';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
@@ -95,8 +95,12 @@ export class SessionValidatorService {
       return { trainerOrgId: profile?.id ?? null, coachProfileId: null, ...NOT_A_CHILD };
     }
     if (user.role === Role.Coach) {
+      // Active only. An off-boarded coach keeps their row so the engagement
+      // stays in the record, but they must stop inheriting their former
+      // employer's tenancy the moment it ends — otherwise every org-scoped
+      // rule still resolves for them.
       const profile = await this.coachProfiles.findOne({
-        where: { userId: user.id },
+        where: { userId: user.id, status: CoachStatus.Active },
         select: { id: true, trainerProfileId: true },
       });
       return {

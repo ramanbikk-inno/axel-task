@@ -34,8 +34,9 @@ export class ShareLinksService {
     return randomBytes(9).toString('base64url');
   }
 
-  async create(input: CreateShareLinkInput): Promise<ShareLink> {
-    const link = this.links.create({
+  async create(input: CreateShareLinkInput, manager?: EntityManager): Promise<ShareLink> {
+    const repository = this.repo(manager);
+    const link = repository.create({
       trainerProfileId: input.trainerProfileId,
       code: this.generateCode(),
       type: input.type,
@@ -46,7 +47,19 @@ export class ShareLinksService {
       active: true,
       createdByUserId: input.createdByUserId,
     });
-    return this.links.save(link);
+    return repository.save(link);
+  }
+
+  async findById(id: string, manager?: EntityManager): Promise<ShareLink | null> {
+    return this.repo(manager).findOne({ where: { id } });
+  }
+
+  /**
+   * Retire a link without deleting it, so an accepted or revoked invitation
+   * keeps showing up in the trainer's invitation list with the right status.
+   */
+  async deactivate(id: string, manager?: EntityManager): Promise<void> {
+    await this.repo(manager).update({ id }, { active: false });
   }
 
   async findByTrainer(trainerProfileId: string): Promise<ShareLink[]> {
