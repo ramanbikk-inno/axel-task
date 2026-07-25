@@ -1,25 +1,28 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
+import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
+
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml'];
 
 export class UpdateProfileDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(100)
   firstName?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(100)
   lastName?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ example: '+1 555 123 4567' })
   @IsOptional()
-  @IsString()
-  @MaxLength(30)
+  @IsPhoneNumberLoose()
   phone?: string;
 }
 

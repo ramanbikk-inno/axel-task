@@ -9,6 +9,7 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { parseCalendarDate } from '../../shared/validation/calendar-date';
 import { AssociationsService } from '../enrollment/associations.service';
 import { ShareLinkType } from '../enrollment/entities/share-link.entity';
 import { AssociationStatus } from '../enrollment/entities/trainer-player-association.entity';
@@ -39,20 +40,14 @@ export class FamilyService {
 
   /** Create a child profile and optionally connect it to the parent's trainers. */
   async createChild(parentUserId: string, dto: CreateChildDto): Promise<PlayerProfileView> {
-    const age = this.ageFromBirthDate(dto.birthDate);
-    if (age < 1 || age > 18) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.CHILD_AGE_INVALID,
-        message: 'A child must be between 1 and 18 years old.',
-      });
-    }
+    const birthDate = this.requireChildAge(dto.birthDate);
 
     const owned = await this.playersService.findByOwner(parentUserId);
     const duplicate = owned.some(
       (p) =>
         p.isChild &&
         p.displayName.trim().toLowerCase() === dto.displayName.trim().toLowerCase() &&
-        p.birthDate === dto.birthDate,
+        p.birthDate === birthDate,
     );
     if (duplicate) {
       throw new ConflictException({
@@ -80,7 +75,7 @@ export class FamilyService {
           ownerUserId: parentUserId,
           displayName: dto.displayName,
           isChild: true,
-          birthDate: dto.birthDate,
+          birthDate,
           gender: dto.gender,
           school: dto.school ?? null,
           jerseyNumber: dto.jerseyNumber ?? null,
@@ -251,14 +246,37 @@ export class FamilyService {
     return profiles.map((p) => PlayerProfileView.from(p, byProfile.get(p.id) ?? []));
   }
 
-  private ageFromBirthDate(birthDate: string): number {
+  /**
+   * Enforce the 1-18 rule and return the normalised YYYY-MM-DD date.
+   *
+   * Fails closed on an unparseable value. The previous version returned NaN for
+   * anything Date could not read, and `NaN < 1` and `NaN > 18` are both false,
+   * so the range check waved it through — an adult could be stored as a child.
+   * The DTO now rejects those inputs too; this is the second line of defence,
+   * because the service is also reachable from paths that do not share the DTO.
+   */
+  private requireChildAge(rawBirthDate: string): string {
+    const born = parseCalendarDate(rawBirthDate);
+    if (born === null) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        message: 'birthDate must be a calendar date in YYYY-MM-DD format.',
+      });
+    }
+
     const now = this.clock.now();
-    const born = new Date(`${birthDate}T00:00:00.000Z`);
     let age = now.getUTCFullYear() - born.getUTCFullYear();
     const monthDelta = now.getUTCMonth() - born.getUTCMonth();
     if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < born.getUTCDate())) {
       age -= 1;
     }
-    return age;
+
+    if (age < 1 || age > 18) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.CHILD_AGE_INVALID,
+        message: 'A child must be between 1 and 18 years old.',
+      });
+    }
+    return born.toISOString().slice(0, 10);
   }
 }

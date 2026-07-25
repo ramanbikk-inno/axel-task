@@ -59,10 +59,10 @@ describe('Profile editing (e2e, US-01.11)', () => {
     const res = await request(app.getHttpServer())
       .patch('/api/v1/profile/me')
       .set('Authorization', `Bearer ${token}`)
-      .send({ firstName: 'Newfirst', lastName: 'Newlast', phone: '+123456' })
+      .send({ firstName: 'Newfirst', lastName: 'Newlast', phone: '+1 555 123 4567' })
       .expect(200);
     expect(res.body.firstName).toBe('Newfirst');
-    expect(res.body.phone).toBe('+123456');
+    expect(res.body.phone).toBe('+1 555 123 4567');
     expect(res.body.email).toBe(player.email);
     expect(res.body.role).toBe(Role.PlayerParent);
 
@@ -151,7 +151,7 @@ describe('Profile editing (e2e, US-01.11)', () => {
     const res = await request(app.getHttpServer())
       .patch(`/api/v1/users/${target.userId}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ firstName: 'Admin', lastName: 'Edited', phone: '+1999' })
+      .send({ firstName: 'Admin', lastName: 'Edited', phone: '+1 555 000 1999' })
       .expect(200);
     expect(res.body.firstName).toBe('Admin');
     expect(res.body.lastName).toBe('Edited');
