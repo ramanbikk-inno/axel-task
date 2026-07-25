@@ -1,0 +1,121 @@
+import { ConfigService } from '@nestjs/config';
+import { v2 as cloudinary } from 'cloudinary';
+
+import { CloudinaryStorageService, MAX_EDGE_PX } from './storage.service';
+
+jest.mock('cloudinary', () => ({
+  v2: {
+    config: jest.fn(),
+    uploader: { upload: jest.fn(), destroy: jest.fn() },
+  },
+}));
+
+const uploadMock = cloudinary.uploader.upload as unknown as jest.Mock;
+const destroyMock = cloudinary.uploader.destroy as unknown as jest.Mock;
+
+function service(cloudinaryUrl: string): CloudinaryStorageService {
+  return new CloudinaryStorageService(
+    new ConfigService({ CLOUDINARY_URL: cloudinaryUrl }) as ConfigService,
+  );
+}
+
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
+describe('CloudinaryStorageService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    uploadMock.mockResolvedValue({
+      secure_url: 'https://res.cloudinary.com/demo/image/upload/v1/logos/abc.png',
+      public_id: 'logos/abc',
+    });
+  });
+
+  it('fails loudly when storage is not configured, instead of inventing a URL', async () => {
+    const unconfigured = service('');
+
+    // The old stub returned https://res.cloudinary.com/stub/<name> here, so
+    // uploads "succeeded" while nothing was stored and a dead URL was
+    // persisted onto the user or trainer row.
+    await expect(
+      unconfigured.upload({ buffer: PNG, fileName: 'a.png', mimeType: 'image/png' }),
+    ).rejects.toMatchObject({ status: 500 });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it('uploads and returns the real delivery URL and public id', async () => {
+    const result = await service('cloudinary://k:s@demo').upload({
+      buffer: PNG,
+      fileName: 'logo.png',
+      mimeType: 'image/png',
+      folder: 'logos',
+    });
+
+    expect(result).toEqual({
+      url: 'https://res.cloudinary.com/demo/image/upload/v1/logos/abc.png',
+      publicId: 'logos/abc',
+    });
+    const [dataUri, options] = uploadMock.mock.calls[0];
+    expect(dataUri).toBe(`data:image/png;base64,${PNG.toString('base64')}`);
+    expect(options.folder).toBe('logos');
+    expect(options.resource_type).toBe('image');
+  });
+
+  it('caps the stored image to the maximum edge and strips metadata', async () => {
+    await service('cloudinary://k:s@demo').upload({
+      buffer: PNG,
+      fileName: 'huge.png',
+      mimeType: 'image/png',
+    });
+
+    const [, options] = uploadMock.mock.calls[0];
+    // `limit` only ever scales down, so a small image is stored untouched
+    // (US-01.14 asks for auto-resize, not rejection).
+    expect(options.transformation).toEqual([
+      { width: MAX_EDGE_PX, height: MAX_EDGE_PX, crop: 'limit' },
+      { flags: 'strip_profile' },
+    ]);
+  });
+
+  it('rasterises an SVG to PNG so nothing executable is ever stored', async () => {
+    await service('cloudinary://k:s@demo').upload({
+      buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>'),
+      fileName: 'logo.svg',
+      mimeType: 'image/svg+xml',
+    });
+
+    const [, options] = uploadMock.mock.calls[0];
+    expect(options.format).toBe('png');
+  });
+
+  it('does not force a format for raster uploads', async () => {
+    await service('cloudinary://k:s@demo').upload({
+      buffer: PNG,
+      fileName: 'photo.jpg',
+      mimeType: 'image/jpeg',
+    });
+
+    const [, options] = uploadMock.mock.calls[0];
+    expect(options.format).toBeUndefined();
+  });
+
+  it('translates a provider failure into a 500 rather than leaking the cause', async () => {
+    uploadMock.mockRejectedValue(new Error('cloudinary said no: api_key=secret'));
+
+    await expect(
+      service('cloudinary://k:s@demo').upload({
+        buffer: PNG,
+        fileName: 'a.png',
+        mimeType: 'image/png',
+      }),
+    ).rejects.toMatchObject({
+      status: 500,
+      response: { message: 'Could not store the uploaded file.' },
+    });
+  });
+
+  it('swallows a failed delete so cleanup cannot fail the user’s request', async () => {
+    destroyMock.mockRejectedValue(new Error('gone'));
+
+    await expect(service('cloudinary://k:s@demo').delete('logos/abc')).resolves.toBeUndefined();
+  });
+});

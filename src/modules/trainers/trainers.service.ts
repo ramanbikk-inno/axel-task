@@ -1,8 +1,9 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { decodeImageUpload } from '../../shared/files/image-content';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from './entities/trainer-profile.entity';
 
@@ -98,19 +99,12 @@ export class TrainersService {
   ): Promise<TrainerProfile> {
     const profile = await this.requireOwnProfile(userId);
 
-    const buffer = Buffer.from(input.dataBase64, 'base64');
-    if (buffer.length === 0) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
-        message: 'Empty logo data.',
-      });
-    }
-    if (buffer.length > MAX_LOGO_BYTES) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.FILE_TOO_LARGE,
-        message: 'Logo must be 2MB or smaller.',
-      });
-    }
+    const { buffer } = decodeImageUpload({
+      dataBase64: input.dataBase64,
+      declaredMimeType: input.mimeType,
+      maxBytes: MAX_LOGO_BYTES,
+      label: 'Logo',
+    });
 
     const { url } = await this.storage.upload({
       buffer,
