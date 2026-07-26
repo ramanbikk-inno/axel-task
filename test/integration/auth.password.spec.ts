@@ -1,7 +1,7 @@
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { IsNull } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
@@ -139,6 +139,14 @@ describe('AuthService password reset & change', () => {
         {
           provide: PlayersService,
           useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
+        },
+        {
+          // register() runs inside a transaction; the callback gets the same
+          // repository stubs the rest of these providers use.
+          provide: DataSource,
+          useValue: {
+            transaction: (cb: (m: unknown) => unknown) => cb({ getRepository: () => repoStub() }),
+          },
         },
         {
           provide: ConfigService,

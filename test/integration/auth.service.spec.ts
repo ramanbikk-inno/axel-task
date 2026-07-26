@@ -2,6 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { DataSource } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
@@ -130,6 +131,14 @@ describe('AuthService (login + register)', () => {
           useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
         },
         {
+          // register() runs inside a transaction; the callback gets the same
+          // repository stubs the rest of these providers use.
+          provide: DataSource,
+          useValue: {
+            transaction: (cb: (m: unknown) => unknown) => cb({ getRepository: () => repoMock() }),
+          },
+        },
+        {
           provide: ConfigService,
           useValue: {
             get: (k: string): unknown => (k === 'MIN_SELF_REGISTRATION_AGE' ? 18 : undefined),
@@ -234,6 +243,8 @@ describe('AuthService (login + register)', () => {
         role: Role.PlayerParent,
         emailVerified: false,
       }),
+      // Registration runs in a transaction, so the manager is threaded through.
+      expect.anything(),
     );
   });
 

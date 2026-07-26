@@ -2,9 +2,12 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
-import { bootstrapE2E, E2EContext } from './setup-e2e';
+import { ADULT_DOB, bootstrapE2E, E2EContext } from './setup-e2e';
+import { EmailVerificationToken } from '../src/modules/auth/entities/email-verification-token.entity';
 import { PlayerProfile } from '../src/modules/players/entities/player-profile.entity';
+import { PlayersService } from '../src/modules/players/players.service';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
+import { User } from '../src/modules/users/entities/user.entity';
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
@@ -17,8 +20,6 @@ import { ErrorCode } from '../src/shared/errors/error-codes';
 describe('Birth date on the account holder’s own profile (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
-
-  const ADULT_DOB = '1994-03-22';
 
   beforeAll(async () => {
     ctx = await bootstrapE2E();
@@ -52,7 +53,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
 
       const profile = await selfProfileOf(parent.userId);
       expect(profile).not.toBeNull();
-      expect(profile!.birthDate).toBe('1994-03-22');
+      expect(profile!.birthDate).toBe(ADULT_DOB);
       expect(profile!.isChild).toBe(false);
     });
 
@@ -64,7 +65,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
         .get('/api/v1/profile/me')
         .set(auth(token))
         .expect(200);
-      expect(res.body.player.birthDate).toBe('1994-03-22');
+      expect(res.body.player.birthDate).toBe(ADULT_DOB);
     });
 
     it('creates exactly one profile, not one per registration attempt', async () => {
@@ -109,6 +110,70 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
     });
   });
 
+  describe('registration is all-or-nothing', () => {
+    it('rolls the account back if the profile cannot be written', async () => {
+      const players = app.get(PlayersService);
+      const create = jest
+        .spyOn(players, 'create')
+        .mockRejectedValueOnce(new Error('profile insert failed'));
+
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({ email: 'rollback@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .expect(500);
+
+      // Without a transaction the user row would survive with no profile, so the
+      // birth date would be gone for good — nothing asks the registrant again.
+      expect(await ctx.dataSource.getRepository(User).count()).toBe(0);
+      expect(await ctx.dataSource.getRepository(PlayerProfile).count()).toBe(0);
+      expect(await ctx.dataSource.getRepository(EmailVerificationToken).count()).toBe(0);
+      create.mockRestore();
+    });
+
+    it('lets the address be registered again after such a rollback', async () => {
+      const players = app.get(PlayersService);
+      const create = jest
+        .spyOn(players, 'create')
+        .mockRejectedValueOnce(new Error('profile insert failed'));
+
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({ email: 'retry@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .expect(500);
+      create.mockRestore();
+
+      // The enumeration-safe no-op on an existing address would otherwise strand
+      // the caller: no account usable, and no way to make one.
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({ email: 'retry@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .expect(201);
+
+      const profile = await ctx.dataSource
+        .getRepository(PlayerProfile)
+        .findOneBy({ displayName: 'retry@example.com' });
+      expect(profile!.birthDate).toBe(ADULT_DOB);
+    });
+
+    it('does not send a verification email when the transaction fails', async () => {
+      const players = app.get(PlayersService);
+      const create = jest
+        .spyOn(players, 'create')
+        .mockRejectedValueOnce(new Error('profile insert failed'));
+      ctx.mailer.sendVerification.mockClear();
+
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({ email: 'no-mail@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .expect(500);
+
+      // The mail goes out after the commit, so a rolled-back registration must
+      // not have told anyone their account exists.
+      expect(ctx.mailer.sendVerification).not.toHaveBeenCalled();
+      create.mockRestore();
+    });
+  });
+
   describe('the date survives into the flows that need it', () => {
     it('shows on the trainer’s roster after the player joins', async () => {
       const trainerUser = await createUser(ctx.dataSource, {
@@ -140,7 +205,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
         .set(auth(trainerToken))
         .expect(200);
       expect(roster.body).toHaveLength(1);
-      expect(roster.body[0].birthDate).toBe('1994-03-22');
+      expect(roster.body[0].birthDate).toBe(ADULT_DOB);
     });
 
     it('matches what the ShareLink registration path stores', async () => {
@@ -171,7 +236,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       const viaLink = await ctx.dataSource
         .getRepository(PlayerProfile)
         .findOneBy({ displayName: 'Sam' });
-      expect(viaLink!.birthDate).toBe('1994-03-22');
+      expect(viaLink!.birthDate).toBe(ADULT_DOB);
     });
   });
 
@@ -188,7 +253,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
 
     it('clears the birth date off the account holder’s own profile', async () => {
       const parent = await ctx.registerVerifiedPlayer({ email: 'erase-self@example.com' });
-      expect((await selfProfileOf(parent.userId))!.birthDate).toBe('1994-03-22');
+      expect((await selfProfileOf(parent.userId))!.birthDate).toBe(ADULT_DOB);
 
       await deleteUser(parent.userId);
 
@@ -261,7 +326,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
         .set(auth(token))
         .expect(200);
       expect(res.body).toHaveLength(1);
-      expect(res.body[0]).toMatchObject({ isChild: false, birthDate: '1994-03-22' });
+      expect(res.body[0]).toMatchObject({ isChild: false, birthDate: ADULT_DOB });
       expect(res.body[0].trainers).toHaveLength(0);
     });
 
@@ -345,7 +410,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       expect(res.body.errorCode).toBe(ErrorCode.UNDERAGE_SELF_REGISTRATION);
 
       const profile = await selfProfileOf(parent.userId);
-      expect(profile!.birthDate).toBe('1994-03-22');
+      expect(profile!.birthDate).toBe(ADULT_DOB);
     });
 
     it('refuses a future date', async () => {
@@ -392,7 +457,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
         .expect(200);
       expect(res.body.player).toMatchObject({
         school: 'Riverside High',
-        birthDate: '1994-03-22',
+        birthDate: ADULT_DOB,
       });
     });
 

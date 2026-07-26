@@ -8,9 +8,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { MIN_SELF_REGISTRATION_AGE_DEFAULT } from '../../shared/config/env.validation';
 import { displayNameFor } from '../../shared/format/display-name';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { PasswordService } from '../../shared/crypto/password.service';
@@ -55,6 +56,7 @@ export class AuthService {
     private readonly impersonationLogs: ImpersonationLogService,
     private readonly playersService: PlayersService,
     private readonly config: ConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -80,7 +82,8 @@ export class AuthService {
       });
     }
 
-    const minimumAge = this.config.get<number>('MIN_SELF_REGISTRATION_AGE') ?? 18;
+    const minimumAge =
+      this.config.get<number>('MIN_SELF_REGISTRATION_AGE') ?? MIN_SELF_REGISTRATION_AGE_DEFAULT;
     if (ageInYears(born, now) < minimumAge) {
       throw new ForbiddenException({
         errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION,
@@ -214,36 +217,39 @@ export class AuthService {
       return { message: REGISTER_MESSAGE };
     }
 
-    const passwordHash = await this.passwords.hash(dto.password);
-    const user = await this.usersService.create({
-      email: dto.email,
-      role: Role.PlayerParent,
-      passwordHash,
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      phone: dto.phone,
-      emailVerified: false,
-      mustSetPassword: false,
-      status: UserStatus.Active,
+    // One transaction for the account, its profile and its verification token.
+    // A half-finished registration would cost the birth date permanently — the
+    // profile is the only thing that holds one and nothing asks again — and
+    // could leave an account with no way to verify itself.
+    const created = await this.dataSource.transaction(async (manager: EntityManager) => {
+      const { user, verificationToken } = await this.createUnverifiedAccount(
+        {
+          email: dto.email,
+          password: dto.password,
+          role: Role.PlayerParent,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+        },
+        manager,
+      );
+
+      await this.playersService.create(
+        {
+          ownerUserId: user.id,
+          displayName: displayNameFor(user, user.email),
+          isChild: false,
+          birthDate: dto.birthDate,
+        },
+        manager,
+      );
+
+      return { email: user.email, verificationToken };
     });
 
-    // The birth date is collected to run the age check above, so it has to be
-    // kept: the self profile is the only place that holds one, and nothing
-    // downstream can ask the registrant again. This mirrors the ShareLink
-    // registration path, which has always created the profile here.
-    await this.playersService.create({
-      ownerUserId: user.id,
-      displayName: displayNameFor(user, user.email),
-      isChild: false,
-      birthDate: dto.birthDate,
-    });
-
-    const { token, tokenHash } = this.tokens.generateOpaqueToken();
-    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
-    await this.emailVerifications.save(
-      this.emailVerifications.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }),
-    );
-    await this.mail.sendVerificationEmail(user.email, token);
+    // After the commit: the mail provider is not transactional, and an outage
+    // there must not undo an account that already exists.
+    await this.mail.sendVerificationEmail(created.email, created.verificationToken);
 
     return { message: REGISTER_MESSAGE };
   }

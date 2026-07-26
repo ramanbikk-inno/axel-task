@@ -1,6 +1,7 @@
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { DataSource } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
@@ -102,6 +103,15 @@ describe('AuthService email verification', () => {
         {
           provide: PlayersService,
           useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
+        },
+        {
+          // register() runs inside a transaction; the callback gets the same
+          // repository stubs the rest of these providers use.
+          provide: DataSource,
+          useValue: {
+            transaction: (cb: (m: unknown) => unknown) =>
+              cb({ getRepository: () => emailVerifications }),
+          },
         },
         {
           provide: ConfigService,

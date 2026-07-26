@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+/**
+ * Minimum age for an account in someone's own name. Exported so the schema
+ * default and the service's fallback cannot drift apart.
+ */
+export const MIN_SELF_REGISTRATION_AGE_DEFAULT = 18;
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -43,7 +49,12 @@ export const envSchema = z.object({
    * Minimum age for holding an account in your own name. Under this, a player
    * belongs to a parent's account as a child profile.
    */
-  MIN_SELF_REGISTRATION_AGE: z.coerce.number().int().min(0).max(120).default(18),
+  MIN_SELF_REGISTRATION_AGE: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(120)
+    .default(MIN_SELF_REGISTRATION_AGE_DEFAULT),
 
   ARGON_MEMORY_KIB: z.coerce.number().int().positive().default(19456),
   ARGON_TIME_COST: z.coerce.number().int().positive().default(2),

@@ -38,6 +38,7 @@ function build(minimumAge?: number): AuthService {
     unused,
     unused,
     config,
+    unused,
   );
 }
 
