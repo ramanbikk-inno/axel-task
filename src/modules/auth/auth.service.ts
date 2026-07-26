@@ -15,6 +15,7 @@ import { MIN_SELF_REGISTRATION_AGE_DEFAULT } from '../../shared/config/env.valid
 import { displayNameFor } from '../../shared/format/display-name';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { PasswordService } from '../../shared/crypto/password.service';
+import { PG_UNIQUE_VIOLATION } from '../../shared/errors/all-exceptions.filter';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { ImpersonationLogService } from '../impersonation/impersonation-log.service';
 import { MailService } from '../mail/mail.service';
@@ -34,6 +35,9 @@ import { Principal } from './principal';
 import { TokenService } from './token.service';
 
 const REGISTER_MESSAGE = 'Registration received. Check your email to verify your account.';
+
+/** The unique index behind users.email, as Postgres names it in a violation. */
+const USERS_EMAIL_INDEX = 'uq_users_email';
 
 @Injectable()
 export class AuthService {
@@ -217,11 +221,40 @@ export class AuthService {
       return { message: REGISTER_MESSAGE };
     }
 
-    // One transaction for the account, its profile and its verification token.
-    // A half-finished registration would cost the birth date permanently — the
-    // profile is the only thing that holds one and nothing asks again — and
-    // could leave an account with no way to verify itself.
-    const created = await this.dataSource.transaction(async (manager: EntityManager) => {
+    // The existence check above is a read, so two concurrent registrations of one
+    // address can both pass it. The loser hits uq_users_email, and surfacing that
+    // as a 409 would tell an unauthenticated caller the address is taken — the one
+    // thing the generic message exists to hide. Swallowed to the same no-op.
+    let created: { email: string; verificationToken: string };
+    try {
+      created = await this.registerInTransaction(dto);
+    } catch (error) {
+      const driver = error as { code?: string; constraint?: string };
+      // Narrowed to the email index: any other unique collision is a real fault
+      // and must not be reported as a successful registration.
+      if (driver.code === PG_UNIQUE_VIOLATION && driver.constraint === USERS_EMAIL_INDEX) {
+        return { message: REGISTER_MESSAGE };
+      }
+      throw error;
+    }
+
+    // After the commit: the mail provider is not transactional, and an outage
+    // there must not undo an account that already exists.
+    await this.mail.sendVerificationEmail(created.email, created.verificationToken);
+
+    return { message: REGISTER_MESSAGE };
+  }
+
+  /**
+   * The account, its profile and its verification token, or none of them. A
+   * half-finished registration would cost the birth date permanently — the
+   * profile is the only thing that holds one and nothing asks again — and could
+   * leave an account with no way to verify itself.
+   */
+  private async registerInTransaction(
+    dto: RegisterDto,
+  ): Promise<{ email: string; verificationToken: string }> {
+    return this.dataSource.transaction(async (manager: EntityManager) => {
       const { user, verificationToken } = await this.createUnverifiedAccount(
         {
           email: dto.email,
@@ -246,12 +279,6 @@ export class AuthService {
 
       return { email: user.email, verificationToken };
     });
-
-    // After the commit: the mail provider is not transactional, and an outage
-    // there must not undo an account that already exists.
-    await this.mail.sendVerificationEmail(created.email, created.verificationToken);
-
-    return { message: REGISTER_MESSAGE };
   }
 
   async verifyEmail(token: string): Promise<void> {

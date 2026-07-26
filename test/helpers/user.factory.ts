@@ -12,8 +12,8 @@ export interface CreateUserOverrides {
   status?: UserStatus;
   emailVerified?: boolean;
   mustSetPassword?: boolean;
-  firstName?: string;
-  lastName?: string;
+  firstName?: string | null;
+  lastName?: string | null;
 }
 
 export async function createUser(
@@ -33,8 +33,8 @@ export async function createUser(
     emailVerifiedAt: (over.emailVerified ?? true) ? new Date() : null,
     mustSetPassword: over.mustSetPassword ?? false,
     passwordHash,
-    firstName: over.firstName ?? 'Test',
-    lastName: over.lastName ?? 'Player',
+    firstName: over.firstName !== undefined ? over.firstName : 'Test',
+    lastName: over.lastName !== undefined ? over.lastName : 'Player',
   });
 
   return repository.save(user);

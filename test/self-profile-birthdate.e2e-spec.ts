@@ -8,6 +8,7 @@ import { PlayerProfile } from '../src/modules/players/entities/player-profile.en
 import { PlayersService } from '../src/modules/players/players.service';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
 import { User } from '../src/modules/users/entities/user.entity';
+import { UsersService } from '../src/modules/users/users.service';
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
@@ -32,6 +33,12 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
 
   beforeEach(async () => {
     await ctx.resetDb();
+  });
+
+  afterEach(() => {
+    // Restored here rather than at the end of each test: an assertion that
+    // throws would otherwise leave a spy in place for whatever runs next.
+    jest.restoreAllMocks();
   });
 
   const auth = (t: string): Record<string, string> => ({ Authorization: `Bearer ${t}` });
@@ -113,9 +120,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
   describe('registration is all-or-nothing', () => {
     it('rolls the account back if the profile cannot be written', async () => {
       const players = app.get(PlayersService);
-      const create = jest
-        .spyOn(players, 'create')
-        .mockRejectedValueOnce(new Error('profile insert failed'));
+      jest.spyOn(players, 'create').mockRejectedValueOnce(new Error('profile insert failed'));
 
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
@@ -127,20 +132,17 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       expect(await ctx.dataSource.getRepository(User).count()).toBe(0);
       expect(await ctx.dataSource.getRepository(PlayerProfile).count()).toBe(0);
       expect(await ctx.dataSource.getRepository(EmailVerificationToken).count()).toBe(0);
-      create.mockRestore();
     });
 
     it('lets the address be registered again after such a rollback', async () => {
       const players = app.get(PlayersService);
-      const create = jest
-        .spyOn(players, 'create')
-        .mockRejectedValueOnce(new Error('profile insert failed'));
+      jest.spyOn(players, 'create').mockRejectedValueOnce(new Error('profile insert failed'));
 
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
         .send({ email: 'retry@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
         .expect(500);
-      create.mockRestore();
+      jest.restoreAllMocks();
 
       // The enumeration-safe no-op on an existing address would otherwise strand
       // the caller: no account usable, and no way to make one.
@@ -155,11 +157,30 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       expect(profile!.birthDate).toBe(ADULT_DOB);
     });
 
+    it('stays enumeration-safe when the existence check loses a race', async () => {
+      const taken = 'taken@example.com';
+      await ctx.registerVerifiedPlayer({ email: taken });
+
+      // The existence check runs before the transaction, so two concurrent
+      // registrations of one address can both pass it and the loser hits
+      // uq_users_email. Forcing the check to miss reproduces that window without
+      // depending on timing.
+      const users = app.get(UsersService);
+      jest.spyOn(users, 'findByEmail').mockResolvedValueOnce(null);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/register')
+        .send({ email: taken, password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB });
+
+      // A 409 here would tell an unauthenticated caller the address is taken,
+      // which is exactly what the generic 201 exists to hide.
+      expect(res.status).toBe(201);
+      expect(await ctx.dataSource.getRepository(User).count()).toBe(1);
+    });
+
     it('does not send a verification email when the transaction fails', async () => {
       const players = app.get(PlayersService);
-      const create = jest
-        .spyOn(players, 'create')
-        .mockRejectedValueOnce(new Error('profile insert failed'));
+      jest.spyOn(players, 'create').mockRejectedValueOnce(new Error('profile insert failed'));
       ctx.mailer.sendVerification.mockClear();
 
       await request(app.getHttpServer())
@@ -170,7 +191,6 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       // The mail goes out after the commit, so a rolled-back registration must
       // not have told anyone their account exists.
       expect(ctx.mailer.sendVerification).not.toHaveBeenCalled();
-      create.mockRestore();
     });
   });
 

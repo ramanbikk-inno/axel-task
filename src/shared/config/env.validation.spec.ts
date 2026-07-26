@@ -1,4 +1,4 @@
-import { validate } from './env.validation';
+import { MIN_SELF_REGISTRATION_AGE_DEFAULT, validate } from './env.validation';
 
 describe('validate (env)', () => {
   const validEnv: Record<string, string> = {
@@ -32,6 +32,29 @@ describe('validate (env)', () => {
     expect(result.ARGON_TIME_COST).toBe(2);
     expect(result.ARGON_PARALLELISM).toBe(1);
     expect(result.APP_URL).toBe('http://localhost:3000');
+  });
+
+  it('defaults the self-registration age to the exported constant', () => {
+    // The service falls back to the same constant when it is built outside this
+    // validation, so a literal here would let the two drift apart.
+    expect(validate(validEnv).MIN_SELF_REGISTRATION_AGE).toBe(MIN_SELF_REGISTRATION_AGE_DEFAULT);
+  });
+
+  it('takes an explicit self-registration age over the default', () => {
+    const result = validate({ ...validEnv, MIN_SELF_REGISTRATION_AGE: '16' });
+    expect(result.MIN_SELF_REGISTRATION_AGE).toBe(16);
+  });
+
+  it('refuses a self-registration age that is not a sane human age', () => {
+    expect(() => validate({ ...validEnv, MIN_SELF_REGISTRATION_AGE: '-1' })).toThrow(
+      /MIN_SELF_REGISTRATION_AGE/,
+    );
+    expect(() => validate({ ...validEnv, MIN_SELF_REGISTRATION_AGE: '121' })).toThrow(
+      /MIN_SELF_REGISTRATION_AGE/,
+    );
+    expect(() => validate({ ...validEnv, MIN_SELF_REGISTRATION_AGE: 'eighteen' })).toThrow(
+      /MIN_SELF_REGISTRATION_AGE/,
+    );
   });
 
   it('coerces numeric env strings into numbers', () => {

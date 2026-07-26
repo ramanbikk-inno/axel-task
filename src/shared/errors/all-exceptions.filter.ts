@@ -48,7 +48,7 @@ interface DriverErrorLike {
  * a unique index is the 409 the contract promises, not a 500; a malformed uuid
  * reaching the driver is a 400.
  */
-const PG_UNIQUE_VIOLATION = '23505';
+export const PG_UNIQUE_VIOLATION = '23505';
 const PG_INVALID_TEXT_REPRESENTATION = '22P02';
 const PG_FOREIGN_KEY_VIOLATION = '23503';
 const PG_CHECK_VIOLATION = '23514';
