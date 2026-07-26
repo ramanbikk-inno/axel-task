@@ -16,6 +16,12 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 import { User } from '../src/modules/users/entities/user.entity';
 
+/**
+ * An adult date of birth, for the many registrations that only need to clear the
+ * minimum-age floor. Shared so raising the floor is one edit, not sixty.
+ */
+export const ADULT_DOB = '1994-03-22';
+
 export interface E2EContext {
   app: INestApplication;
   dataSource: DataSource;
@@ -179,7 +185,7 @@ export async function bootstrapE2E(): Promise<E2EContext> {
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password, firstName: 'Reg', lastName: 'Player', birthDate: '1994-03-22' })
+      .send({ email, password, firstName: 'Reg', lastName: 'Player', birthDate: ADULT_DOB })
       .expect(201);
 
     const lastCall =

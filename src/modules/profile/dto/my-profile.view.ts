@@ -18,6 +18,7 @@ class SelfPlayerProfileView {
   @ApiProperty({ nullable: true }) school!: string | null;
   @ApiProperty({ nullable: true }) jerseyNumber!: string | null;
   @ApiProperty({ nullable: true }) gender!: string | null;
+  @ApiProperty({ nullable: true }) birthDate!: string | null;
 }
 
 /** Aggregated self-profile: editable common fields + role-specific profile. */
@@ -70,6 +71,7 @@ export class MyProfileView {
             school: player.school,
             jerseyNumber: player.jerseyNumber,
             gender: player.gender,
+            birthDate: player.birthDate,
           }
         : null,
     };

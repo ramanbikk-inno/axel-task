@@ -3,6 +3,7 @@ import { Inject } from '@nestjs/common';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
+import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
@@ -52,6 +53,7 @@ export class ProfileService {
     private readonly usersService: UsersService,
     private readonly trainersService: TrainersService,
     private readonly playersService: PlayersService,
+    private readonly authService: AuthService,
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly audit: AuditService,
   ) {}
@@ -160,16 +162,32 @@ export class ProfileService {
   }
 
   async updatePlayer(actor: Principal, dto: UpdatePlayerProfileDto): Promise<MyProfileView> {
+    // Also guarded on the route. Kept here because the fallback below creates a
+    // profile when the caller has none, and a child must never get one.
+    if (actor.isChild) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.CHILD_ACTION_NOT_ALLOWED,
+        message: 'Ask your parent to do this for you.',
+      });
+    }
+
     const userId = actor.userId;
     const user = await this.requireUser(userId);
+    if (dto.birthDate !== undefined) {
+      // The same floor registration enforces. Without it, an account created as
+      // an adult could be edited down to a minor's date afterwards.
+      this.authService.assertOldEnoughForOwnAccount(dto.birthDate);
+    }
+
     let profile = await this.playersService.updateSelfProfile(userId, {
       displayName: dto.displayName,
       school: dto.school,
       jerseyNumber: dto.jerseyNumber,
       gender: dto.gender,
+      birthDate: dto.birthDate,
     });
     if (!profile) {
-      // No self profile yet (e.g. registered without a ShareLink) — create one.
+      // Only accounts predating registration-time profile creation reach this.
       profile = await this.playersService.create({
         ownerUserId: userId,
         displayName: dto.displayName ?? this.nameOf(user),
@@ -177,6 +195,7 @@ export class ProfileService {
         school: dto.school ?? null,
         jerseyNumber: dto.jerseyNumber ?? null,
         gender: dto.gender ?? null,
+        birthDate: dto.birthDate ?? null,
       });
     }
     await this.audit.record({

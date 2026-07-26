@@ -8,14 +8,18 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { MIN_SELF_REGISTRATION_AGE_DEFAULT } from '../../shared/config/env.validation';
+import { displayNameFor } from '../../shared/format/display-name';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { PasswordService } from '../../shared/crypto/password.service';
+import { PG_UNIQUE_VIOLATION } from '../../shared/errors/all-exceptions.filter';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { ImpersonationLogService } from '../impersonation/impersonation-log.service';
 import { MailService } from '../mail/mail.service';
+import { PlayersService } from '../players/players.service';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
@@ -31,6 +35,9 @@ import { Principal } from './principal';
 import { TokenService } from './token.service';
 
 const REGISTER_MESSAGE = 'Registration received. Check your email to verify your account.';
+
+/** The unique index behind users.email, as Postgres names it in a violation. */
+const USERS_EMAIL_INDEX = 'uq_users_email';
 
 @Injectable()
 export class AuthService {
@@ -51,15 +58,16 @@ export class AuthService {
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
     private readonly impersonationLogs: ImpersonationLogService,
+    private readonly playersService: PlayersService,
     private readonly config: ConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
-   * Minors cannot hold an account in their own name; they belong to a parent's
-   * account as a child profile. Threshold is MIN_SELF_REGISTRATION_AGE, default
-   * 18. Both registration paths must call this — a gate on one door is no gate.
+   * Minors belong to a parent's account as a child profile, not their own. Every
+   * path onto an own-name account must call this, including the edit.
    */
-  assertOldEnoughToSelfRegister(birthDate: string): void {
+  assertOldEnoughForOwnAccount(birthDate: string): void {
     const born = parseCalendarDate(birthDate);
     if (born === null) {
       throw new BadRequestException({
@@ -76,7 +84,8 @@ export class AuthService {
       });
     }
 
-    const minimumAge = this.config.get<number>('MIN_SELF_REGISTRATION_AGE') ?? 18;
+    const minimumAge =
+      this.config.get<number>('MIN_SELF_REGISTRATION_AGE') ?? MIN_SELF_REGISTRATION_AGE_DEFAULT;
     if (ageInYears(born, now) < minimumAge) {
       throw new ForbiddenException({
         errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION,
@@ -202,7 +211,11 @@ export class AuthService {
   async register(dto: RegisterDto): Promise<{ message: string }> {
     // Before the existence check, or the response tells the caller whether the
     // address is already taken.
-    this.assertOldEnoughToSelfRegister(dto.birthDate);
+    this.assertOldEnoughForOwnAccount(dto.birthDate);
+
+    // Before the existence check, not just before the transaction: hashing only
+    // for free addresses makes a taken one answer ~40ms faster.
+    const passwordHash = await this.passwords.hash(dto.password);
 
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
@@ -210,27 +223,61 @@ export class AuthService {
       return { message: REGISTER_MESSAGE };
     }
 
-    const passwordHash = await this.passwords.hash(dto.password);
-    const user = await this.usersService.create({
-      email: dto.email,
-      role: Role.PlayerParent,
-      passwordHash,
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      phone: dto.phone,
-      emailVerified: false,
-      mustSetPassword: false,
-      status: UserStatus.Active,
-    });
+    // Two concurrent registrations of one address both pass the read above; the
+    // loser hits uq_users_email, and a 409 would reveal the address is taken.
+    let created: { email: string; verificationToken: string };
+    try {
+      created = await this.registerInTransaction(dto, passwordHash);
+    } catch (error) {
+      const driver = error as { code?: string; constraint?: string };
+      // Narrowed to the email index: any other unique collision is a real fault
+      // and must not be reported as a successful registration.
+      if (driver.code === PG_UNIQUE_VIOLATION && driver.constraint === USERS_EMAIL_INDEX) {
+        return { message: REGISTER_MESSAGE };
+      }
+      throw error;
+    }
 
-    const { token, tokenHash } = this.tokens.generateOpaqueToken();
-    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
-    await this.emailVerifications.save(
-      this.emailVerifications.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }),
-    );
-    await this.mail.sendVerificationEmail(user.email, token);
+    // After the commit: the mail provider is not transactional, and an outage
+    // there must not undo an account that already exists.
+    await this.mail.sendVerificationEmail(created.email, created.verificationToken);
 
     return { message: REGISTER_MESSAGE };
+  }
+
+  /**
+   * All three writes or none. A half-finished registration leaves an account that
+   * can never verify itself, and loses the birth date nothing asks for again.
+   */
+  private async registerInTransaction(
+    dto: RegisterDto,
+    passwordHash: string,
+  ): Promise<{ email: string; verificationToken: string }> {
+    return this.dataSource.transaction(async (manager: EntityManager) => {
+      const { user, verificationToken } = await this.createUnverifiedAccount(
+        {
+          email: dto.email,
+          passwordHash,
+          role: Role.PlayerParent,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+        },
+        manager,
+      );
+
+      await this.playersService.create(
+        {
+          ownerUserId: user.id,
+          displayName: displayNameFor(user, user.email),
+          isChild: false,
+          birthDate: dto.birthDate,
+        },
+        manager,
+      );
+
+      return { email: user.email, verificationToken };
+    });
   }
 
   async verifyEmail(token: string): Promise<void> {
@@ -568,7 +615,7 @@ export class AuthService {
   async createUnverifiedPlayer(
     input: {
       email: string;
-      password: string;
+      passwordHash: string;
       firstName?: string;
       lastName?: string;
       phone?: string;
@@ -579,12 +626,13 @@ export class AuthService {
   }
 
   /**
-   * As above, for any role. Used by the ShareLink join and coach-invite flows.
+   * As above, for any role. Takes a hash, not a password: every caller runs this
+   * inside a transaction, and argon2id's ~40ms must not hold a pooled connection.
    */
   async createUnverifiedAccount(
     input: {
       email: string;
-      password: string;
+      passwordHash: string;
       role: Role;
       firstName?: string;
       lastName?: string;
@@ -592,12 +640,11 @@ export class AuthService {
     },
     manager: EntityManager,
   ): Promise<{ user: User; verificationToken: string }> {
-    const passwordHash = await this.passwords.hash(input.password);
     const user = await this.usersService.create(
       {
         email: input.email,
         role: input.role,
-        passwordHash,
+        passwordHash: input.passwordHash,
         firstName: input.firstName,
         lastName: input.lastName,
         phone: input.phone,

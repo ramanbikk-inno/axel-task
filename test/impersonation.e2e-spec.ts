@@ -25,6 +25,46 @@ describe('Super Admin impersonation (e2e)', () => {
     await ctx.resetDb();
   });
 
+  /**
+   * The banner is the only thing telling an admin whose account they are looking
+   * at, so the name it shows has to survive the shared display-name helper.
+   */
+  it('falls back to the email when the target has no name on file', async () => {
+    const admin = await adminLogin();
+    const nameless = await createUser(ctx.dataSource, {
+      email: 'nameless@example.com',
+      firstName: null,
+      lastName: null,
+    });
+
+    const start = await request(app.getHttpServer())
+      .post(`/api/v1/users/${nameless.id}/impersonate`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ reason: 'support ticket #43' })
+      .expect(200);
+
+    // Not an empty string: a blank banner reads as "not impersonating".
+    expect(start.body.banner.name).toBe('nameless@example.com');
+  });
+
+  it('shows a single name when only one is on file', async () => {
+    const admin = await adminLogin();
+    const partial = await createUser(ctx.dataSource, {
+      email: 'first-only@example.com',
+      firstName: 'Mononym',
+      lastName: null,
+    });
+
+    const start = await request(app.getHttpServer())
+      .post(`/api/v1/users/${partial.id}/impersonate`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ reason: 'support ticket #44' })
+      .expect(200);
+
+    // No trailing space from the absent surname.
+    expect(start.body.banner.name).toBe('Mononym');
+  });
+
   const adminLogin = async (): Promise<{ token: string; id: string }> => {
     const sa = await ctx.seedSuperAdmin();
     const res = await request(app.getHttpServer())
@@ -48,6 +88,8 @@ describe('Super Admin impersonation (e2e)', () => {
     expect(start.body.accessToken).toBeTruthy();
     expect(start.body.banner.impersonatedUserId).toBe(player.userId);
     expect(start.body.banner.role).toBe(Role.PlayerParent);
+    // registerVerifiedPlayer supplies both names.
+    expect(start.body.banner.name).toBe('Reg Player');
     const impToken = start.body.accessToken as string;
 
     // The impersonation principal is the target, flagged as impersonating.
@@ -67,6 +109,7 @@ describe('Super Admin impersonation (e2e)', () => {
     expect(banner.body.impersonating).toBe(true);
     expect(banner.body.adminUserId).toBe(admin.id);
     expect(banner.body.target.impersonatedUserId).toBe(player.userId);
+    expect(banner.body.target.name).toBe('Reg Player');
 
     // A log row exists, open (no end yet).
     let logs = await ctx.dataSource.getRepository(ImpersonationLog).find();

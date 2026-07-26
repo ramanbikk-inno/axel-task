@@ -15,6 +15,7 @@ import { Request } from 'express';
 import { Roles } from '../ability/roles.decorator';
 import { RolesGuard } from '../ability/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { NotAChildGuard } from '../auth/guards/not-a-child.guard';
 import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { MyProfileView } from './dto/my-profile.view';
@@ -73,9 +74,13 @@ export class ProfileController {
     return this.profile.updateTrainer(req.user as Principal, dto);
   }
 
+  /**
+   * The account holder's own trainee profile. NotAChildGuard because a child
+   * shares the PlayerParent role but has no self profile of its own.
+   */
   @Patch('me/player')
   @HttpCode(200)
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, NotAChildGuard)
   @Roles(Role.PlayerParent)
   @ApiOkResponse({ type: MyProfileView })
   async updatePlayer(

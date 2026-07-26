@@ -67,6 +67,7 @@ export class PlayersService {
       school?: string | null;
       jerseyNumber?: string | null;
       gender?: string | null;
+      birthDate?: string;
     },
   ): Promise<PlayerProfile | null> {
     const profile = await this.findSelfProfile(ownerUserId);
@@ -84,6 +85,9 @@ export class PlayersService {
     }
     if (input.gender !== undefined) {
       profile.gender = input.gender;
+    }
+    if (input.birthDate !== undefined) {
+      profile.birthDate = input.birthDate;
     }
     return this.profiles.save(profile);
   }

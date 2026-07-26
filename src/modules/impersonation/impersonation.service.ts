@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { displayNameFor } from '../../shared/format/display-name';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { Action, AbilityFactory } from '../ability/ability.factory';
 import { AuditService } from '../audit/audit.service';
@@ -10,7 +11,6 @@ import { AuthSession } from '../auth/entities/auth-session.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { Principal } from '../auth/principal';
 import { TokenService } from '../auth/token.service';
-import { User } from '../users/entities/user.entity';
 import { UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
 import { ImpersonationHistoryView } from './dto/impersonation-history.dto';
@@ -33,11 +33,6 @@ export interface StartImpersonationResult {
   expiresIn: number;
   sessionExpiresAt: string;
   banner: ImpersonationBanner;
-}
-
-function displayName(user: User): string {
-  const full = [user.firstName, user.lastName].filter((v) => v && v.trim() !== '').join(' ');
-  return full !== '' ? full : user.email;
 }
 
 @Injectable()
@@ -160,7 +155,7 @@ export class ImpersonationService {
       sessionExpiresAt: sessionExpiresAt.toISOString(),
       banner: {
         impersonatedUserId: target.id,
-        name: displayName(target),
+        name: displayNameFor(target, target.email),
         role: target.role,
       },
     };
@@ -278,7 +273,7 @@ export class ImpersonationService {
       adminUserId: principal.actor.userId,
       target: {
         impersonatedUserId: target.id,
-        name: displayName(target),
+        name: displayNameFor(target, target.email),
         role: target.role,
       },
     };

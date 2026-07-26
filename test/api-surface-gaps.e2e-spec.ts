@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 
-import { bootstrapE2E, E2EContext } from './setup-e2e';
+import { ADULT_DOB, bootstrapE2E, E2EContext } from './setup-e2e';
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
 import { CoachProfile } from '../src/modules/coaches/entities/coach-profile.entity';
 import { PlayerProfile } from '../src/modules/players/entities/player-profile.entity';
@@ -17,8 +17,6 @@ import { ErrorCode } from '../src/shared/errors/error-codes';
 describe('API surface gaps (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
-
-  const ADULT_DOB = '1994-03-22';
 
   beforeAll(async () => {
     ctx = await bootstrapE2E();

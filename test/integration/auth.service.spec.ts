@@ -2,9 +2,11 @@ import { UnauthorizedException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { DataSource, EntityManager } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
+import { PlayersService } from '../../src/modules/players/players.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../../src/modules/users/entities/user.enums';
@@ -48,6 +50,8 @@ describe('AuthService (login + register)', () => {
   let mail: jest.Mocked<Pick<MailService, 'sendVerificationEmail'>>;
   let sessions: RepoMock;
   let refreshTokens: RepoMock;
+  /** Ordered log of the two things whose relative order matters in register(). */
+  let calls: string[];
 
   const baseUser: User = {
     id: 'user-1',
@@ -71,6 +75,7 @@ describe('AuthService (login + register)', () => {
   } as User;
 
   beforeEach(async () => {
+    calls = [];
     usersService = {
       findByEmail: jest.fn(),
       findByEmailWithPassword: jest.fn(),
@@ -82,7 +87,10 @@ describe('AuthService (login + register)', () => {
       verify: jest.fn(),
       needsRehash: jest.fn().mockReturnValue(false),
     };
-    passwords.hash.mockResolvedValue('argon-dummy');
+    passwords.hash.mockImplementation(async () => {
+      calls.push('hash');
+      return 'argon-dummy';
+    });
     tokens = {
       signAccess: jest.fn(),
       signRefresh: jest.fn(),
@@ -122,6 +130,21 @@ describe('AuthService (login + register)', () => {
           useValue: {
             closeForSession: jest.fn().mockResolvedValue(undefined),
             closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: PlayersService,
+          useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
+        },
+        {
+          // register() runs inside a transaction; the callback gets the same
+          // repository stubs the rest of these providers use.
+          provide: DataSource,
+          useValue: {
+            transaction: (cb: (m: unknown) => unknown) => {
+              calls.push('transaction');
+              return cb({ getRepository: () => repoMock() });
+            },
           },
         },
         {
@@ -229,6 +252,8 @@ describe('AuthService (login + register)', () => {
         role: Role.PlayerParent,
         emailVerified: false,
       }),
+      // Registration runs in a transaction, so the manager is threaded through.
+      expect.anything(),
     );
   });
 
@@ -245,5 +270,50 @@ describe('AuthService (login + register)', () => {
       message: 'Registration received. Check your email to verify your account.',
     });
     expect(usersService.create).not.toHaveBeenCalled();
+  });
+
+  it('hashes before opening the transaction, not inside it', async () => {
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockResolvedValue({ ...baseUser, id: 'new-user', emailVerified: false });
+
+    await service.register({
+      email: 'fresh@example.com',
+      password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
+    });
+
+    // Reversed, argon2id's ~40ms runs on a checked-out pooled connection.
+    expect(calls).toEqual(['hash', 'transaction']);
+  });
+
+  it('hashes even when the address is taken, so the answer is not measurably faster', async () => {
+    usersService.findByEmail.mockResolvedValue(baseUser);
+
+    await service.register({
+      email: 'player@example.com',
+      password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
+    });
+
+    // Skipping the hash here would let a caller time the difference and learn
+    // which addresses are registered — what the generic message exists to hide.
+    expect(calls).toEqual(['hash']);
+  });
+
+  it('createUnverifiedAccount stores the hash it is handed and never computes one', async () => {
+    usersService.create.mockResolvedValue({ ...baseUser, id: 'invited-coach' });
+    const manager = { getRepository: () => repoMock() } as unknown as EntityManager;
+
+    await service.createUnverifiedAccount(
+      { email: 'coach@example.com', passwordHash: 'pre-computed-hash', role: Role.Coach },
+      manager,
+    );
+
+    // Hashing here would put argon2 back inside all three callers' transactions.
+    expect(passwords.hash).not.toHaveBeenCalled();
+    expect(usersService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ passwordHash: 'pre-computed-hash' }),
+      manager,
+    );
   });
 });

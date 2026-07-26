@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AuditModule } from '../audit/audit.module';
+import { AuthModule } from '../auth/auth.module';
 import { PlayersModule } from '../players/players.module';
 import { StorageModule } from '../storage/storage.module';
 import { TrainersModule } from '../trainers/trainers.module';
@@ -9,7 +10,7 @@ import { ProfileController } from './profile.controller';
 import { ProfileService } from './profile.service';
 
 @Module({
-  imports: [UsersModule, TrainersModule, PlayersModule, StorageModule, AuditModule],
+  imports: [UsersModule, TrainersModule, PlayersModule, StorageModule, AuditModule, AuthModule],
   controllers: [ProfileController],
   providers: [ProfileService],
   exports: [ProfileService],
