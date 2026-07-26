@@ -2,7 +2,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
@@ -50,6 +50,8 @@ describe('AuthService (login + register)', () => {
   let mail: jest.Mocked<Pick<MailService, 'sendVerificationEmail'>>;
   let sessions: RepoMock;
   let refreshTokens: RepoMock;
+  /** Ordered log of the two things whose relative order matters in register(). */
+  let calls: string[];
 
   const baseUser: User = {
     id: 'user-1',
@@ -73,6 +75,7 @@ describe('AuthService (login + register)', () => {
   } as User;
 
   beforeEach(async () => {
+    calls = [];
     usersService = {
       findByEmail: jest.fn(),
       findByEmailWithPassword: jest.fn(),
@@ -84,7 +87,10 @@ describe('AuthService (login + register)', () => {
       verify: jest.fn(),
       needsRehash: jest.fn().mockReturnValue(false),
     };
-    passwords.hash.mockResolvedValue('argon-dummy');
+    passwords.hash.mockImplementation(async () => {
+      calls.push('hash');
+      return 'argon-dummy';
+    });
     tokens = {
       signAccess: jest.fn(),
       signRefresh: jest.fn(),
@@ -135,7 +141,10 @@ describe('AuthService (login + register)', () => {
           // repository stubs the rest of these providers use.
           provide: DataSource,
           useValue: {
-            transaction: (cb: (m: unknown) => unknown) => cb({ getRepository: () => repoMock() }),
+            transaction: (cb: (m: unknown) => unknown) => {
+              calls.push('transaction');
+              return cb({ getRepository: () => repoMock() });
+            },
           },
         },
         {
@@ -261,5 +270,52 @@ describe('AuthService (login + register)', () => {
       message: 'Registration received. Check your email to verify your account.',
     });
     expect(usersService.create).not.toHaveBeenCalled();
+  });
+
+  it('hashes before opening the transaction, not inside it', async () => {
+    usersService.findByEmail.mockResolvedValue(null);
+    usersService.create.mockResolvedValue({ ...baseUser, id: 'new-user', emailVerified: false });
+
+    await service.register({
+      email: 'fresh@example.com',
+      password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
+    });
+
+    // Reversed, argon2id's ~40ms runs on a checked-out pooled connection.
+    expect(calls).toEqual(['hash', 'transaction']);
+  });
+
+  it('hashes even when the address is taken, so the answer is not measurably faster', async () => {
+    usersService.findByEmail.mockResolvedValue(baseUser);
+
+    await service.register({
+      email: 'player@example.com',
+      password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
+    });
+
+    // Skipping the hash here would let a caller time the difference and learn
+    // which addresses are registered — what the generic message exists to hide.
+    expect(calls).toEqual(['hash']);
+  });
+
+  it('createUnverifiedAccount stores the hash it is handed and never computes one', async () => {
+    usersService.create.mockResolvedValue({ ...baseUser, id: 'invited-coach' });
+    const manager = { getRepository: () => repoMock() } as unknown as EntityManager;
+
+    await service.createUnverifiedAccount(
+      { email: 'coach@example.com', passwordHash: 'pre-computed-hash', role: Role.Coach },
+      manager,
+    );
+
+    // This helper runs inside a caller's transaction every time it is used, so
+    // hashing here would put argon2 back on a held connection — in the coach
+    // invite and ShareLink join flows as well as registration.
+    expect(passwords.hash).not.toHaveBeenCalled();
+    expect(usersService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ passwordHash: 'pre-computed-hash' }),
+      manager,
+    );
   });
 });

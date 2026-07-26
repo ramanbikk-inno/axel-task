@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
@@ -58,6 +59,7 @@ export class CoachesService {
     private readonly mail: MailService,
     private readonly audit: AuditService,
     private readonly clock: ClockService,
+    private readonly passwords: PasswordService,
   ) {}
 
   async invite(principal: Principal, dto: InviteCoachDto): Promise<CoachInvitationView> {
@@ -416,6 +418,12 @@ export class CoachesService {
 
   /** New coach accepts an invite: creates the Coach account + profile. */
   async accept(code: string, dto: AcceptCoachInviteDto): Promise<{ message: string }> {
+    // Outside the transaction: argon2id is ~40ms of CPU and the transaction below
+    // holds a row lock on the invite the whole time. Whether we need the hash is
+    // only known once that lock is held, so it is computed unconditionally and
+    // discarded when an existing account is re-homed instead.
+    const passwordHash = await this.passwords.hash(dto.password);
+
     let verificationToken = '';
     const user = await this.dataSource.transaction(async (manager: EntityManager) => {
       // Locked inside the transaction so two people cannot accept the same
@@ -441,7 +449,7 @@ export class CoachesService {
       const created = await this.authService.createUnverifiedAccount(
         {
           email,
-          password: dto.password,
+          passwordHash,
           role: Role.Coach,
           firstName: dto.firstName,
           lastName: dto.lastName,

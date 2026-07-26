@@ -8,6 +8,7 @@ import {
 import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { displayNameFor } from '../../shared/format/display-name';
 import { AuditService } from '../audit/audit.service';
@@ -65,6 +66,7 @@ export class EnrollmentService {
     private readonly clock: ClockService,
     private readonly audit: AuditService,
     private readonly context: ContextService,
+    private readonly passwords: PasswordService,
   ) {}
 
   /** Public: resolve a ShareLink for the join page (trainer name + validity). */
@@ -133,11 +135,15 @@ export class EnrollmentService {
    * join confirmation.
    */
   async registerViaShareLink(code: string, dto: JoinRegisterDto): Promise<JoinResult> {
-    // The same section-9 rule /auth/register enforces. Checked here too because
-    // this is a second, equally public way to mint an account — a gate on only
-    // one of two doors is not a gate. Before the transaction, so an underage
-    // attempt never takes a use off the trainer's link.
+    // The same age floor /auth/register enforces. Checked here too because this
+    // is a second, equally public way to mint an account — a gate on only one of
+    // two doors is not a gate. Before the transaction, so an underage attempt
+    // never takes a use off the trainer's link.
     this.authService.assertOldEnoughForOwnAccount(dto.birthDate);
+
+    // Also before it: argon2id is ~40ms of CPU, and the transaction holds a row
+    // lock on the ShareLink for as long as it runs.
+    const passwordHash = await this.passwords.hash(dto.password);
 
     let verificationToken = '';
     const result = await this.dataSource.transaction(async (manager: EntityManager) => {
@@ -160,7 +166,7 @@ export class EnrollmentService {
       const { user, verificationToken: token } = await this.authService.createUnverifiedPlayer(
         {
           email: dto.email,
-          password: dto.password,
+          passwordHash,
           firstName: dto.firstName,
           lastName: dto.lastName,
           phone: dto.phone,

@@ -215,6 +215,12 @@ export class AuthService {
     // address is already taken.
     this.assertOldEnoughForOwnAccount(dto.birthDate);
 
+    // Unconditionally, and before both the existence check and the transaction.
+    // Hashing only for addresses that turn out to be free would make a taken one
+    // answer ~40ms faster — the one fact the generic message hides — and doing it
+    // inside the transaction would hold a pooled connection for that whole time.
+    const passwordHash = await this.passwords.hash(dto.password);
+
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
       // Enumeration-safe: no-op, never throw EMAIL_ALREADY_EXISTS here.
@@ -227,7 +233,7 @@ export class AuthService {
     // thing the generic message exists to hide. Swallowed to the same no-op.
     let created: { email: string; verificationToken: string };
     try {
-      created = await this.registerInTransaction(dto);
+      created = await this.registerInTransaction(dto, passwordHash);
     } catch (error) {
       const driver = error as { code?: string; constraint?: string };
       // Narrowed to the email index: any other unique collision is a real fault
@@ -253,12 +259,13 @@ export class AuthService {
    */
   private async registerInTransaction(
     dto: RegisterDto,
+    passwordHash: string,
   ): Promise<{ email: string; verificationToken: string }> {
     return this.dataSource.transaction(async (manager: EntityManager) => {
       const { user, verificationToken } = await this.createUnverifiedAccount(
         {
           email: dto.email,
-          password: dto.password,
+          passwordHash,
           role: Role.PlayerParent,
           firstName: dto.firstName,
           lastName: dto.lastName,
@@ -616,7 +623,7 @@ export class AuthService {
   async createUnverifiedPlayer(
     input: {
       email: string;
-      password: string;
+      passwordHash: string;
       firstName?: string;
       lastName?: string;
       phone?: string;
@@ -628,11 +635,14 @@ export class AuthService {
 
   /**
    * As above, for any role. Used by the ShareLink join and coach-invite flows.
+   * Takes a hash rather than a password on purpose: argon2id costs ~40ms of CPU
+   * and every caller runs this inside a transaction, so hashing here would hold
+   * a pooled connection open doing nothing. Hash first, then open it.
    */
   async createUnverifiedAccount(
     input: {
       email: string;
-      password: string;
+      passwordHash: string;
       role: Role;
       firstName?: string;
       lastName?: string;
@@ -640,12 +650,11 @@ export class AuthService {
     },
     manager: EntityManager,
   ): Promise<{ user: User; verificationToken: string }> {
-    const passwordHash = await this.passwords.hash(input.password);
     const user = await this.usersService.create(
       {
         email: input.email,
         role: input.role,
-        passwordHash,
+        passwordHash: input.passwordHash,
         firstName: input.firstName,
         lastName: input.lastName,
         phone: input.phone,
