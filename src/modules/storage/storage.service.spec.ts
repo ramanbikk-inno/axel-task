@@ -73,7 +73,7 @@ describe('CloudinaryStorageService', () => {
 
     const [, options] = uploadMock.mock.calls[0];
     // `limit` only ever scales down, so a small image is stored untouched
-    // (US-01.14 asks for auto-resize, not rejection).
+    // (asks for auto-resize, not rejection).
     expect(options.transformation).toEqual([
       { width: MAX_EDGE_PX, height: MAX_EDGE_PX, crop: 'limit' },
       { flags: 'strip_profile' },

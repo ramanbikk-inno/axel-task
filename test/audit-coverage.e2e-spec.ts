@@ -9,8 +9,6 @@ import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile
 import { Role } from '../src/modules/users/entities/user.enums';
 
 /**
- * US-01.07: "All actions during impersonation logged with admin_id context."
- *
  * The attribution mechanism was complete, but only admin/, coaches/, profile/
  * and impersonation/ ever emitted a row — so every mutation reachable through
  * availability/, family/, enrollment/ and trainers/ produced no audit entry at
@@ -18,7 +16,7 @@ import { Role } from '../src/modules/users/entities/user.enums';
  * impersonation history. These tests pin the emission itself; without them the
  * next refactor can silently drop an action and nothing fails.
  */
-describe('Audit coverage for mutating endpoints (e2e, US-01.07)', () => {
+describe('Audit coverage for mutating endpoints (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 
@@ -77,7 +75,7 @@ describe('Audit coverage for mutating endpoints (e2e, US-01.07)', () => {
     return { token: await login(parent.email, parent.password), userId: parent.userId };
   };
 
-  describe('trainers/ — portal branding (US-01.14)', () => {
+  describe('trainers/ — portal branding', () => {
     it('records the colour change against the trainer org', async () => {
       const trainer = await makeTrainer('brand-color@example.com');
 
@@ -141,7 +139,7 @@ describe('Audit coverage for mutating endpoints (e2e, US-01.07)', () => {
     });
   });
 
-  describe('family/ — profiles and associations (US-01.03 / US-01.04)', () => {
+  describe('family/ — profiles and associations', () => {
     it('records child creation', async () => {
       const parent = await makeParent('audit-child@example.com');
 
@@ -264,7 +262,7 @@ describe('Audit coverage for mutating endpoints (e2e, US-01.07)', () => {
     });
   });
 
-  describe('enrollment/ — links and joins (US-01.02)', () => {
+  describe('enrollment/ — links and joins', () => {
     it('records share-link creation against the link itself', async () => {
       const trainer = await makeTrainer('audit-link@example.com');
 
@@ -333,7 +331,7 @@ describe('Audit coverage for mutating endpoints (e2e, US-01.07)', () => {
     });
   });
 
-  describe('availability/ — Best Times and My Times (US-01.09 / US-01.10)', () => {
+  describe('availability/ — Best Times and My Times', () => {
     it('records a player availability replacement with the resulting slot count', async () => {
       const trainer = await makeTrainer('audit-avail-trainer@example.com');
       const parent = await makeParent('audit-avail-parent@example.com');
@@ -454,7 +452,7 @@ describe('Audit coverage for mutating endpoints (e2e, US-01.07)', () => {
       // actor stays the identity the request was made as...
       expect(row.actorUserId).toBe(trainer.userId);
       // ...and the admin behind it is recorded separately, which is the whole
-      // point of US-01.07's attribution requirement.
+      // point of attributing actions to the admin behind them.
       expect(row.onBehalfOfAdminId).not.toBeNull();
       expect(row.impersonationSessionId).not.toBeNull();
     });

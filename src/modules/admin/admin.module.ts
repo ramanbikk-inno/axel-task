@@ -24,8 +24,8 @@ import { UserDeletionLog } from './entities/user-deletion-log.entity';
     AbilityModule,
     AuditModule,
     PlayersModule,
-    // For ShareLinksService: a GDPR erasure has to reach the coach-invitation
-    // copy of the person's email, which lives in this module's table.
+    // For ShareLinksService: erasure has to reach the coach-invitation copy of
+    // the person's email, which lives in this module's table.
     EnrollmentModule,
     StorageModule,
     ClockModule,

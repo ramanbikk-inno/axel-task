@@ -74,20 +74,13 @@ export class ShareLinksService {
   }
 
   /**
-   * Resolve, validate and lock a share link for redemption, inside the caller's
+   * Resolve, validate and lock a share link for redemption inside the caller's
    * transaction.
    *
-   * `expectedType` is required rather than optional: player joins and coach
-   * invite acceptance redeem out of the same table, and the player-side paths
-   * used to skip the type check entirely — so a stranger could spend a
-   * trainer's single-use, 7-day coach invite by registering as a player,
-   * burning the invite and joining the org.
-   *
-   * The pessimistic write lock is what makes single-use actually single use.
-   * Validating and then incrementing in two statements is a check-then-act
-   * race: two concurrent redemptions of a maxUses=1 link both read
-   * useCount = 0 and both succeed. Holding the row until the transaction
-   * commits serialises them, so the second sees the incremented count.
+   * `expectedType` is required, not optional: player joins and coach invites
+   * redeem from the same table, and skipping the check let a stranger burn a
+   * coach invite by registering as a player. The write lock is what makes
+   * single-use single use — validate-then-increment is a check-then-act race.
    */
   async lockForRedemption(
     code: string,
@@ -147,17 +140,10 @@ export class ShareLinksService {
   }
 
   /**
-   * Erase a person's address from any coach invitation still holding it, and
-   * retire the link (US-01.13).
-   *
-   * `target_email` is the one place a coach's email is copied out of `users`,
-   * so an erasure that only anonymised the account left the address sitting in
-   * this table — reachable by the trainer's invitation list. Deactivating as
-   * well as nulling matters: a pending invite whose recipient no longer exists
-   * must not stay redeemable, and an invite with no address cannot be resent.
-   *
-   * Matched case-insensitively because `users.email` is citext while this
-   * column is plain text, so the stored copy need not match byte-for-byte.
+   * Erase an address from any coach invitation holding it, and retire the link.
+   * Deactivating as well as nulling matters: a pending invite whose recipient no
+   * longer exists must not stay redeemable. Matched case-insensitively because
+   * `users.email` is citext while this column is plain text.
    */
   async scrubTargetEmail(email: string, manager?: EntityManager): Promise<void> {
     await this.repo(manager)

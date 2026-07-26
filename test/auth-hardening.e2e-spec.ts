@@ -7,13 +7,10 @@ import { User } from '../src/modules/users/entities/user.entity';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
 /**
- * Regression cover for the auth-surface findings in the Epic-01 audit.
- *
- * The login cases matter most: the password-complexity policy was applied to
- * *login*, so a wrong password of the wrong shape came back as a 422 quoting
- * the policy while a wrong password of the right shape came back as a 401.
- * That both leaks the policy to an unauthenticated caller and breaks the
- * enumeration-safe contract that every failed login is indistinguishable.
+ * The login cases matter most: applying the password-complexity policy to
+ * *login* returned 422 quoting the policy for a wrong password of the wrong
+ * shape and 401 for the right shape, leaking the policy and making failed
+ * logins distinguishable.
  */
 describe('Auth hardening (e2e)', () => {
   let ctx: E2EContext;

@@ -18,7 +18,7 @@ export class UserStatusChangeDto {
  * permanent record.
  */
 export class DeleteUserDto {
-  @ApiProperty({ minLength: 5, maxLength: 500, description: 'Required (US-01.13)' })
+  @ApiProperty({ minLength: 5, maxLength: 500, description: 'Required' })
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MinLength(5)

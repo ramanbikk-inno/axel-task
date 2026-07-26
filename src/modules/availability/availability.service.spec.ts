@@ -537,7 +537,7 @@ describe('AvailabilityService', () => {
       expect(result[0].slots).toHaveLength(2);
     });
   });
-  describe('coach My Times (US-01.10)', () => {
+  describe('coach My Times', () => {
     const coachRow = { id: 'c1', userId: 'coach-user', trainerProfileId: 't1' };
 
     it('throws Forbidden (COACH_PROFILE_NOT_FOUND) when the account is not a coach', async () => {
@@ -632,7 +632,7 @@ describe('AvailabilityService', () => {
     });
   });
 
-  describe('checkCoachConflict (US-01.10 trainer assignment flow)', () => {
+  describe('checkCoachConflict (trainer assignment flow)', () => {
     const setup = (daySlots: AvailabilitySlot[]): ReturnType<typeof makeService> => {
       const ctx = makeService();
       ctx.findByUserId.mockResolvedValue({ id: 't1' });

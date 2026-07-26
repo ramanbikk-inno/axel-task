@@ -60,10 +60,8 @@ export class AdminService {
         message: 'A Super Admin cannot be created through this endpoint.',
       });
     }
-    // Previously any non-SuperAdmin role was accepted and then quietly
-    // overwritten with Trainer, so POST /users {role:'Coach'} returned 201
-    // describing an account that was never created. Coaches are invited by
-    // their trainer, not minted here.
+    // Coaches are invited by their trainer, not minted here. Anything other
+    // than Trainer used to be accepted and silently rewritten.
     if (input.role !== undefined && input.role !== Role.Trainer) {
       throw new BadRequestException({
         errorCode: ErrorCode.VALIDATION_ERROR,
@@ -102,7 +100,6 @@ export class AdminService {
 
       setupToken = await this.authService.createSetupToken(created.id, manager);
 
-      // Audit log: who created the trainer, when, and the trainer details.
       await this.audit.record(
         {
           action: AUDIT_TRAINER_CREATED,
@@ -126,10 +123,8 @@ export class AdminService {
   }
 
   /**
-   * Soft-deactivate a user (US-01.12): flips status to Inactive, revokes their
-   * active sessions so they are logged out, and records the action. All
-   * historical data is preserved. Super Admin accounts (including the caller)
-   * cannot be deactivated to avoid locking the platform out.
+   * Flip to Inactive and log the user out. Historical data is kept. Super Admins
+   * are excluded so the platform cannot be locked out.
    */
   async deactivateUser(
     targetUserId: string,
@@ -145,8 +140,8 @@ export class AdminService {
       });
     }
 
-    // Without this, Deleted -> deactivate -> Inactive -> reactivate -> Active
-    // walks a GDPR-deleted account back to life past the guard on reactivate.
+    // Otherwise Deleted -> deactivate -> reactivate walks an erased account back
+    // to life, past the guard on reactivate.
     if (target.status === UserStatus.Deleted) {
       throw new ConflictException({
         errorCode: ErrorCode.ACCOUNT_DELETED,
@@ -169,10 +164,7 @@ export class AdminService {
     return UserSummaryDto.fromEntity(updated);
   }
 
-  /**
-   * Reactivate a previously deactivated user (US-01.12). Deleted (anonymized)
-   * users cannot be reactivated (US-01.13 — deletion is permanent).
-   */
+  /** Reactivate a deactivated user. Erasure is permanent, so Deleted is refused. */
   async reactivateUser(
     targetUserId: string,
     actor: Principal,
@@ -201,7 +193,7 @@ export class AdminService {
     return UserSummaryDto.fromEntity(updated);
   }
 
-  /** Super Admin edits any user's common profile fields (US-01.11). */
+  /** Super Admin edits any user's common profile fields. */
   async updateUser(
     targetUserId: string,
     actor: Principal,
@@ -225,10 +217,9 @@ export class AdminService {
   }
 
   /**
-   * GDPR delete (US-01.13): permanently anonymize a user's PII (and the PII on
-   * every player profile they own), mark them Deleted, revoke sessions, and
-   * write a compliance record to the audit log (original email/name preserved
-   * there for legal purposes). Historical references become "Deleted User".
+   * Permanent erasure: anonymise the user and every profile they own, mark them
+   * Deleted, revoke sessions. The audit row keeps the original email and name as
+   * the compliance record; everything else reads "Deleted User".
    */
   async deleteUser(
     targetUserId: string,
@@ -252,16 +243,14 @@ export class AdminService {
 
     const now = this.clock.now();
     const photoPublicId = target.photoPublicId;
-    // Captured before anonymisation overwrites the column: the copies of this
-    // address living outside `users` can only be found by the original value.
+    // Captured before anonymisation: copies living outside `users` can only be
+    // found by the original value.
     const originalEmail = target.email;
 
-    // Cascades to the children's own logins. A parent's erasure that left
-    // their child's account signed-in-able, with the child's name and email
-    // still on it, would not be an erasure of the family's data at all.
+    // Cascades to the children's own logins, which would otherwise stay usable
+    // with the child's name and email intact.
     const childUserIds = await this.playersService.childUserIdsByOwner(target.id);
-    // A child login carries its own address, so the family's erasure has to
-    // sweep those out of the same off-`users` copies.
+    // Each child login has its own address to sweep out of those same copies.
     const erasedEmails = [
       originalEmail,
       ...(await this.usersService.findByIds(childUserIds)).map((u) => u.email),
@@ -286,19 +275,16 @@ export class AdminService {
 
       await this.usersService.anonymize(target.id, manager);
       await this.playersService.anonymizeByOwner(target.id, manager);
-      // Covers the target being a child login rather than a parent: that
-      // profile is owned by the parent, so the owner sweep above never reaches
-      // it and the child's name, birth date, school and emergency contact
-      // would survive their own erasure.
+      // A child's profile is owned by the parent, so the owner sweep above never
+      // reaches it when the child's own account is the target.
       await this.playersService.anonymizeByChildUserId(target.id, manager);
       for (const childUserId of childUserIds) {
         await this.usersService.anonymize(childUserId, manager);
         await this.playersService.anonymizeByChildUserId(childUserId, manager);
       }
 
-      // Copies of the address that live outside `users`. These take the
-      // pre-anonymisation values, which is why they run against the emails
-      // captured above rather than re-reading rows this transaction just wrote.
+      // Copies outside `users`, matched on the pre-anonymisation values captured
+      // above rather than rows this transaction has already rewritten.
       for (const email of erasedEmails) {
         await this.shareLinks.scrubTargetEmail(email, manager);
         await this.audit.scrubEmailFromMetadata(email, manager);
@@ -320,8 +306,8 @@ export class AdminService {
       await this.authService.revokeAllUserSessions(childUserId, 'parent-deleted');
     }
 
-    // Outside the transaction: the provider is not transactional, and an
-    // outage there must not roll back an erasure that is already recorded.
+    // Outside the transaction: the storage provider is not transactional, and an
+    // outage there must not roll back a recorded erasure.
     if (photoPublicId !== null) {
       await this.discardAsset(photoPublicId);
     }

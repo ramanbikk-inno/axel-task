@@ -71,7 +71,7 @@ export class CoachesController {
     return this.coaches.listCoaches(req.user as Principal, query.includeInactive ?? false);
   }
 
-  /** US-01.08: "Link expires: Clear message, option to resend invitation". */
+  /** Resend an invitation whose link expired. */
   @Post('invitations/:id/resend')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -114,10 +114,8 @@ export class CoachesController {
   }
 
   /**
-   * The trainer's publicly-listed coaches, as their players and parents see
-   * them. Not role-gated — everyone inside an organisation may see who coaches
-   * there — but scoped to that organisation's members, so authentication alone
-   * does not open one org's staff list to another's.
+   * The trainer's publicly-listed coaches. Not role-gated — anyone in the
+   * organisation may see who coaches there — but scoped to its members.
    */
   @Get('public/:trainerProfileId')
   @HttpCode(200)
@@ -131,7 +129,7 @@ export class CoachesController {
     return this.coaches.listPublicCoaches(req.user as Principal, trainerProfileId);
   }
 
-  /** Spec section 6: a coach "may edit their own profile and availability". */
+  /** A coach edits their own profile. */
   @Get('me')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard, RolesGuard)

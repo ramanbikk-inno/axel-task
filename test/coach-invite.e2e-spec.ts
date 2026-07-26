@@ -10,7 +10,7 @@ import { ErrorCode } from '../src/shared/errors/error-codes';
 
 const COACH_PASSWORD = 'C0ach!Passw0rd';
 
-describe('Trainer invites coach (e2e, US-01.08)', () => {
+describe('Trainer invites coach (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

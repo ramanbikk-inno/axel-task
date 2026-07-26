@@ -22,8 +22,8 @@ import { CoachAvailabilityOverride } from './entities/coach-availability-overrid
 
 @Module({
   imports: [
-    // CoachProfile is read directly rather than through CoachesModule: this
-    // module only needs the row, and CoachesModule pulls in Auth/Enrollment.
+    // CoachProfile directly rather than via CoachesModule, which would drag in
+    // Auth and Enrollment for the sake of one row.
     TypeOrmModule.forFeature([AvailabilitySlot, CoachAvailabilityOverride, CoachProfile]),
     PlayersModule,
     TrainersModule,

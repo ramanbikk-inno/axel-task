@@ -5,9 +5,8 @@ const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml'];
 
 export class UpdateBrandingDto {
   /**
-   * US-01.14 offers a "Reset to default option" beside the picker. Null is that
-   * reset — the logo already had DELETE /trainers/me/logo, and the colour had
-   * no way back to the platform default at all.
+   * Null resets to the platform default. The logo already had
+   * DELETE /trainers/me/logo; the colour had no way back.
    */
   @ApiProperty({
     example: '#1e88e5',

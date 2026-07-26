@@ -44,13 +44,9 @@ interface DriverErrorLike {
 }
 
 /**
- * Postgres errors that represent a client mistake, not a server fault.
- *
- * Without this a lost race on a unique index surfaced as 500 INTERNAL_ERROR:
- * two concurrent registrations both pass the read-then-write existence check,
- * one insert violates uq_users_email, and the caller sees a server error
- * instead of the 409 the contract promises. Same for a malformed uuid reaching
- * the driver, which is a 400.
+ * Postgres errors that are a client mistake, not a server fault. A lost race on
+ * a unique index is the 409 the contract promises, not a 500; a malformed uuid
+ * reaching the driver is a 400.
  */
 const PG_UNIQUE_VIOLATION = '23505';
 const PG_INVALID_TEXT_REPRESENTATION = '22P02';

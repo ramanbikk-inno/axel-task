@@ -9,14 +9,11 @@ import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
 /**
- * `GET /coaches/public/:trainerProfileId` — who may read an organisation's staff
- * list, and which of its coaches appear on it.
+ * Who may read an organisation's staff list, and which coaches appear on it.
  *
- * "Public" here means public *to the organisation*. That distinction is the
- * whole point of these tests: the endpoint was authenticated but unscoped, so
- * any logged-in account — a parent from another club, a competing trainer —
- * could read any organisation's coaches, names and credentials and all, from
- * nothing but its id. Authentication is not a tenancy boundary.
+ * "Public" means public *to the organisation*. The endpoint was authenticated
+ * but unscoped, so any logged-in account — including a competing trainer —
+ * could read any org's coaches from its id. Authentication is not a boundary.
  */
 describe('Coach public visibility and its tenancy boundary (e2e)', () => {
   let ctx: E2EContext;

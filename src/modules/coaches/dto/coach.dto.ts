@@ -58,8 +58,6 @@ export class CoachView {
   @ApiProperty({ nullable: true }) firstName!: string | null;
   @ApiProperty({ nullable: true }) lastName!: string | null;
   @ApiProperty({ nullable: true }) bio!: string | null;
-  // Accepted by PATCH /coaches/me since US-01.08 but never returned, so a coach
-  // could not read back what they had just written.
   @ApiProperty({ nullable: true }) credentials!: string | null;
   @ApiProperty({ nullable: true }) certifications!: string | null;
   @ApiProperty() publicVisible!: boolean;
@@ -69,15 +67,8 @@ export class CoachView {
 }
 
 /**
- * What a coach may change about themselves (spec section 6: "may edit their
- * own profile and availability"). Deliberately does not include the trainer
- * they work for or their status — employment is the trainer's to set.
- */
-/**
- * A coach as anyone in the trainer's organisation may see them — the read
- * `publicVisible` exists to gate (US-01.08 "Public profile management").
- * Deliberately narrower than CoachView: no email, no employment dates, nothing
- * a player has no business seeing.
+ * A coach as anyone in their organisation sees them. Narrower than CoachView on
+ * purpose: no email, no employment dates.
  */
 export class PublicCoachView {
   @ApiProperty() id!: string;
@@ -108,11 +99,9 @@ export class UpdateCoachProfileDto {
   certifications?: string | null;
 
   /**
-   * Now that this gates `GET /coaches/public/:trainerProfileId`, a value the
-   * caller did not mean must not be inferred. The transform stays lenient about
-   * the string `'true'` that form encodings send, but it no longer folds
-   * null/undefined into `false` — doing so quietly un-listed a coach on a
-   * request that never mentioned a boolean at all.
+   * The transform stays lenient about the `'true'` string form encodings send,
+   * but must not fold null into `false`: that quietly un-listed a coach on a
+   * request that never mentioned a boolean.
    */
   @ApiPropertyOptional({ description: 'Show this profile on the trainer’s public page' })
   @IsOptionalNotNull()

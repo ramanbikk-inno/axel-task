@@ -45,17 +45,9 @@ import { identityTracker, ipTracker } from './modules/auth/guards/throttle-track
     CoachesModule,
     AvailabilityModule,
     /**
-     * Two independent buckets, because one cannot cover both attacks:
-     *
-     * - `default` keys on IP + submitted email and protects a single account
-     *   from targeted brute force. On its own it is useless against spraying:
-     *   an attacker trying one password against thousands of addresses gets a
-     *   fresh bucket for every address.
-     * - `ip` keys on IP alone and catches exactly that. Kept deliberately
-     *   looser than the per-account limit so that a gym or school behind one
-     *   NAT does not lock its own families out.
-     *
-     * A request must satisfy both.
+     * Two buckets, both of which must pass. `default` keys on IP + email and
+     * stops targeted brute force; `ip` keys on IP alone and stops spraying,
+     * looser so a school behind one NAT does not lock out its own families.
      */
     ThrottlerModule.forRoot([
       { name: 'default', ttl: 60000, limit: 60, getTracker: identityTracker },

@@ -8,7 +8,7 @@ import { User } from '../src/modules/users/entities/user.entity';
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
-describe('Super Admin impersonation (e2e, US-01.07)', () => {
+describe('Super Admin impersonation (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

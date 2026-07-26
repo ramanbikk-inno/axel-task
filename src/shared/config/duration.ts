@@ -6,13 +6,9 @@ const UNIT_SECONDS: Readonly<Record<string, number>> = {
 };
 
 /**
- * Parse a `jsonwebtoken`-style duration ("15m", "7d", "3600") into seconds.
- *
- * The TTLs are configured as those strings because that is what `expiresIn`
- * takes, but the token endpoints must also report `expiresIn` as a number. The
- * two used to be independent literals — `JWT_ACCESS_TTL` and a hard-coded
- * `ACCESS_TTL_SECONDS = 900` in three separate files — so changing the
- * configured TTL silently made every advertised expiry a lie.
+ * Parse a `jsonwebtoken`-style duration ("15m", "7d", "3600") into seconds. TTLs
+ * are configured as those strings, but the token endpoints report `expiresIn` as
+ * a number; deriving one from the other keeps them from drifting apart.
  */
 export function durationToSeconds(value: string): number {
   const match = /^(\d+)\s*(s|m|h|d)?$/.exec(value.trim());

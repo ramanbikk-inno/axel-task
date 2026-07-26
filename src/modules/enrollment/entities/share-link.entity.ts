@@ -12,9 +12,9 @@ import {
 import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
 
 export enum ShareLinkType {
-  /** Static player invite: unlimited uses, no expiry (US-01.02). */
+  /** Static player invite: unlimited uses, no expiry. */
   PlayerStatic = 'player_static',
-  /** Unique coach invite: single use, 7-day expiry (US-01.08). */
+  /** Unique coach invite: single use, 7-day expiry. */
   CoachUnique = 'coach_unique',
 }
 

@@ -8,19 +8,11 @@ import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile
 import { Role } from '../src/modules/users/entities/user.enums';
 
 /**
- * What every PATCH does with an explicit `null`.
- *
- * There are only two right answers per field, and which one applies is fixed by
- * the column behind it: a nullable field treats null as "clear this", and a
- * non-nullable one must reject it at the validation pipe. The wrong answer is a
- * 500 — which is what happened, because `@IsOptional()` skips all other
- * validators when the value is null, and every one of these services then
- * gates on `!== undefined`. Null therefore passed validation and reached a NOT
- * NULL column.
- *
- * Every PATCH the API exposes is here on purpose. The bug is in an idiom, not
- * in one endpoint, so testing only the endpoint where it was noticed would
- * leave the same hole open three more times.
+ * What every PATCH does with an explicit `null`. Two right answers, fixed by the
+ * column: a nullable field clears, a non-nullable one rejects at the pipe. The
+ * wrong answer is a 500, which is what `@IsOptional()` plus a `!== undefined`
+ * gate produced. Every PATCH is here because the bug is in an idiom, not one
+ * endpoint.
  */
 describe('Explicit null on every PATCH (e2e)', () => {
   let ctx: E2EContext;

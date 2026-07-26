@@ -1,14 +1,10 @@
 import { registerDecorator, ValidationOptions } from 'class-validator';
 
 /**
- * A calendar date with no time component: exactly YYYY-MM-DD.
- *
- * Deliberately narrower than `@IsISO8601()`, which also accepts full
- * date-times. That mattered: `birthDate` was validated with `@IsISO8601()` and
- * then parsed as `new Date(`${birthDate}T00:00:00.000Z`)`. A value like
- * `1970-01-01T00:00:00.000Z` passed validation, produced `Invalid Date` once
- * the suffix was appended, and every subsequent comparison against `NaN` was
- * false — so the 1-18 age gate on child profiles let any age through.
+ * A calendar date with no time component: exactly YYYY-MM-DD. Narrower than
+ * `@IsISO8601()`, which also accepts date-times — appending `T00:00:00.000Z` to
+ * one of those yields Invalid Date, and every age comparison against NaN is
+ * false, so the 1-18 gate let anything through.
  */
 export const CALENDAR_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -31,13 +27,9 @@ export function parseCalendarDate(value: string): Date | null {
 }
 
 /**
- * Whole years elapsed between two dates, counting a birthday that has not yet
- * come round this year as the previous age.
- *
- * Shared because two rules depend on it and must not drift apart: the 1-18
- * bound on a child profile (US-01.03) and the minimum age for holding an
- * independent account (section 9). All arithmetic is UTC, matching how
- * `parseCalendarDate` builds the date.
+ * Whole years elapsed, counting a birthday still to come this year as the
+ * previous age. Shared by the 1-18 child bound and the self-registration floor
+ * so the two cannot drift apart. UTC throughout, like `parseCalendarDate`.
  */
 export function ageInYears(born: Date, asOf: Date): number {
   let age = asOf.getUTCFullYear() - born.getUTCFullYear();

@@ -8,15 +8,12 @@ import { ImpersonationLog } from '../src/modules/impersonation/entities/imperson
 import { Role } from '../src/modules/users/entities/user.enums';
 
 /**
- * US-01.07: "Impersonation logged: Who impersonated whom, start time, end time,
- * duration."
- *
  * Only `/impersonation/exit` ever wrote an end time. Every other way a session
  * ends — the one-hour cap, logging out of it, and the bulk revocation behind
  * deactivation, erasure and password change — left the row open forever, so the
  * compliance report reported neither an end nor a duration for it.
  */
-describe('Impersonation log closure (e2e, US-01.07)', () => {
+describe('Impersonation log closure (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

@@ -15,17 +15,9 @@ export interface AuditTarget {
 export interface RecordAuditInput {
   action: string;
   /**
-   * The principal that performed the action.
-   *
-   * Deliberately the whole principal rather than a user id. US-01.07 requires
-   * that actions taken during an impersonation are attributable to the admin
-   * behind them, and a bare `actorUserId: string` gave every call site the
-   * chance to forget that — silently, since the row still looked complete.
-   * Passing the principal makes attribution structural: there is no way to
-   * record an action from inside an impersonation session and lose the admin.
-   *
-   * Use `recordSystemAction` for something with no user behind it, so "no
-   * actor" is always a decision rather than an omission.
+   * The whole principal, not a user id: it carries the admin behind an
+   * impersonation, so attribution cannot be dropped by a forgetful call site.
+   * Use `recordSystemAction` when there is genuinely no user behind the action.
    */
   actor: Principal;
   targetUserId?: string | null;
@@ -43,10 +35,8 @@ export class AuditService {
 
   async record(input: RecordAuditInput, manager?: EntityManager): Promise<AuditLog> {
     const actor = input.actor;
-    // actorUserId stays the identity the request was made *as* — for an
-    // impersonation that is the target, which is the truth about what the
-    // system saw. The admin behind it goes in its own column, so both
-    // questions can be answered from one row without reinterpreting either.
+    // actorUserId is the identity the request was made *as* (the target, under
+    // impersonation). The admin behind it gets its own column.
     const impersonating = actor.impersonating && actor.actor !== undefined;
 
     return this.write(
@@ -94,17 +84,8 @@ export class AuditService {
   }
 
   /**
-   * Redact a person's email address out of retained audit metadata (US-01.13).
-   *
-   * The trail itself must survive an erasure — it is the compliance record —
-   * but the coach-invitation actions copy the recipient's address into
-   * `metadata.email`, so anonymising `users` alone left the address readable in
-   * every impersonation-history and audit view. Only that one key is touched:
-   * the action, actor, target and timestamps are exactly what the log exists to
-   * preserve, and rewriting the whole document would destroy them.
-   *
-   * `->>` compares the extracted text, so rows whose metadata has no `email`
-   * key are simply not matched.
+   * Redact an email out of retained audit metadata. Only `metadata.email` is
+   * touched — the rest of the row is the compliance record and must survive.
    */
   async scrubEmailFromMetadata(email: string, manager?: EntityManager): Promise<void> {
     const repository: Repository<AuditLog> =

@@ -24,7 +24,7 @@ export interface ValidatedSession {
   /** The Coach's own profile row id, or null for every other role. */
   coachProfileId: string | null;
   /**
-   * Child-account identity (US-01.06), resolved from
+   * Child-account identity, resolved from
    * `player_profiles.child_user_id`. Read per request rather than carried in
    * the token so unlinking a child login takes effect at once.
    */
@@ -44,17 +44,10 @@ function reject(errorCode: ErrorCode, message: string): UnauthorizedException {
 }
 
 /**
- * Re-validates an already signature-verified access token against authoritative
- * server state.
- *
- * Access tokens carry a 15-minute TTL, so a purely stateless check would leave
- * every revocation path in the system — logout, Super Admin deactivation, GDPR
- * deletion, password reset and impersonation exit — inert for up to 15 minutes
- * after the fact. The system already records all of that state
- * (`auth_session.revoked_at`, `auth_session.expires_at`, `users.status`,
- * `users.token_version`); nothing on the access path read it.
- *
- * Cost is two indexed primary-key lookups per authenticated request.
+ * Re-validates a signature-verified access token against server state. Tokens
+ * live 15 minutes, so a stateless check would leave every revocation path —
+ * logout, deactivation, erasure, password reset, impersonation exit — inert for
+ * that long. Costs two indexed lookups per authenticated request.
  */
 @Injectable()
 export class SessionValidatorService {
@@ -71,13 +64,9 @@ export class SessionValidatorService {
   ) {}
 
   /**
-   * Resolved per request rather than baked into the token: it is the tenancy
-   * key, so it must reflect the database now, not whenever the token happened
-   * to be minted. Only Trainers and Coaches pay for the extra indexed lookup.
-   *
-   * A Coach's tenancy comes from their employer, so their org-scoped rules key
-   * on `coach_profiles.trainer_profile_id`; leaving it null would silently
-   * scope every Coach rule to nothing.
+   * Resolved per request, not baked into the token: it is the tenancy key and
+   * must reflect the database now. A Coach's comes from their employer, so
+   * leaving it null would silently scope every Coach rule to nothing.
    */
   private async resolveTenancy(
     user: User,
@@ -148,7 +137,7 @@ export class SessionValidatorService {
     }
 
     // Impersonation sessions are the only ones with a hard expiry today; this is
-    // what actually enforces the one-hour cap from US-01.07.
+    // what actually enforces the one-hour impersonation cap.
     if (session.expiresAt !== null && session.expiresAt.getTime() <= this.clock.now().getTime()) {
       throw reject(ErrorCode.SESSION_EXPIRED, 'Session has expired.');
     }

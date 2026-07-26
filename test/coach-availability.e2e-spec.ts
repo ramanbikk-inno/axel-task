@@ -23,7 +23,7 @@ interface Coach {
   coachProfileId: string;
 }
 
-describe('Coach My Times + override log (e2e, US-01.10)', () => {
+describe('Coach My Times + override log (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 
@@ -277,7 +277,7 @@ describe('Coach My Times + override log (e2e, US-01.10)', () => {
         eventId: null,
       });
 
-      // Logged with the four fields US-01.10 names.
+      // Logged with all four fields.
       const rows = await ctx.dataSource.getRepository(CoachAvailabilityOverride).find();
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({

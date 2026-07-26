@@ -12,7 +12,7 @@ import {
 import { IsCalendarDate } from '../../../shared/validation/calendar-date';
 
 /**
- * Create a child player profile (US-01.03). `birthDate` encodes the child's
+ * Create a child player profile. `birthDate` encodes the child's
  * age, which must resolve to 1–18 years; trainerProfileIds optionally connects
  * the child to trainers the parent is already associated with.
  */

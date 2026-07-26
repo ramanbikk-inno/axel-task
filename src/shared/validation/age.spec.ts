@@ -4,8 +4,8 @@ const at = (iso: string): Date => parseCalendarDate(iso) as Date;
 
 /**
  * Two rules depend on this arithmetic and must not drift apart: the 1-18 bound
- * on a child profile (US-01.03) and the minimum age for an independent account
- * (section 9). The boundary days are the whole point — an off-by-one here is
+ * on a child profile and the minimum age for an independent account
+ *. The boundary days are the whole point — an off-by-one here is
  * the difference between admitting and refusing a minor.
  */
 describe('ageInYears', () => {

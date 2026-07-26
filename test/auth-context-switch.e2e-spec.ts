@@ -10,12 +10,12 @@ import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
 /**
- * Multi-trainer players see separated views (spec section 9). A context is a
+ * Multi-trainer players see separated views . A context is a
  * (profile, trainer) pair — "Alex → Coach Bob" — so the interesting cases are
  * the ones where the trainer alone is ambiguous, and the ones where a caller
  * tries to select a pair that is not theirs.
  */
-describe('Auth context switching (e2e, US-01.04)', () => {
+describe('Auth context switching (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

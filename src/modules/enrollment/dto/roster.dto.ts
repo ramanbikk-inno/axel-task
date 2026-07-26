@@ -6,7 +6,7 @@ import { AssociationStatus } from '../entities/trainer-player-association.entity
 
 /**
  * A trainer's view of one player in their organisation — "Player profile
- * created in trainer's CRM" (US-01.02).
+ * created in trainer's CRM".
  *
  * The parent's contact details are here because for a child the parent *is*
  * the contact: the trainer has to be able to reach someone about a minor, and
@@ -32,15 +32,15 @@ export class RosterEntryView {
 }
 
 /**
- * Section 8: "Skill level (set by trainer)", and US-01.11 lists it among the
- * fields a player may *not* edit. The column existed from the start with no
- * write path at all, so the roster always reported null.
+ * Skill level is the trainer's to set and one of the fields a player may not
+ * edit. The column existed from the start with no write path, so the roster
+ * always reported null.
  */
 export class UpdateRosterEntryDto {
   @ApiPropertyOptional({
     nullable: true,
     example: 'Intermediate',
-    description: 'Free text pending Q-01.01, which has not fixed the vocabulary. Null clears it.',
+    description: 'Free text; the vocabulary is not fixed yet. Null clears it.',
   })
   @IsOptional()
   @IsString()

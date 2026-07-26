@@ -7,14 +7,11 @@ import { User } from '../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 
 /**
- * US-01.07: "All actions during impersonation logged with admin_id context"
- * and "Audit report available: Impersonation History for compliance".
- *
  * `actor_user_id` on an audited action is the identity the request was made
  * *as*, which during an impersonation is the target. On its own that makes an
  * admin's actions indistinguishable from the user's own.
  */
-describe('Impersonation audit attribution (e2e, US-01.07)', () => {
+describe('Impersonation audit attribution (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

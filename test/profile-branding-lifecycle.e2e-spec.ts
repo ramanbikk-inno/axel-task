@@ -9,13 +9,9 @@ import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
 /**
- * Two gaps that share a cause.
- *
- * Uploads stored only the delivery URL and threw away the provider's public
- * id, which is the only handle that can delete an asset — so every replaced
- * avatar and logo stayed in storage forever, with nothing left pointing at it.
- * And a coach, who the spec says "may edit their own profile", had no endpoint
- * to do it with.
+ * Uploads stored only the delivery URL and discarded the provider's public id,
+ * the only handle that can delete an asset — so every replaced avatar and logo
+ * stayed in storage forever. And a coach had no endpoint to edit their profile.
  */
 describe('Profile and branding lifecycle (e2e)', () => {
   let ctx: E2EContext;

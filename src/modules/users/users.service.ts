@@ -156,7 +156,7 @@ export class UsersService {
   }
 
   /**
-   * GDPR anonymization (US-01.13): strip PII, disable login, and mark the
+   * GDPR anonymization: strip PII, disable login, and mark the
    * account Deleted. Irreversible; historical rows keep referring to this id as
    * "Deleted User".
    */
@@ -187,7 +187,7 @@ export class UsersService {
    * accounts are created Active already, so writing Active here let a
    * deactivated or GDPR-deleted user restore themselves by redeeming an
    * outstanding verification or setup token. Status transitions belong to the
-   * Super Admin lifecycle endpoints (US-01.12 / US-01.13).
+   * Super Admin lifecycle endpoints.
    */
   async markEmailVerified(id: string, at: Date): Promise<void> {
     await this.usersRepository.update(

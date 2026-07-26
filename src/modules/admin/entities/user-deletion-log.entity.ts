@@ -3,14 +3,9 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { Role } from '../../users/entities/user.enums';
 
 /**
- * The legal record of a GDPR erasure (US-01.13): "Deletion logged: Original
- * user ID, who deleted, when, reason (for legal compliance)".
- *
- * This is the one place the removed PII still exists. Everything else about
- * the account has been anonymised, so this row is what lets the platform prove
- * *which* account was erased, on whose instruction, and why — and it is
- * separable from the general audit trail, which has a different retention
- * decision attached to it.
+ * The legal record of an erasure: original user id and email, who deleted, when
+ * and why. The one place the removed PII still exists, kept separate from the
+ * audit trail because it carries a different retention decision.
  */
 @Entity({ name: 'user_deletion_logs' })
 export class UserDeletionLog {

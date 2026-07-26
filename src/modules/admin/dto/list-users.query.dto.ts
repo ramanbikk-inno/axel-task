@@ -5,7 +5,7 @@ import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-
 import { Role, UserStatus } from '../../users/entities/user.enums';
 
 /**
- * Query params for the Super Admin Users directory (US-01.01). Search is
+ * Query params for the Super Admin Users directory. Search is
  * tool-specific (email/first/last name) rather than global.
  */
 export class ListUsersQueryDto {

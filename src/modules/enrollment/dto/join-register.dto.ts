@@ -5,7 +5,7 @@ import { IsCalendarDate } from '../../../shared/validation/calendar-date';
 import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 
 /**
- * Registration payload for joining a trainer via a ShareLink (US-01.02).
+ * Registration payload for joining a trainer via a ShareLink.
  * Creates the account holder's own player profile.
  */
 export class JoinRegisterDto {

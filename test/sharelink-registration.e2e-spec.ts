@@ -12,7 +12,7 @@ import { Role } from '../src/modules/users/entities/user.enums';
 import { FACTORY_PASSWORD } from './helpers/user.factory';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
-describe('ShareLink registration + multi-trainer (e2e, US-01.02)', () => {
+describe('ShareLink registration + multi-trainer (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 
