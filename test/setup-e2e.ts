@@ -179,7 +179,7 @@ export async function bootstrapE2E(): Promise<E2EContext> {
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password, firstName: 'Reg', lastName: 'Player' })
+      .send({ email, password, firstName: 'Reg', lastName: 'Player', birthDate: '1994-03-22' })
       .expect(201);
 
     const lastCall =

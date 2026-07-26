@@ -31,6 +31,24 @@ export function parseCalendarDate(value: string): Date | null {
 }
 
 /**
+ * Whole years elapsed between two dates, counting a birthday that has not yet
+ * come round this year as the previous age.
+ *
+ * Shared because two rules depend on it and must not drift apart: the 1-18
+ * bound on a child profile (US-01.03) and the minimum age for holding an
+ * independent account (section 9). All arithmetic is UTC, matching how
+ * `parseCalendarDate` builds the date.
+ */
+export function ageInYears(born: Date, asOf: Date): number {
+  let age = asOf.getUTCFullYear() - born.getUTCFullYear();
+  const monthDelta = asOf.getUTCMonth() - born.getUTCMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && asOf.getUTCDate() < born.getUTCDate())) {
+    age -= 1;
+  }
+  return age;
+}
+
+/**
  * Runs the same `parseCalendarDate` the services use, so a value that is
  * well-formed but not a real day (2008-02-30) is rejected by the validation
  * pipe as a 422 rather than falling through to a service and surfacing as a

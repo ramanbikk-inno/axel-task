@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
+import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
-import { PlayerProfile } from './entities/player-profile.entity';
+import { EmergencyContact, PlayerProfile } from './entities/player-profile.entity';
 
 export interface CreatePlayerProfileInput {
   ownerUserId: string;
@@ -85,6 +86,64 @@ export class PlayersService {
       profile.gender = input.gender;
     }
     return this.profiles.save(profile);
+  }
+
+  /**
+   * Apply a partial update to a child profile (US-01.03).
+   *
+   * Only keys the caller actually supplied are written. `school`,
+   * `jerseyNumber` and `emergencyContact` accept an explicit null, which is how
+   * a parent clears one — hence the `undefined` check rather than a truthiness
+   * test, which would silently ignore the clear.
+   */
+  async updateChildProfile(
+    id: string,
+    input: {
+      displayName?: string;
+      birthDate?: string;
+      gender?: string;
+      school?: string | null;
+      jerseyNumber?: string | null;
+      emergencyContact?: EmergencyContact | null;
+    },
+    manager?: EntityManager,
+  ): Promise<PlayerProfile> {
+    const repository = this.repo(manager);
+    const patch: QueryDeepPartialEntity<PlayerProfile> = {};
+    if (input.displayName !== undefined) {
+      patch.displayName = input.displayName;
+    }
+    if (input.birthDate !== undefined) {
+      patch.birthDate = input.birthDate;
+    }
+    if (input.gender !== undefined) {
+      patch.gender = input.gender;
+    }
+    if (input.school !== undefined) {
+      patch.school = input.school;
+    }
+    if (input.jerseyNumber !== undefined) {
+      patch.jerseyNumber = input.jerseyNumber;
+    }
+    if (input.emergencyContact !== undefined) {
+      patch.emergencyContact = input.emergencyContact;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await repository.update({ id }, patch);
+    }
+    return (await repository.findOne({ where: { id } })) as PlayerProfile;
+  }
+
+  /** Set the skill level a trainer assesses for a player (section 8). */
+  async setSkillLevel(
+    id: string,
+    skillLevel: string | null,
+    manager?: EntityManager,
+  ): Promise<PlayerProfile> {
+    const repository = this.repo(manager);
+    await repository.update({ id }, { skillLevel });
+    return (await repository.findOne({ where: { id } })) as PlayerProfile;
   }
 
   /** The PII an erasure has to clear off a trainee profile (US-01.13). */

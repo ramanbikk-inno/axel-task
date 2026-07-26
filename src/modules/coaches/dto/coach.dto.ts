@@ -7,6 +7,7 @@ import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
 } from '../../../shared/validation/password';
+import { IsOptionalNotNull } from '../../../shared/validation/presence';
 import { CoachStatus } from '../entities/coach-profile.entity';
 
 export class InviteCoachDto {
@@ -57,6 +58,10 @@ export class CoachView {
   @ApiProperty({ nullable: true }) firstName!: string | null;
   @ApiProperty({ nullable: true }) lastName!: string | null;
   @ApiProperty({ nullable: true }) bio!: string | null;
+  // Accepted by PATCH /coaches/me since US-01.08 but never returned, so a coach
+  // could not read back what they had just written.
+  @ApiProperty({ nullable: true }) credentials!: string | null;
+  @ApiProperty({ nullable: true }) certifications!: string | null;
   @ApiProperty() publicVisible!: boolean;
   @ApiProperty({ enum: ['Active', 'Inactive'] }) status!: CoachStatus;
   @ApiProperty() joinedAt!: Date;
@@ -68,28 +73,52 @@ export class CoachView {
  * own profile and availability"). Deliberately does not include the trainer
  * they work for or their status — employment is the trainer's to set.
  */
+/**
+ * A coach as anyone in the trainer's organisation may see them — the read
+ * `publicVisible` exists to gate (US-01.08 "Public profile management").
+ * Deliberately narrower than CoachView: no email, no employment dates, nothing
+ * a player has no business seeing.
+ */
+export class PublicCoachView {
+  @ApiProperty() id!: string;
+  @ApiProperty({ nullable: true }) firstName!: string | null;
+  @ApiProperty({ nullable: true }) lastName!: string | null;
+  @ApiProperty({ nullable: true }) bio!: string | null;
+  @ApiProperty({ nullable: true }) credentials!: string | null;
+  @ApiProperty({ nullable: true }) certifications!: string | null;
+}
+
 export class UpdateCoachProfileDto {
-  @ApiPropertyOptional({ maxLength: 2000 })
+  @ApiPropertyOptional({ maxLength: 2000, nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(2000)
-  bio?: string;
+  bio?: string | null;
 
-  @ApiPropertyOptional({ maxLength: 1000 })
+  @ApiPropertyOptional({ maxLength: 1000, nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  credentials?: string;
+  credentials?: string | null;
 
-  @ApiPropertyOptional({ maxLength: 1000 })
+  @ApiPropertyOptional({ maxLength: 1000, nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  certifications?: string;
+  certifications?: string | null;
 
+  /**
+   * Now that this gates `GET /coaches/public/:trainerProfileId`, a value the
+   * caller did not mean must not be inferred. The transform stays lenient about
+   * the string `'true'` that form encodings send, but it no longer folds
+   * null/undefined into `false` — doing so quietly un-listed a coach on a
+   * request that never mentioned a boolean at all.
+   */
   @ApiPropertyOptional({ description: 'Show this profile on the trainer’s public page' })
-  @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
+  @IsOptionalNotNull()
+  @Transform(({ value }) =>
+    value === null || value === undefined ? value : value === true || value === 'true',
+  )
   @IsBoolean()
   publicVisible?: boolean;
 }

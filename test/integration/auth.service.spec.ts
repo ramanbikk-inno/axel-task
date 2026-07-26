@@ -1,5 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
@@ -123,6 +124,12 @@ describe('AuthService (login + register)', () => {
             closeForTargetUser: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (k: string): unknown => (k === 'MIN_SELF_REGISTRATION_AGE' ? 18 : undefined),
+          },
+        },
         { provide: ClockService, useValue: new ClockService() },
       ],
     }).compile();
@@ -210,6 +217,7 @@ describe('AuthService (login + register)', () => {
     const result = await service.register({
       email: 'fresh@example.com',
       password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
     });
 
     expect(result).toEqual({
@@ -230,6 +238,7 @@ describe('AuthService (login + register)', () => {
     const result = await service.register({
       email: 'player@example.com',
       password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
     });
 
     expect(result).toEqual({

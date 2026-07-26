@@ -95,7 +95,7 @@ export class TrainersService {
   }
 
   /** Set the trainer's primary brand color (US-01.14). */
-  async setPrimaryColor(actor: Principal, primaryColor: string): Promise<TrainerProfile> {
+  async setPrimaryColor(actor: Principal, primaryColor: string | null): Promise<TrainerProfile> {
     const profile = await this.requireOwnProfile(actor.userId);
     profile.primaryColor = primaryColor;
     const saved = await this.trainersRepository.save(profile);

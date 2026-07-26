@@ -1,15 +1,25 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsIn, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml'];
 
 export class UpdateBrandingDto {
-  @ApiProperty({ example: '#1e88e5', description: 'Primary brand color as a hex code' })
+  /**
+   * US-01.14 offers a "Reset to default option" beside the picker. Null is that
+   * reset — the logo already had DELETE /trainers/me/logo, and the colour had
+   * no way back to the platform default at all.
+   */
+  @ApiProperty({
+    example: '#1e88e5',
+    nullable: true,
+    description: 'Primary brand color as a hex code, or null to reset to the default',
+  })
+  @ValidateIf((_o, value) => value !== null)
   @IsString()
   @Matches(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, {
     message: 'primaryColor must be a hex color like #1e88e5',
   })
-  primaryColor!: string;
+  primaryColor!: string | null;
 }
 
 export class UploadLogoDto {

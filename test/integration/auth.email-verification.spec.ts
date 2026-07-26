@@ -1,4 +1,5 @@
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
@@ -97,6 +98,12 @@ describe('AuthService email verification', () => {
             closeForTargetUser: jest.fn().mockResolvedValue(undefined),
           },
         },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (k: string): unknown => (k === 'MIN_SELF_REGISTRATION_AGE' ? 18 : undefined),
+          },
+        },
         { provide: ClockService, useValue: new FakeClock() },
       ],
     }).compile();
@@ -116,6 +123,7 @@ describe('AuthService email verification', () => {
     const result = await service.register({
       email: 'new@example.com',
       password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
     });
 
     expect(result).toEqual({
@@ -141,6 +149,7 @@ describe('AuthService email verification', () => {
     const result = await service.register({
       email: 'taken@example.com',
       password: 'Str0ng!Passw0rd',
+      birthDate: '1994-03-22',
     });
 
     expect(result).toEqual({

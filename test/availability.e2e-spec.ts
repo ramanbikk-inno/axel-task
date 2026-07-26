@@ -51,7 +51,13 @@ describe('Availability / Best Times (e2e, US-01.09)', () => {
   const registerParent = async (email: string, code: string): Promise<string> => {
     await request(app.getHttpServer())
       .post(`/api/v1/join/${code}/register`)
-      .send({ email, password: 'Str0ng!Passw0rd', firstName: 'Pat', lastName: 'Parent' })
+      .send({
+        email,
+        password: 'Str0ng!Passw0rd',
+        firstName: 'Pat',
+        lastName: 'Parent',
+        birthDate: '1994-03-22',
+      })
       .expect(201);
     const verifyUrl =
       ctx.mailer.sendVerification.mock.calls[ctx.mailer.sendVerification.mock.calls.length - 1][0]

@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
+import { IsCalendarDate } from '../../../shared/validation/calendar-date';
+
 import {
   IsStrongPassword,
   PASSWORD_MAX_LENGTH,
@@ -40,4 +42,12 @@ export class RegisterDto {
   @IsOptional()
   @IsPhoneNumberLoose()
   phone?: string;
+
+  /**
+   * Required, not optional: section 9 forbids an independent account for a
+   * minor, and that cannot be enforced against a field the caller may omit.
+   */
+  @ApiProperty({ example: '1994-03-22', description: 'Date of birth (YYYY-MM-DD)' })
+  @IsCalendarDate()
+  birthDate!: string;
 }

@@ -1,5 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
@@ -123,6 +124,12 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
           useValue: {
             closeForSession: jest.fn().mockResolvedValue(undefined),
             closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (k: string): unknown => (k === 'MIN_SELF_REGISTRATION_AGE' ? 18 : undefined),
           },
         },
         { provide: ClockService, useValue: clock },

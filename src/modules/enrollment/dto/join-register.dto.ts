@@ -1,14 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEmail,
-  IsISO8601,
-  IsOptional,
-  IsString,
-  Matches,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
+import { IsCalendarDate } from '../../../shared/validation/calendar-date';
 import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 
 /**
@@ -54,8 +47,12 @@ export class JoinRegisterDto {
   @MaxLength(30)
   gender?: string;
 
-  @ApiPropertyOptional({ example: '2010-05-01', description: 'ISO date (YYYY-MM-DD)' })
-  @IsOptional()
-  @IsISO8601()
-  birthDate?: string;
+  /**
+   * Required for the same reason as on /auth/register, and narrowed from
+   * IsISO8601 to a bare calendar date so a value carrying a time component
+   * cannot reach the age arithmetic.
+   */
+  @ApiProperty({ example: '1994-03-22', description: 'Date of birth (YYYY-MM-DD)' })
+  @IsCalendarDate()
+  birthDate!: string;
 }

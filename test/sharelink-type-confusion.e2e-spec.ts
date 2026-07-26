@@ -73,7 +73,12 @@ describe('ShareLink type confusion and single-use races (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/v1/join/${code}/register`)
-      .send({ email: 'stranger@example.com', password: 'Str0ng!Passw0rd', firstName: 'Mal' })
+      .send({
+        email: 'stranger@example.com',
+        password: 'Str0ng!Passw0rd',
+        firstName: 'Mal',
+        birthDate: '1994-03-22',
+      })
       .expect(404)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.SHARE_LINK_INVALID));
 
@@ -224,11 +229,21 @@ describe('ShareLink type confusion and single-use races (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/v1/join/${code}/register`)
-      .send({ email: 'p1@example.com', password: 'Str0ng!Passw0rd', firstName: 'P' })
+      .send({
+        email: 'p1@example.com',
+        password: 'Str0ng!Passw0rd',
+        firstName: 'P',
+        birthDate: '1994-03-22',
+      })
       .expect(201);
     await request(app.getHttpServer())
       .post(`/api/v1/join/${code}/register`)
-      .send({ email: 'p2@example.com', password: 'Str0ng!Passw0rd', firstName: 'Q' })
+      .send({
+        email: 'p2@example.com',
+        password: 'Str0ng!Passw0rd',
+        firstName: 'Q',
+        birthDate: '1994-03-22',
+      })
       .expect(201);
 
     expect(await useCountOf(code)).toBe(2);

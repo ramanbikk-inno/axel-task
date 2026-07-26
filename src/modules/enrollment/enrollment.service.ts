@@ -11,6 +11,7 @@ import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
+import { ContextService } from '../auth/context.service';
 import { Principal } from '../auth/principal';
 import { MailService } from '../mail/mail.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
@@ -54,6 +55,8 @@ function displayNameFor(
 export const AUDIT_SHARE_LINK_CREATED = 'sharelink.created';
 export const AUDIT_ENROLLMENT_JOINED = 'enrollment.joined';
 export const AUDIT_ENROLLMENT_REGISTERED = 'enrollment.registered';
+export const AUDIT_ROSTER_SKILL_LEVEL_SET = 'roster.skill-level-set';
+export const AUDIT_ROSTER_MEMBER_REMOVED = 'roster.member-removed';
 
 @Injectable()
 export class EnrollmentService {
@@ -70,6 +73,7 @@ export class EnrollmentService {
     private readonly mail: MailService,
     private readonly clock: ClockService,
     private readonly audit: AuditService,
+    private readonly context: ContextService,
   ) {}
 
   /** Public: resolve a ShareLink for the join page (trainer name + validity). */
@@ -138,6 +142,12 @@ export class EnrollmentService {
    * join confirmation.
    */
   async registerViaShareLink(code: string, dto: JoinRegisterDto): Promise<JoinResult> {
+    // The same section-9 rule /auth/register enforces. Checked here too because
+    // this is a second, equally public way to mint an account — a gate on only
+    // one of two doors is not a gate. Before the transaction, so an underage
+    // attempt never takes a use off the trainer's link.
+    this.authService.assertOldEnoughToSelfRegister(dto.birthDate);
+
     let verificationToken = '';
     const result = await this.dataSource.transaction(async (manager: EntityManager) => {
       // Locked and type-checked inside the transaction: a coach invite must not
@@ -497,6 +507,94 @@ export class EnrollmentService {
         (field) => field !== null && field.toLowerCase().includes(search),
       ),
     );
+  }
+
+  /**
+   * The tenancy gate for every trainer-side write against a roster member.
+   *
+   * Resolves the caller's org and the association in one place, and reports a
+   * player from another organisation as simply not on the roster — a 403 would
+   * confirm the id names a real profile somewhere else.
+   */
+  private async requireRosterMember(
+    principal: Principal,
+    playerProfileId: string,
+  ): Promise<{ trainerProfileId: string; profile: PlayerProfile }> {
+    const trainer = await this.trainersService.findByUserId(principal.userId);
+    if (!trainer) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
+        message: 'No trainer profile for this account.',
+      });
+    }
+
+    const association = await this.associations.find(trainer.id, playerProfileId);
+    const profile = await this.playersService.findById(playerProfileId);
+    if (!association || association.status !== AssociationStatus.Active || !profile) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'This player is not on your roster.',
+      });
+    }
+    return { trainerProfileId: trainer.id, profile };
+  }
+
+  /** Record the trainer's assessment of a player's skill level (section 8). */
+  async setRosterSkillLevel(
+    principal: Principal,
+    playerProfileId: string,
+    skillLevel: string | null,
+  ): Promise<RosterEntryView> {
+    const { trainerProfileId, profile } = await this.requireRosterMember(
+      principal,
+      playerProfileId,
+    );
+
+    await this.playersService.setSkillLevel(profile.id, skillLevel);
+    await this.audit.record({
+      action: AUDIT_ROSTER_SKILL_LEVEL_SET,
+      actor: principal,
+      target: { type: 'PlayerProfile', id: profile.id },
+      metadata: { trainerProfileId, skillLevel },
+    });
+
+    const entry = (await this.roster(principal)).find((r) => r.playerProfileId === profile.id);
+    if (!entry) {
+      // Unreachable: requireRosterMember just proved the association is active.
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'This player is not on your roster.',
+      });
+    }
+    return entry;
+  }
+
+  /**
+   * Remove a player from the trainer's own roster (section 3, "Manage own
+   * organization users").
+   *
+   * Deactivated rather than deleted, matching the family-side removal in
+   * US-01.04: history is preserved and the pairing can be re-established. Until
+   * this existed only the family could sever the link, so a trainer had no way
+   * to off-board a player who had left.
+   */
+  async removeFromRoster(principal: Principal, playerProfileId: string): Promise<void> {
+    const { trainerProfileId, profile } = await this.requireRosterMember(
+      principal,
+      playerProfileId,
+    );
+
+    await this.associations.setStatus(trainerProfileId, profile.id, AssociationStatus.Inactive);
+    // A session parked in this context now points at a trainer the profile is
+    // no longer connected to, exactly as on the family side.
+    await this.context.clearForAssociation(profile.id, trainerProfileId);
+
+    await this.audit.record({
+      action: AUDIT_ROSTER_MEMBER_REMOVED,
+      actor: principal,
+      target: { type: 'PlayerProfile', id: profile.id },
+      metadata: { trainerProfileId },
+    });
   }
 
   private async trainerName(trainerProfileId: string): Promise<string> {

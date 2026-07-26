@@ -28,6 +28,7 @@ import {
   CoachView,
   InviteCoachDto,
   ListCoachesQueryDto,
+  PublicCoachView,
   ResolvedCoachInviteView,
   UpdateCoachProfileDto,
 } from './dto/coach.dto';
@@ -110,6 +111,24 @@ export class CoachesController {
     @Req() req: Request,
   ): Promise<CoachView> {
     return this.coaches.offboardCoach(req.user as Principal, id);
+  }
+
+  /**
+   * The trainer's publicly-listed coaches, as their players and parents see
+   * them. Not role-gated — everyone inside an organisation may see who coaches
+   * there — but scoped to that organisation's members, so authentication alone
+   * does not open one org's staff list to another's.
+   */
+  @Get('public/:trainerProfileId')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: [PublicCoachView] })
+  async listPublic(
+    @Param('trainerProfileId', ParseUUIDPipe) trainerProfileId: string,
+    @Req() req: Request,
+  ): Promise<PublicCoachView[]> {
+    return this.coaches.listPublicCoaches(req.user as Principal, trainerProfileId);
   }
 
   /** Spec section 6: a coach "may edit their own profile and availability". */

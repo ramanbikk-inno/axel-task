@@ -315,6 +315,7 @@ describe('Audit coverage for mutating endpoints (e2e, US-01.07)', () => {
       await request(app.getHttpServer())
         .post(`/api/v1/join/${link.body.code as string}/register`)
         .send({
+          birthDate: '1994-03-22',
           email: 'brand-new@example.com',
           password: 'Str0ng!Passw0rd',
           firstName: 'New',
