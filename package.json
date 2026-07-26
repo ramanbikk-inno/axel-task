@@ -1,6 +1,6 @@
 {
   "name": "axel-task",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "axel-task backend API (Epic-01: User Management & Authentication)",
   "private": true,
   "license": "UNLICENSED",
