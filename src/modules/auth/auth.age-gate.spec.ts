@@ -14,7 +14,7 @@ class FixedClock extends ClockService {
 }
 
 /**
- * `assertOldEnoughToSelfRegister` reads only the clock and the configured
+ * `assertOldEnoughForOwnAccount` reads only the clock and the configured
  * threshold, so the rest of AuthService's dependencies are left unset rather
  * than stubbed into noise. If that ever stops being true this will fail loudly
  * on a null dereference, which is the correct outcome.
@@ -36,6 +36,7 @@ function build(minimumAge?: number): AuthService {
     new FixedClock(),
     unused,
     unused,
+    unused,
     config,
   );
 }
@@ -47,9 +48,9 @@ const expectRejection = (
   errorCode: ErrorCode,
 ): void => {
   const service = build(minimumAge);
-  expect(() => service.assertOldEnoughToSelfRegister(birthDate)).toThrow(type);
+  expect(() => service.assertOldEnoughForOwnAccount(birthDate)).toThrow(type);
   try {
-    service.assertOldEnoughToSelfRegister(birthDate);
+    service.assertOldEnoughForOwnAccount(birthDate);
   } catch (error) {
     expect(
       ((error as BadRequestException).getResponse() as { errorCode: ErrorCode }).errorCode,
@@ -62,10 +63,10 @@ const expectRejection = (
  * substance of the rule: an off-by-one is the difference between admitting and
  * refusing a minor.
  */
-describe('AuthService.assertOldEnoughToSelfRegister', () => {
+describe('AuthService.assertOldEnoughForOwnAccount', () => {
   describe('at the default threshold of 18', () => {
     it('admits an applicant on the morning of their eighteenth birthday', () => {
-      expect(() => build(18).assertOldEnoughToSelfRegister('2008-07-26')).not.toThrow();
+      expect(() => build(18).assertOldEnoughForOwnAccount('2008-07-26')).not.toThrow();
     });
 
     it('refuses the same applicant one day earlier', () => {
@@ -73,7 +74,7 @@ describe('AuthService.assertOldEnoughToSelfRegister', () => {
     });
 
     it('admits an adult', () => {
-      expect(() => build(18).assertOldEnoughToSelfRegister('1994-03-22')).not.toThrow();
+      expect(() => build(18).assertOldEnoughForOwnAccount('1994-03-22')).not.toThrow();
     });
 
     it('refuses a child', () => {
@@ -86,12 +87,12 @@ describe('AuthService.assertOldEnoughToSelfRegister', () => {
 
     it('handles a 29 February birthday, which does not exist in the current year', () => {
       // Turns 18 on 1 March 2026, because 29 Feb has not passed on 28 Feb.
-      expect(() => build(18).assertOldEnoughToSelfRegister('2008-02-29')).not.toThrow();
+      expect(() => build(18).assertOldEnoughForOwnAccount('2008-02-29')).not.toThrow();
     });
 
     it('names the threshold in the message, so the UI need not hardcode it', () => {
       try {
-        build(18).assertOldEnoughToSelfRegister('2015-01-01');
+        build(18).assertOldEnoughForOwnAccount('2015-01-01');
         throw new Error('expected a rejection');
       } catch (error) {
         const body = (error as ForbiddenException).getResponse() as { message: string };
@@ -102,7 +103,7 @@ describe('AuthService.assertOldEnoughToSelfRegister', () => {
 
   describe('with the threshold configured elsewhere', () => {
     it('admits a sixteen-year-old once the floor is 16', () => {
-      expect(() => build(16).assertOldEnoughToSelfRegister('2010-07-26')).not.toThrow();
+      expect(() => build(16).assertOldEnoughForOwnAccount('2010-07-26')).not.toThrow();
     });
 
     it('still refuses a fifteen-year-old at that floor', () => {
@@ -110,7 +111,7 @@ describe('AuthService.assertOldEnoughToSelfRegister', () => {
     });
 
     it('admits anyone born in the past when the floor is 0', () => {
-      expect(() => build(0).assertOldEnoughToSelfRegister('2026-07-26')).not.toThrow();
+      expect(() => build(0).assertOldEnoughForOwnAccount('2026-07-26')).not.toThrow();
     });
 
     it('falls back to 18 when the setting is missing', () => {
@@ -122,7 +123,7 @@ describe('AuthService.assertOldEnoughToSelfRegister', () => {
         ForbiddenException,
         ErrorCode.UNDERAGE_SELF_REGISTRATION,
       );
-      expect(() => build(undefined).assertOldEnoughToSelfRegister('1994-03-22')).not.toThrow();
+      expect(() => build(undefined).assertOldEnoughForOwnAccount('1994-03-22')).not.toThrow();
     });
   });
 
@@ -160,7 +161,7 @@ describe('AuthService.assertOldEnoughToSelfRegister', () => {
     it('treats yesterday as a real date, not a malformed one', () => {
       // Distinguishes "in the future" from "very recent": only the former is a
       // 400. At a floor of 0 this is simply someone aged 0.
-      expect(() => build(0).assertOldEnoughToSelfRegister('2026-07-25')).not.toThrow();
+      expect(() => build(0).assertOldEnoughForOwnAccount('2026-07-25')).not.toThrow();
     });
   });
 });

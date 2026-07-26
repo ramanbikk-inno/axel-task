@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
+import { IsCalendarDate } from '../../../shared/validation/calendar-date';
 import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 import { IsOptionalNotNull } from '../../../shared/validation/presence';
 
@@ -98,4 +99,10 @@ export class UpdatePlayerProfileDto {
   @IsString()
   @MaxLength(30)
   gender?: string | null;
+
+  /** Not clearable: the minimum-age rule has nothing to check against a null. */
+  @ApiPropertyOptional({ example: '1994-03-22', description: 'Date of birth (YYYY-MM-DD)' })
+  @IsOptionalNotNull()
+  @IsCalendarDate()
+  birthDate?: string;
 }

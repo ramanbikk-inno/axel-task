@@ -79,7 +79,11 @@ describe('Input validation (e2e)', () => {
           .expect(422);
 
         expect(res.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR);
-        expect(await ctx.dataSource.getRepository(PlayerProfile).count()).toBe(0);
+        // Counting children specifically: the registrant's own profile is created
+        // at registration, so a bare count() is no longer zero here.
+        expect(
+          await ctx.dataSource.getRepository(PlayerProfile).count({ where: { isChild: true } }),
+        ).toBe(0);
       },
     );
 

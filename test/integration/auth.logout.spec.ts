@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
+import { PlayersService } from '../../src/modules/players/players.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
 import { AuthSession } from '../../src/modules/auth/entities/auth-session.entity';
@@ -67,6 +68,10 @@ describe('AuthService.logout', () => {
             closeForSession: jest.fn().mockResolvedValue(undefined),
             closeForTargetUser: jest.fn().mockResolvedValue(undefined),
           },
+        },
+        {
+          provide: PlayersService,
+          useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
         },
         {
           provide: ConfigService,

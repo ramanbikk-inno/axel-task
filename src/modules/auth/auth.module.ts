@@ -9,6 +9,7 @@ import { CryptoModule } from '../../shared/crypto/crypto.module';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { ImpersonationLogModule } from '../impersonation/impersonation-log.module';
 import { MailModule } from '../mail/mail.module';
+import { PlayersModule } from '../players/players.module';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
@@ -37,6 +38,7 @@ import { TokenService } from './token.service';
     CryptoModule,
     UsersModule,
     MailModule,
+    PlayersModule,
     // Leaf module, so logout and bulk revocation can close an impersonation's
     // audit row without a cycle back into ImpersonationModule.
     ImpersonationLogModule,

@@ -9,6 +9,7 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { displayNameFor } from '../../shared/format/display-name';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { ContextService } from '../auth/context.service';
@@ -40,16 +41,6 @@ export interface JoinResult {
   /** The first profile connected; kept for callers written before multi-select. */
   playerProfileId: string;
   playerProfileIds: string[];
-}
-
-function displayNameFor(
-  input: { firstName?: string | null; lastName?: string | null },
-  fallback: string,
-): string {
-  const full = [input.firstName, input.lastName]
-    .filter((v) => v !== null && v !== undefined && v.trim() !== '')
-    .join(' ');
-  return full !== '' ? full : fallback;
 }
 
 export const AUDIT_SHARE_LINK_CREATED = 'sharelink.created';
@@ -146,7 +137,7 @@ export class EnrollmentService {
     // this is a second, equally public way to mint an account — a gate on only
     // one of two doors is not a gate. Before the transaction, so an underage
     // attempt never takes a use off the trainer's link.
-    this.authService.assertOldEnoughToSelfRegister(dto.birthDate);
+    this.authService.assertOldEnoughForOwnAccount(dto.birthDate);
 
     let verificationToken = '';
     const result = await this.dataSource.transaction(async (manager: EntityManager) => {

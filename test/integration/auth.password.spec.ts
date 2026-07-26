@@ -5,6 +5,7 @@ import { IsNull } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
+import { PlayersService } from '../../src/modules/players/players.service';
 import { Principal } from '../../src/modules/auth/principal';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
@@ -134,6 +135,10 @@ describe('AuthService password reset & change', () => {
             closeForSession: jest.fn().mockResolvedValue(undefined),
             closeForTargetUser: jest.fn().mockResolvedValue(undefined),
           },
+        },
+        {
+          provide: PlayersService,
+          useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
         },
         {
           provide: ConfigService,

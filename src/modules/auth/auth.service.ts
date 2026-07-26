@@ -11,11 +11,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { displayNameFor } from '../../shared/format/display-name';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { ImpersonationLogService } from '../impersonation/impersonation-log.service';
 import { MailService } from '../mail/mail.service';
+import { PlayersService } from '../players/players.service';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
@@ -51,15 +53,17 @@ export class AuthService {
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
     private readonly impersonationLogs: ImpersonationLogService,
+    private readonly playersService: PlayersService,
     private readonly config: ConfigService,
   ) {}
 
   /**
    * Minors cannot hold an account in their own name; they belong to a parent's
    * account as a child profile. Threshold is MIN_SELF_REGISTRATION_AGE, default
-   * 18. Both registration paths must call this — a gate on one door is no gate.
+   * 18. Every door onto an own-name account calls this — both registration
+   * paths and the edit that can move a birth date afterwards.
    */
-  assertOldEnoughToSelfRegister(birthDate: string): void {
+  assertOldEnoughForOwnAccount(birthDate: string): void {
     const born = parseCalendarDate(birthDate);
     if (born === null) {
       throw new BadRequestException({
@@ -202,7 +206,7 @@ export class AuthService {
   async register(dto: RegisterDto): Promise<{ message: string }> {
     // Before the existence check, or the response tells the caller whether the
     // address is already taken.
-    this.assertOldEnoughToSelfRegister(dto.birthDate);
+    this.assertOldEnoughForOwnAccount(dto.birthDate);
 
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
@@ -221,6 +225,17 @@ export class AuthService {
       emailVerified: false,
       mustSetPassword: false,
       status: UserStatus.Active,
+    });
+
+    // The birth date is collected to run the age check above, so it has to be
+    // kept: the self profile is the only place that holds one, and nothing
+    // downstream can ask the registrant again. This mirrors the ShareLink
+    // registration path, which has always created the profile here.
+    await this.playersService.create({
+      ownerUserId: user.id,
+      displayName: displayNameFor(user, user.email),
+      isChild: false,
+      birthDate: dto.birthDate,
     });
 
     const { token, tokenHash } = this.tokens.generateOpaqueToken();
