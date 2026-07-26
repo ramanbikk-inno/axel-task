@@ -18,7 +18,7 @@ export enum AssociationStatus {
 }
 
 /**
- * Links a player profile to a trainer's organization (US-01.02). A player can
+ * Links a player profile to a trainer's organization. A player can
  * be associated with multiple trainers; each pairing is unique.
  */
 @Entity({ name: 'trainer_player_associations' })

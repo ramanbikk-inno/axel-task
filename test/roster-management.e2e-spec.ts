@@ -11,14 +11,12 @@ import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile
 import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 
 /**
- * The trainer's own side of the roster: recording a skill level (section 8, "set
- * by trainer") and off-boarding a player who has left (section 3, "Manage own
- * organization users").
+ * The trainer's own side of the roster: recording a skill level and off-boarding
+ * a player who has left.
  *
- * Both are writes a trainer performs against a profile someone else owns, so the
- * interesting cases are the boundaries rather than the happy path: who may call
- * them, what happens to a session parked in the context being severed, and
- * whether "removed" means gone or merely disconnected.
+ * Both write against a profile someone else owns, so the interesting cases are
+ * the boundaries: who may call them, what happens to a session parked in the
+ * context being severed, and whether "removed" means gone or disconnected.
  */
 describe('Trainer roster management (e2e)', () => {
   let ctx: E2EContext;
@@ -150,7 +148,7 @@ describe('Trainer roster management (e2e)', () => {
         .expect(404);
     });
 
-    it('is not the parent’s to set — section 8 gives it to the trainer', async () => {
+    it('is not the parent’s to set — it is the trainer’s assessment', async () => {
       const { parentToken, profileId } = await seed('skill-parent');
 
       await request(app.getHttpServer())
@@ -320,7 +318,7 @@ describe('Trainer roster management (e2e)', () => {
     it('is not the parent’s call through this route', async () => {
       const { parentToken, profileId } = await seed('remove-parent');
 
-      // The family has its own removal (US-01.04); this one is the trainer's.
+      // The family has its own removal; this one is the trainer's.
       await request(app.getHttpServer())
         .delete(`/api/v1/trainers/me/roster/${profileId}`)
         .set(auth(parentToken))

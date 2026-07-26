@@ -60,7 +60,7 @@ export class ShareLinksController {
     };
   }
 
-  /** US-01.02: the trainer's CRM view of everyone connected to them. */
+  /** The trainer's view of everyone connected to them. */
   @Get('trainers/me/roster')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -71,7 +71,7 @@ export class ShareLinksController {
     return this.enrollment.roster(req.user as Principal, query);
   }
 
-  /** Section 8: skill level is the trainer's assessment, not the player's. */
+  /** Skill level is the trainer's assessment, not the player's. */
   @Patch('trainers/me/roster/:playerProfileId')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -90,7 +90,7 @@ export class ShareLinksController {
     );
   }
 
-  /** Off-board a player from this trainer's roster (section 3). */
+  /** Off-board a player from this trainer's roster. */
   @Delete('trainers/me/roster/:playerProfileId')
   @HttpCode(204)
   @UseGuards(JwtAuthGuard, RolesGuard)

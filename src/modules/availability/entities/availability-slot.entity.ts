@@ -12,19 +12,10 @@ import { CoachProfile } from '../../coaches/entities/coach-profile.entity';
 import { PlayerProfile } from '../../players/entities/player-profile.entity';
 
 /**
- * A weekly availability window — "Best Times" for a player (US-01.09) or
- * "My Times" for a coach (US-01.10).
- *
- * Ownership is an XOR: exactly one of playerProfileId / coachProfileId is set,
- * enforced by CHK_availability_slots_owner. dayOfWeek is 0=Sunday..6=Saturday;
- * start/end are minutes from midnight. Each window is confined to a single day
- * (0 <= startMinute < endMinute <= 1439) and never crosses midnight. Same-day
- * overlaps within one availability class are rejected in the service layer; the
- * DB CHECK constraints enforce the numeric ranges as defense-in-depth.
- *
- * isAvailable=false marks a blackout that subtracts from the surrounding
- * available windows, which is how spec section 8's "available or not available"
- * is represented.
+ * A weekly availability window — "Best Times" for a player, "My Times" for a
+ * coach. Exactly one of playerProfileId / coachProfileId is set. dayOfWeek is
+ * 0=Sunday; start/end are minutes from midnight and never cross it.
+ * isAvailable=false is a blackout subtracting from the surrounding windows.
  */
 @Entity({ name: 'availability_slots' })
 export class AvailabilitySlot {

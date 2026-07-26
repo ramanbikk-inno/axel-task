@@ -5,15 +5,10 @@ import { ErrorCode } from '../../../shared/errors/error-codes';
 import { Principal } from '../principal';
 
 /**
- * Blocks child accounts from the family-management endpoints (US-01.06).
- *
- * A child shares the PlayerParent role, so `@Roles(Role.PlayerParent)` lets
- * them through by construction. The CASL rules in AbilityFactory say the same
- * thing, but most of these endpoints do their ownership checks in the service
- * rather than through PoliciesGuard, so this is the check that actually runs
- * on the request path today. Both are kept: a route that later gains a
- * `@CheckPolicies` should not be the first place anyone notices the guard was
- * the only thing holding.
+ * Blocks child accounts from the family-management endpoints. A child shares the
+ * PlayerParent role, so `@Roles(Role.PlayerParent)` admits them by construction.
+ * AbilityFactory says the same thing, but these routes check ownership in the
+ * service rather than through PoliciesGuard, so this is what actually runs.
  */
 @Injectable()
 export class NotAChildGuard implements CanActivate {

@@ -11,7 +11,7 @@ import { User } from '../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
-describe('Super Admin GDPR delete (e2e, US-01.13)', () => {
+describe('Super Admin GDPR delete (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

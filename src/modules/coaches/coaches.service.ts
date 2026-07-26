@@ -34,7 +34,7 @@ import {
 } from './dto/coach.dto';
 import { CoachProfile, CoachStatus } from './entities/coach-profile.entity';
 
-/** Unique coach invites expire after 7 days and are single-use (US-01.08). */
+/** Unique coach invites expire after 7 days and are single-use. */
 const COACH_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const AUDIT_COACH_INVITED = 'coach.invited';
@@ -91,13 +91,9 @@ export class CoachesService {
   }
 
   /**
-   * Re-send a pending invitation (US-01.08: "Link expires: Clear message,
-   * option to resend invitation").
-   *
-   * The old link is deactivated and a new code minted rather than the expiry
-   * extended: the original may have gone to a mailbox the trainer no longer
-   * intends to reach, and a code that keeps coming back to life is one that
-   * can never be taken away.
+   * Re-send a pending invitation. Mints a new code rather than extending the
+   * expiry: the original may have reached the wrong mailbox, and a code that
+   * keeps coming back to life can never be taken away.
    */
   async resendInvitation(principal: Principal, invitationId: string): Promise<CoachInvitationView> {
     const trainer = await this.requireTrainer(principal.userId);
@@ -143,9 +139,8 @@ export class CoachesService {
   }
 
   /**
-   * Cancel a pending invitation. A single-use link that reached the wrong
-   * mailbox is live for seven days and grants a Coach account inside the
-   * trainer's org; there has to be a way to take it back.
+   * Cancel a pending invitation. The link is live for seven days and grants a
+   * Coach account inside the org, so it has to be revocable.
    */
   async revokeInvitation(principal: Principal, invitationId: string): Promise<CoachInvitationView> {
     const trainer = await this.requireTrainer(principal.userId);
@@ -169,19 +164,14 @@ export class CoachesService {
   }
 
   /**
-   * End a coach's engagement (US-01.08's lifecycle counterpart).
-   *
-   * The row is kept and marked Inactive rather than deleted, so the engagement
-   * stays in the record and the partial unique index frees the coach to be
-   * hired elsewhere. Their sessions are revoked immediately: their tenancy
-   * comes from this row, and leaving a live token behind would let them keep
-   * reading the org's roster until it expired.
+   * End a coach's engagement. The row is kept and marked Inactive so the history
+   * survives and the partial unique index frees them to be hired elsewhere.
+   * Sessions are revoked at once — their tenancy comes from this row.
    */
   async offboardCoach(principal: Principal, coachProfileId: string): Promise<CoachView> {
     const trainer = await this.requireTrainer(principal.userId);
     const profile = await this.coaches.findOne({
-      // The trainer clause is the tenancy boundary: without it a trainer could
-      // off-board another organisation's coach by id.
+      // Tenancy boundary: without it a trainer could off-board another org's coach.
       where: { id: coachProfileId, trainerProfileId: trainer.id },
     });
     if (!profile) {
@@ -214,12 +204,9 @@ export class CoachesService {
   }
 
   /**
-   * A coach edits their own profile (spec section 6).
-   *
-   * Resolved from `principal.coachProfileId`, which SessionValidatorService
-   * derives per request from the *active* engagement — so an off-boarded coach
-   * has none and cannot edit a profile that no longer represents anything.
-   * Never from a caller-supplied id: that would be the whole boundary.
+   * Resolved from `principal.coachProfileId`, derived per request from the active
+   * engagement, so an off-boarded coach has none. Never from a caller-supplied
+   * id — that is the whole boundary.
    */
   async updateOwnProfile(principal: Principal, dto: UpdateCoachProfileDto): Promise<CoachView> {
     if (principal.coachProfileId === null) {
@@ -298,14 +285,9 @@ export class CoachesService {
   }
 
   /**
-   * Is this principal inside the named trainer organisation?
-   *
-   * "Public" here means public *to the organisation*, not to the internet. A
-   * Trainer's and a Coach's org is already resolved per request into
-   * `trainerOrgId` — their own for a Trainer, their employer's for a Coach, and
-   * null once an engagement ends — so that is the comparison rather than a
-   * fresh lookup that could disagree with it. A player or parent belongs
-   * wherever one of their profiles is actively associated.
+   * Is this principal inside the named organisation? `trainerOrgId` is already
+   * resolved per request — own org for a Trainer, employer's for a Coach, null
+   * once an engagement ends — so compare against it rather than re-deriving it.
    */
   private async isOrgMember(principal: Principal, trainerProfileId: string): Promise<boolean> {
     if (principal.role === Role.SuperAdmin) {
@@ -315,8 +297,7 @@ export class CoachesService {
       return principal.trainerOrgId === trainerProfileId;
     }
 
-    // A child login may only look through the one profile it is, exactly as in
-    // the context selector — never their parent's or a sibling's.
+    // A child login sees only the one profile it is, never a sibling's.
     const profileIds = principal.isChild
       ? principal.childPlayerProfileId === null
         ? []
@@ -333,24 +314,9 @@ export class CoachesService {
   }
 
   /**
-   * The coaches a trainer's organisation shows to its members (US-01.08,
-   * "Public profile management").
-   *
-   * `publicVisible` had no consumer at all: it was stored, editable and
-   * returned to the trainer, but nothing ever filtered on it, so a coach who
-   * ticked the box appeared nowhere and one who cleared it was hidden from
-   * nowhere. This is the read it gates.
-   *
-   * Active engagements only — an off-boarded coach is not staff — and the view
-   * is deliberately narrower than CoachView, which carries the email and
-   * employment dates that belong to the trainer's own roster screen.
-   *
-   * Scoped to the organisation's own members. Authentication alone is not the
-   * boundary: without the membership check any logged-in account — including a
-   * competing trainer — could read any org's staff list, names, credentials and
-   * all, from nothing but its id. 404 rather than 403, matching every other
-   * cross-tenant miss here, so the reply does not confirm that the id names a
-   * real organisation.
+   * The coaches an organisation shows its own members — the read `publicVisible`
+   * gates. Members only: authentication alone would let a competing trainer read
+   * any org's staff list from its id. 404, not 403, so the reply gives nothing away.
    */
   async listPublicCoaches(
     principal: Principal,
@@ -507,14 +473,9 @@ export class CoachesService {
   }
 
   /**
-   * Attach an existing account to this trainer.
-   *
-   * US-01.08 says a coach "can ONLY be active under this trainer" — a rule
-   * about *current* employment. Before, any existing email was refused
-   * outright with "contact support", which also blocked the ordinary case of a
-   * coach whose previous engagement has ended being hired again. What must
-   * stay impossible is poaching someone who is still active elsewhere, and the
-   * partial unique index enforces that in the database as well as here.
+   * Attach an existing account to this trainer. A coach may only be active under
+   * one trainer at a time, but an ended engagement must not block re-hiring.
+   * The partial unique index enforces the same rule in the database.
    */
   private async attachExistingCoach(
     existing: User,

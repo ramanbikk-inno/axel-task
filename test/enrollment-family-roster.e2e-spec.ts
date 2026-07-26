@@ -9,17 +9,14 @@ import { User } from '../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 
 /**
- * US-01.02's multi-trainer half:
- *
- *   "If Parent with Children: Show selection prompt — 'Who will train with
- *    [New Trainer]?' … Only selected family members associated with new
- *    trainer."
+ * The multi-trainer half of joining: a parent with children picks who will
+ * train with the new trainer, and only those family members are associated.
  *
  * The join endpoint always connected the caller's own profile and nothing
  * else, so a parent joining a trainer on behalf of one child ended up joining
  * personally instead — and there was no way to see or choose.
  */
-describe('Family selection on join, and the trainer roster (e2e, US-01.02)', () => {
+describe('Family selection on join, and the trainer roster (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

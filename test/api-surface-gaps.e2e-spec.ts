@@ -71,7 +71,7 @@ describe('API surface gaps (e2e)', () => {
     return { token, userId: parent.userId, childProfileId: child.body.id as string };
   };
 
-  describe('child profile is no longer write-once (US-01.03 / US-01.11)', () => {
+  describe('child profile is no longer write-once', () => {
     it('amends the fields a parent can get wrong at creation', async () => {
       const fam = await makeParentWithChild('patch-child@example.com');
 
@@ -203,7 +203,7 @@ describe('API surface gaps (e2e)', () => {
     });
   });
 
-  describe('skill level is now the trainer’s to set (section 8)', () => {
+  describe('skill level is now the trainer’s to set', () => {
     const seedRoster = async (
       prefix: string,
     ): Promise<{ trainer: { token: string; trainerProfileId: string }; profileId: string }> => {
@@ -284,7 +284,7 @@ describe('API surface gaps (e2e)', () => {
         .expect(200);
       expect(active.body).toHaveLength(0);
 
-      // Soft, like the family-side removal in US-01.04 — the pairing survives.
+      // Soft, like the family-side removal — the pairing survives.
       const all = await request(app.getHttpServer())
         .get('/api/v1/trainers/me/roster')
         .query({ includeInactive: true })
@@ -305,7 +305,7 @@ describe('API surface gaps (e2e)', () => {
     });
   });
 
-  describe('coach profile fields are readable (US-01.08)', () => {
+  describe('coach profile fields are readable', () => {
     const seedCoach = async (
       prefix: string,
       publicVisible: boolean,
@@ -400,7 +400,7 @@ describe('API surface gaps (e2e)', () => {
     });
   });
 
-  describe('minors cannot hold an account in their own name (section 9)', () => {
+  describe('minors cannot hold an account in their own name', () => {
     it('rejects an underage self-registration', async () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/auth/register')
@@ -500,7 +500,7 @@ describe('API surface gaps (e2e)', () => {
   });
 
   describe('smaller reporting gaps', () => {
-    it('reports when each trainer association began (US-01.04 “with dates”)', async () => {
+    it('reports when each trainer association began (“with dates”)', async () => {
       const trainer = await makeTrainer('dates-trainer@example.com');
       const parent = await ctx.registerVerifiedPlayer({ email: 'dates-parent@example.com' });
       const token = await login(parent.email, parent.password);
@@ -525,7 +525,7 @@ describe('API surface gaps (e2e)', () => {
       expect(new Date(withTrainer.trainers[0].connectedAt as string).getTime()).not.toBeNaN();
     });
 
-    it('resets the brand colour to the platform default (US-01.14)', async () => {
+    it('resets the brand colour to the platform default', async () => {
       const trainer = await makeTrainer('reset-colour@example.com');
       await request(app.getHttpServer())
         .patch('/api/v1/trainers/me/branding')

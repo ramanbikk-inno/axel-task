@@ -65,7 +65,7 @@ export class PlayerAvailabilityController {
   }
 }
 
-/** "My Times" — a coach manages their own weekly availability (US-01.10). */
+/** "My Times" — a coach manages their own weekly availability. */
 @ApiTags('availability')
 @Controller('coaches/me')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -91,7 +91,7 @@ export class CoachAvailabilityController {
     return this.availability.setForCoach(req.user as Principal, dto.slots);
   }
 
-  /** The coach's side of Q-01.06: they can see every override filed against them. */
+  /** A coach can see every override filed against them. */
   @Get('availability/overrides')
   @HttpCode(200)
   @ApiOkResponse({ type: PagedCoachOverrides })
@@ -131,10 +131,7 @@ export class TrainerAvailabilityController {
     return this.availability.coachViewForTrainer((req.user as Principal).userId, coachProfileId);
   }
 
-  /**
-   * Advisory only. A conflict never blocks the assignment — it tells the
-   * trainer what warning to show and whether a reason will be required.
-   */
+  /** Advisory only: a conflict never blocks the assignment, it just warns. */
   @Get('me/coaches/:coachProfileId/availability/conflict-check')
   @HttpCode(200)
   @ApiOkResponse({ type: ConflictCheckView })
@@ -151,20 +148,18 @@ export class TrainerAvailabilityController {
   }
 }
 
-/** The override audit trail itself (US-01.10 "Override logged"). */
+/** The override audit trail. */
 @ApiTags('availability')
 @Controller('coach-overrides')
 @UseGuards(JwtAuthGuard, RolesGuard)
-// Class-level roles are the safety net: RolesGuard allows a request when it
-// finds no @Roles metadata at all, so a handler added here without its own
-// decorator would otherwise be open to every authenticated principal.
+// RolesGuard allows a request when it finds no @Roles metadata at all, so the
+// class-level decorator keeps a new handler from defaulting to wide open.
 @Roles(Role.Trainer, Role.SuperAdmin)
 @ApiBearerAuth()
 export class CoachOverridesController {
   constructor(private readonly overrides: CoachOverridesService) {}
 
-  // Recording is a trainer action: a Super Admin does not run an organisation's
-  // schedule, so they can read the trail but not write to it.
+  // A Super Admin does not run an organisation's schedule: read, not write.
   @Post()
   @HttpCode(201)
   @Roles(Role.Trainer)
@@ -184,8 +179,7 @@ export class CoachOverridesController {
     @Req() req: Request,
   ): Promise<PagedCoachOverrides> {
     const principal = req.user as Principal;
-    // A Super Admin is not scoped to one org, so they see the platform-wide
-    // trail rather than being asked for a trainer profile they do not have.
+    // A Super Admin has no trainer profile, so they get the platform-wide trail.
     return principal.role === Role.SuperAdmin
       ? this.overrides.listAll(query)
       : this.overrides.listForTrainer(principal.userId, query);

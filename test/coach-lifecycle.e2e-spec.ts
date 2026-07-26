@@ -9,15 +9,12 @@ import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
 /**
- * US-01.08 beyond the happy path: resending an expired invitation, revoking
- * one that went astray, ending an engagement, and hiring a coach whose
- * previous engagement has ended.
- *
- * "Coach can ONLY be active under this trainer" is a rule about *current*
- * employment. The old code read it as "may never have worked anywhere",
- * refused any existing email outright, and so had no lifecycle at all.
+ * Beyond the happy path: resending an expired invitation, revoking one that went
+ * astray, ending an engagement, and re-hiring a coach. "Active under one
+ * trainer" is about current employment — reading it as "never worked anywhere"
+ * refused every existing email and left no lifecycle at all.
  */
-describe('Coach lifecycle (e2e, US-01.08)', () => {
+describe('Coach lifecycle (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

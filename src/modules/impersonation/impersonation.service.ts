@@ -17,7 +17,7 @@ import { ImpersonationHistoryView } from './dto/impersonation-history.dto';
 import { ImpersonationLogService } from './impersonation-log.service';
 import { ImpersonationLog } from './entities/impersonation-log.entity';
 
-/** Impersonation sessions are hard-capped at one hour (US-01.07). */
+/** Impersonation sessions are hard-capped at one hour. */
 export const IMPERSONATION_TTL_MS = 60 * 60 * 1000;
 
 export interface ImpersonationBanner {
@@ -188,13 +188,9 @@ export class ImpersonationService {
   }
 
   /**
-   * The "Impersonation History" compliance report US-01.07 asks for: who
-   * impersonated whom, when, for how long, why — and what they did.
-   *
-   * The actions come from `audit_logs.impersonation_session_id`, which is why
-   * that column exists: `actor_user_id` on those rows is the *impersonated*
-   * user, so without it there is no way to attribute anything an admin did
-   * while wearing someone else's identity.
+   * Compliance report: who impersonated whom, when, for how long, why, and what
+   * they did. Actions are matched on `audit_logs.impersonation_session_id` —
+   * `actor_user_id` on those rows is the impersonated user, not the admin.
    */
   async history(query: {
     adminUserId?: string;

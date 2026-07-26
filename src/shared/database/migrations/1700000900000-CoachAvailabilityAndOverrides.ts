@@ -1,19 +1,12 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * US-01.10 — coaches need availability of their own ("My Times"), and a trainer
- * who schedules over it must leave an auditable reason.
+ * Coach availability ("My Times") and the audit trail for scheduling over it.
  *
- * `availability_slots` was created with a NOT NULL FK to `player_profiles`, so
- * coach availability had nowhere to live. Rather than a parallel table with a
- * duplicate validation path, the owner becomes an XOR: exactly one of
- * `player_profile_id` / `coach_profile_id` is set per row (design 5.4,
- * "Availability -> Player/Coach N:1 (XOR)").
- *
- * `is_available` and `updated_at` also land here: spec section 8 lists
- * "available or not available" and "created/updated timestamps" among the
- * required availability fields, and folding them into the same rewrite avoids a
- * second ALTER on this table later.
+ * `availability_slots` had a NOT NULL FK to `player_profiles`, so coach rows had
+ * nowhere to live. Rather than a parallel table with duplicate validation, the
+ * owner becomes an XOR. `is_available` and `updated_at` fold into the same
+ * rewrite to avoid a second ALTER later.
  */
 export class CoachAvailabilityAndOverrides1700000900000 implements MigrationInterface {
   name = 'CoachAvailabilityAndOverrides1700000900000';

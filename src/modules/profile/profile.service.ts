@@ -24,7 +24,7 @@ import {
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 
 /**
- * US-01.07 requires every action taken during an impersonation to be
+ * Every action taken during an impersonation has to be
  * attributable to the admin behind it. Self-service profile edits were not
  * audited at all, so an admin could change a user's name, phone or photo while
  * impersonating them and leave nothing behind — the one place the requirement

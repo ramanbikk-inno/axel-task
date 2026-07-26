@@ -1,15 +1,12 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * "For User Deletion Compliance" (spec section 8): original user id, original
- * email, who deleted, reason, when, and a backup of the original data.
+ * The deletion compliance record: original user id and email, who deleted, why,
+ * when, and a backup of the original data.
  *
- * Kept out of audit_logs deliberately. That table is a general activity feed
- * whose metadata column has no shape and no retention rule of its own; the one
- * record a regulator will actually ask for should not be a JSON blob among
- * thousands of unrelated rows. It also carries the PII that was removed
- * everywhere else, which is a different retention decision from the rest of
- * the audit trail and needs to be separable.
+ * Kept out of audit_logs on purpose — that is a general activity feed with an
+ * unshaped metadata column, and this row carries removed PII under a different
+ * retention rule.
  */
 export class CreateUserDeletionLogs1700001300000 implements MigrationInterface {
   name = 'CreateUserDeletionLogs1700001300000';

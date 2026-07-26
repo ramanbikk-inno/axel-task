@@ -7,11 +7,9 @@ import { CoachProfile, CoachStatus } from '../coaches/entities/coach-profile.ent
 import { TrainersService } from '../trainers/trainers.service';
 
 /**
- * Resolves the coach a request is allowed to act on. Both the availability
- * service and the override service need the same two questions answered, and
- * the tenancy gate is the security boundary for every trainer-facing coach
- * endpoint — it belongs in one place rather than reached through from a
- * sibling service.
+ * Resolves the coach a request may act on. The tenancy gate for every
+ * trainer-facing coach endpoint, shared by the availability and override
+ * services so there is only one copy of it.
  */
 @Injectable()
 export class CoachLookupService {
@@ -23,14 +21,9 @@ export class CoachLookupService {
   /**
    * The caller's own coach profile, for the "me" endpoints.
    *
-   * Active only. Off-boarding keeps the row (so the engagement stays in the
-   * record) and the unique index is partial, so a coach who was off-boarded and
-   * later re-hired has *two* rows. An unfiltered findOne picks between them
-   * arbitrarily, which silently sent My Times writes to the ended engagement:
-   * the coach saw a saved schedule, while the trainer's conflict check — which
-   * resolves the coach through the org-scoped id — read an empty one. Filtering
-   * on Active also means an off-boarded coach cannot write availability at all,
-   * which is correct: their tenancy ended with the row.
+   * Active only. Off-boarding keeps the row and the unique index is partial, so
+   * a re-hired coach has two — an unfiltered findOne picks arbitrarily and can
+   * send writes to the ended engagement.
    */
   async requireOwnProfile(coachUserId: string): Promise<CoachProfile> {
     const coach = await this.coachProfiles.findOne({
@@ -46,13 +39,9 @@ export class CoachLookupService {
   }
 
   /**
-   * Tenancy gate for every trainer-facing coach read. A coach from another
-   * organisation is reported as not found rather than forbidden, so the
-   * endpoint cannot be used to probe which coach ids exist elsewhere.
-   *
-   * Active only, for the same reason: a former employer still owns the ended
-   * row's trainerProfileId, and without this they keep a live read on a coach
-   * who no longer works for them.
+   * Tenancy gate for trainer-facing coach reads. Another org's coach is "not
+   * found", not "forbidden", so the endpoint cannot probe for ids elsewhere.
+   * Active only: an ended row still carries the former employer's id.
    */
   async requireInOwnOrg(trainerUserId: string, coachProfileId: string): Promise<CoachProfile> {
     const trainer = await this.requireTrainer(trainerUserId);

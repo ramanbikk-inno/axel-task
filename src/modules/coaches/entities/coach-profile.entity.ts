@@ -12,7 +12,7 @@ import {
 import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
 import { User } from '../../users/entities/user.entity';
 
-/** Employment state. Off-boarding keeps the row so history survives (US-01.08). */
+/** Employment state. Off-boarding keeps the row so history survives. */
 export enum CoachStatus {
   Active = 'Active',
   Inactive = 'Inactive',
@@ -20,7 +20,7 @@ export enum CoachStatus {
 
 /**
  * A coach account's profile. Each coach works for exactly ONE trainer
- * (US-01.08), enforced by the unique user_id (one profile per coach account).
+ *, enforced by the unique user_id (one profile per coach account).
  */
 @Entity({ name: 'coach_profiles' })
 export class CoachProfile {

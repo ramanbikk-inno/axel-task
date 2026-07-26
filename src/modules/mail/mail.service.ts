@@ -51,7 +51,7 @@ export class MailService {
   }
 
   /**
-   * US-01.06: "[Child Name] wants to join [Trainer Name]'s program", carrying
+   * "[Child Name] wants to join [Trainer Name]'s program", carrying
    * the ShareLink so the parent can finish the registration themselves.
    */
   async sendChildJoinRequestEmail(
@@ -67,7 +67,7 @@ export class MailService {
     });
   }
 
-  /** Q-01.06: the coach is told when a trainer schedules over their My Times. */
+  /** The coach is told when a trainer schedules over their My Times. */
   async sendCoachAvailabilityOverrideEmail(
     to: string,
     input: {

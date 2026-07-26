@@ -58,11 +58,9 @@ const expectRejection = (
 };
 
 /**
- * Section 9: "ALL players under 18 require parent-managed accounts (no
- * independent accounts for minors)." The boundary days are the substance of the
- * rule — an off-by-one is the difference between admitting and refusing a minor
- * — and the threshold is configurable because Q-01.05 has not settled whether
- * 16-18s may hold their own account.
+ * Minors cannot hold an account in their own name. The boundary days are the
+ * substance of the rule: an off-by-one is the difference between admitting and
+ * refusing a minor.
  */
 describe('AuthService.assertOldEnoughToSelfRegister', () => {
   describe('at the default threshold of 18', () => {
@@ -104,7 +102,6 @@ describe('AuthService.assertOldEnoughToSelfRegister', () => {
 
   describe('with the threshold configured elsewhere', () => {
     it('admits a sixteen-year-old once the floor is 16', () => {
-      // How Q-01.05 gets resolved: configuration, not a code change.
       expect(() => build(16).assertOldEnoughToSelfRegister('2010-07-26')).not.toThrow();
     });
 

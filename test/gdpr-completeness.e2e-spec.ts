@@ -8,11 +8,11 @@ import { User } from '../src/modules/users/entities/user.entity';
 import { UserStatus } from '../src/modules/users/entities/user.enums';
 
 /**
- * US-01.13. The erasure itself already worked; what was missing was the legal
- * record it has to leave behind, and three pieces of PII the sweep walked past
+ * The erasure itself already worked; what was missing was the legal record it
+ * has to leave behind, and three pieces of PII the sweep walked past
  * — the stored photo, the emergency contact, and the children's own logins.
  */
-describe('GDPR deletion completeness (e2e, US-01.13)', () => {
+describe('GDPR deletion completeness (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

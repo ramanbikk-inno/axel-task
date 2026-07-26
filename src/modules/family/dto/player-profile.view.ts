@@ -10,8 +10,7 @@ export class TrainerContextView {
   businessName!: string;
 
   /**
-   * US-01.04: "For each child, see: Name, Age, Associated Trainers (with
-   * dates)". The column was on the association from the start but never
+   * When the association began. The column existed from the start but was never
    * surfaced, so the family screen had no date to show.
    */
   @ApiProperty()
@@ -43,7 +42,7 @@ export class PlayerProfileView {
   @ApiProperty({ nullable: true })
   jerseyNumber!: string | null;
 
-  /** Set by the trainer, read-only here (section 8). */
+  /** Set by the trainer, read-only here. */
   @ApiProperty({ nullable: true })
   skillLevel!: string | null;
 

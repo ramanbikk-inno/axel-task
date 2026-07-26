@@ -61,7 +61,7 @@ export class FamilyController {
     return this.family.createChild(principal, dto);
   }
 
-  /** Amend a child profile (US-01.03 / US-01.11). Parent-only. */
+  /** Amend a child profile. Parent-only. */
   @Patch('children/:profileId')
   @HttpCode(200)
   @UseGuards(NotAChildGuard)
@@ -76,7 +76,7 @@ export class FamilyController {
   }
 
   /**
-   * Give a child profile its own login (US-01.06). Parent-only: a child holding
+   * Give a child profile its own login. Parent-only: a child holding
    * one must not be able to mint another, for a sibling or for themselves.
    */
   @Post('children/:profileId/login')

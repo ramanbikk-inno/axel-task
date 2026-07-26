@@ -5,19 +5,11 @@ import { IsNull, Repository } from 'typeorm';
 import { ImpersonationLog } from './entities/impersonation-log.entity';
 
 /**
- * Writes to the impersonation audit trail (US-01.07).
+ * Writes to the impersonation audit trail.
  *
- * Deliberately split out of ImpersonationService and given its own module: an
- * impersonation session can end from paths that live in AuthModule — logout,
- * and the bulk revocation behind deactivation, GDPR deletion and password
- * change — and AuthModule cannot import ImpersonationModule, which already
- * imports it. This provider depends on nothing but its own table, so both
- * sides can use it without a cycle.
- *
- * Closing the log from every one of those paths is the point: until it was,
- * only an explicit `/exit` recorded an end time, so every other way of ending a
- * session left the row open forever and US-01.07's "start time, end time,
- * duration" was simply never reported for it.
+ * Split into its own module because sessions also end from AuthModule (logout,
+ * bulk revocation) and AuthModule cannot import ImpersonationModule, which
+ * already imports it. This depends on nothing but its own table.
  */
 @Injectable()
 export class ImpersonationLogService {
@@ -27,8 +19,7 @@ export class ImpersonationLogService {
   ) {}
 
   private static durationSeconds(startedAt: Date, endedAt: Date): number {
-    // Clamped: a clock that moved backwards must not write a negative duration
-    // into a compliance report.
+    // Clamped so a backwards clock cannot write a negative duration.
     return Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000));
   }
 
@@ -45,19 +36,14 @@ export class ImpersonationLogService {
   }
 
   /**
-   * Close every open log for sessions belonging to a user.
-   *
-   * `revokeAllUserSessions` ends sessions in bulk without knowing which of them
-   * were impersonations, so this mirrors it: the impersonated user is the
-   * session's `user_id`, and therefore the target of the log.
+   * Close every open log for a user's sessions. Mirrors `revokeAllUserSessions`,
+   * which ends sessions in bulk without knowing which were impersonations.
    */
   async closeForTargetUser(targetUserId: string, endedAt: Date): Promise<void> {
     const open = await this.logs.find({ where: { targetUserId, endedAt: IsNull() } });
     if (open.length === 0) {
       return;
     }
-    // One statement per distinct duration would be a query per row; instead
-    // group the ids that share a computed duration.
     for (const log of open) {
       await this.logs.update(
         { id: log.id },
@@ -70,14 +56,9 @@ export class ImpersonationLogService {
   }
 
   /**
-   * Backfill end times for sessions that ended without anything closing the log
-   * — most importantly the one-hour cap from US-01.07, which is enforced lazily
-   * on the next request and so never fires an event of its own.
-   *
-   * The session row is the authority on when the session stopped being usable:
-   * `revoked_at` if something revoked it, otherwise `expires_at` once it is in
-   * the past. Called before reading the history so the report is correct even
-   * for sessions that simply timed out and were never touched again.
+   * Backfill end times for sessions that expired rather than being ended. The
+   * one-hour cap is enforced lazily on the next request, so nothing fires when
+   * it lapses; the session row is the authority on when it stopped being usable.
    */
   async reconcileOpenLogs(logIds: string[], now: Date): Promise<void> {
     if (logIds.length === 0) {

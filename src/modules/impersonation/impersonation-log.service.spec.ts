@@ -44,7 +44,7 @@ const makeService = (): {
   };
 };
 
-describe('ImpersonationLogService (US-01.07)', () => {
+describe('ImpersonationLogService', () => {
   describe('closeForSession', () => {
     it('writes the end time and the elapsed duration', async () => {
       const { service, findOne, update } = makeService();

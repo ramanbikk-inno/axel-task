@@ -37,8 +37,8 @@ import { TokenService } from './token.service';
     CryptoModule,
     UsersModule,
     MailModule,
-    // Leaf module by design — see ImpersonationLogModule. Lets logout and bulk
-    // revocation close an impersonation's audit row without a cycle.
+    // Leaf module, so logout and bulk revocation can close an impersonation's
+    // audit row without a cycle back into ImpersonationModule.
     ImpersonationLogModule,
     TypeOrmModule.forFeature([
       AuthSession,

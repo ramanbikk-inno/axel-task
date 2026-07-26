@@ -24,9 +24,8 @@ export interface StorageService {
 }
 
 /**
- * Longest edge kept for stored images. US-01.14 recommends a 200x200 logo and
- * asks for oversized uploads to be resized rather than rejected; `limit` only
- * ever scales down, so a smaller image is stored untouched.
+ * Longest edge kept for stored images. Oversized uploads are resized rather than
+ * rejected; `limit` only ever scales down, so smaller images are untouched.
  */
 export const MAX_EDGE_PX = 512;
 
@@ -73,8 +72,7 @@ export class CloudinaryStorageService implements StorageService {
     // Rasterise SVG on the way in. An SVG is an XML document that can carry
     // <script> and event handlers, and object storage serves it verbatim, so
     // keeping one as-is is a stored-XSS vector on the delivery domain.
-    // Converting to PNG preserves the PNG/JPG/SVG intake US-01.14 asks for
-    // while leaving nothing executable behind.
+    // Converting to PNG keeps SVG uploads working with nothing executable left.
     if (input.mimeType === 'image/svg+xml') {
       options.format = 'png';
     }

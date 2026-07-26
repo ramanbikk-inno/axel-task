@@ -31,11 +31,7 @@ import { AvailabilitySlot } from './entities/availability-slot.entity';
 export const AUDIT_PLAYER_AVAILABILITY_SET = 'availability.player-set';
 export const AUDIT_COACH_AVAILABILITY_SET = 'availability.coach-set';
 
-/**
- * Exactly one owner per slot, mirroring the CHK_availability_slots_owner XOR in
- * the database. Passing one of these around means no code path can accidentally
- * write a slot owned by nobody or by both.
- */
+/** Exactly one owner per slot, mirroring the CHK_availability_slots_owner XOR. */
 export type SlotOwner =
   | { playerProfileId: string; coachProfileId?: undefined }
   | { coachProfileId: string; playerProfileId?: undefined };
@@ -68,10 +64,7 @@ function toView(slot: AvailabilitySlot): AvailabilitySlotView {
   };
 }
 
-/**
- * Merge [start, end) ranges, joining touching ones so 16:00–18:00 and
- * 18:00–20:00 read as one continuous 16:00–20:00 window when testing coverage.
- */
+/** Merge [start, end) ranges, joining touching ones: 16:00–18:00 + 18:00–20:00 = one. */
 function mergeRanges(ranges: { start: number; end: number }[]): { start: number; end: number }[] {
   const sorted = [...ranges].sort((a, b) => a.start - b.start);
   const merged: { start: number; end: number }[] = [];
@@ -87,13 +80,9 @@ function mergeRanges(ranges: { start: number; end: number }[]): { start: number;
 }
 
 /**
- * Is [start, end) on `day` fully available? Covered by the union of available
- * windows and untouched by any blackout. A blackout that overlaps even
- * partially disqualifies the window.
- *
- * The single primitive behind both the coach conflict check and the trainer's
- * player filter — when only the coach path knew about blackouts, the two
- * disagreed about whether a blacked-out slot counted as free.
+ * Is [start, end) on `day` fully available — covered by the available windows and
+ * untouched by any blackout? Shared by the coach conflict check and the trainer's
+ * player filter so the two cannot disagree about blackouts.
  */
 export function coversWindow(windows: Window[], day: number, start: number, end: number): boolean {
   const onDay = windows.filter((w) => w.dayOfWeek === day);
@@ -108,10 +97,8 @@ export function coversWindow(windows: Window[], day: number, start: number, end:
 }
 
 /**
- * Is there any free minute at all on `day`? The day-only filter cannot use
- * coversWindow (there is no window to test), but it must still subtract
- * blackouts, or a fully blacked-out day reads as available and the same query
- * with a time added contradicts it.
+ * Any free minute at all on `day`? The day-only filter has no window to test but
+ * must still subtract blackouts, or a blacked-out day reads as available.
  */
 export function hasFreeMinuteOnDay(windows: Window[], day: number): boolean {
   const onDay = windows.filter((w) => w.dayOfWeek === day);
@@ -148,7 +135,7 @@ export class AvailabilityService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Replace a player profile's full availability set (US-01.09). Owner-only. */
+  /** Replace a player profile's full availability set. Owner-only. */
   async setForProfile(
     actor: Principal,
     profileId: string,
@@ -170,7 +157,7 @@ export class AvailabilityService {
     return this.listSlots({ playerProfileId: profileId });
   }
 
-  /** Replace the calling coach's own weekly availability — "My Times" (US-01.10). */
+  /** Replace the calling coach's own weekly availability. */
   async setForCoach(
     actor: Principal,
     input: AvailabilitySlotInput[],
@@ -205,9 +192,8 @@ export class AvailabilityService {
   }
 
   /**
-   * Is a coach free for a proposed window? Shared by the advisory conflict
-   * check and by override recording, so the verdict stored on an override row
-   * is computed exactly the way the warning the trainer saw was.
+   * Is a coach free for a proposed window? Shared by the advisory check and by
+   * override recording, so the stored verdict matches the warning that was shown.
    */
   async isCoachFreeFor(
     coachProfileId: string,
@@ -222,9 +208,8 @@ export class AvailabilityService {
   }
 
   /**
-   * US-01.10 trainer assignment flow: does a proposed session time fall inside
-   * the coach's stated availability? This never blocks — it returns the warning
-   * copy the trainer is shown before choosing to override.
+   * Does a proposed session fall inside the coach's stated availability? Never
+   * blocks; returns the warning copy shown before the trainer chooses to override.
    */
   async checkCoachConflict(
     trainerUserId: string,
@@ -245,8 +230,8 @@ export class AvailabilityService {
       where: { coachProfileId: coach.id, dayOfWeek: query.dayOfWeek },
       order: { startMinute: 'ASC' },
     });
-    // Same primitive the recorded override verdict uses, so the warning the
-    // trainer sees and the hadConflict written later cannot disagree.
+    // Same primitive the recorded verdict uses, so the warning and the stored
+    // hadConflict cannot disagree.
     const available = coversWindow(rows, query.dayOfWeek, start, end);
 
     return {
@@ -264,12 +249,11 @@ export class AvailabilityService {
   ): Promise<AvailabilitySlotView[]> {
     this.assertValidSlots(input);
 
-    // Read back inside the same transaction: a read after commit can pick up a
-    // concurrent writer's set and hand the caller back slots they never sent.
+    // Read back inside the transaction: after commit a concurrent writer's set
+    // could be returned instead.
     return this.dataSource.transaction(async (manager: EntityManager) => {
-      // Without the lock the replace is not atomic against a concurrent
-      // replace: both transactions' DELETEs see the pre-existing set, both
-      // INSERT, and the union survives — overlapping windows that
+      // Without the lock two concurrent replaces both DELETE the pre-existing set
+      // and both INSERT, leaving the union — overlapping windows that
       // assertValidSlots would have rejected.
       await this.lockOwner(owner, manager);
 
@@ -299,10 +283,9 @@ export class AvailabilityService {
   }
 
   /**
-   * SELECT ... FOR UPDATE on a row that does not exist locks nothing and
-   * returns quietly, which would let the replace proceed unserialised. The
-   * callers already check the owner exists, so a miss here means it vanished
-   * mid-flight: fail rather than write an orphan set.
+   * SELECT ... FOR UPDATE on a missing row locks nothing and returns quietly,
+   * letting the replace proceed unserialised. Callers already checked the owner
+   * exists, so a miss means it vanished mid-flight: fail rather than orphan.
    */
   private async lockOwner(owner: SlotOwner, manager: EntityManager): Promise<void> {
     const locked =
@@ -332,9 +315,8 @@ export class AvailabilityService {
   }
 
   /**
-   * Both columns are pinned in every query. Matching only the owning column
-   * would let a player id delete or read rows that happen to share it with a
-   * coach id, and IsNull() makes the XOR explicit at the query level.
+   * Both owner columns are pinned in every query. Matching only the owning one
+   * would let a player id reach rows sharing that value with a coach id.
    */
   private ownerWhere(owner: SlotOwner): FindOptionsWhere<AvailabilitySlot> {
     return owner.playerProfileId !== undefined
@@ -343,12 +325,9 @@ export class AvailabilityService {
   }
 
   /**
-   * Validate a proposed set of windows: each must be a single-day range with
-   * endTime strictly after startTime (windows never cross midnight), and
-   * windows must not overlap another window of the same kind on the same day.
-   * Touching windows (17:00–18:00 and 18:00–19:00) are allowed because ranges
-   * are end-exclusive. An available and a blackout window may overlap — that is
-   * exactly how a blackout carves a hole out of a longer available window.
+   * Windows are single-day, end-exclusive, and must not overlap another of the
+   * same kind on the same day. Touching windows are fine. Available and blackout
+   * windows may overlap — that is how a blackout carves a hole out of one.
    */
   private assertValidSlots(input: AvailabilitySlotInput[]): void {
     const byDay = new Map<string, AvailabilitySlotInput[]>();
@@ -397,9 +376,8 @@ export class AvailabilityService {
       return [];
     }
 
-    // Sorted for stable ordering across requests. The day/time filter applied
-    // below narrows *which* players are returned; each returned player keeps
-    // their full weekly availability for scheduling context.
+    // The filter below narrows which players come back; each keeps their full
+    // week for scheduling context.
     const profiles = (await this.playersService.findByIds(profileIds)).sort(
       (a, b) => a.displayName.localeCompare(b.displayName) || a.id.localeCompare(b.id),
     );
@@ -431,8 +409,7 @@ export class AvailabilityService {
     const days = query.dayOfWeek !== undefined ? [query.dayOfWeek] : ALL_DAYS;
     return views.filter((v) => {
       const raw = byProfile.get(v.playerProfileId) ?? [];
-      // Evaluated per day so a blackout on Tuesday cannot suppress a match on
-      // Monday when no dayOfWeek filter was given.
+      // Per day, so a Tuesday blackout cannot suppress a Monday match.
       return days.some((day) =>
         filterMinute === undefined
           ? hasFreeMinuteOnDay(raw, day)

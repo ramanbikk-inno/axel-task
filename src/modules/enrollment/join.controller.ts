@@ -26,7 +26,7 @@ export class JoinController {
     return this.enrollment.registerViaShareLink(code, dto);
   }
 
-  /** US-01.02: "Who will train with [New Trainer]?" — the selection prompt. */
+  /** The "Who will train with [New Trainer]?" selection prompt. */
   @Get(':code/members')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard, RolesGuard, NotAChildGuard)

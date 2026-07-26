@@ -13,17 +13,11 @@ import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
 import { User } from '../../users/entities/user.entity';
 
 /**
- * US-01.10: a trainer may schedule a coach outside their stated availability,
- * but only with a reason, and the decision is logged — event_id, coach_id,
- * override_reason, overridden_by.
+ * A trainer may schedule a coach outside their stated availability, with a
+ * mandatory reason. Append-only.
  *
- * eventId is a nullable stub: events arrive in Epic-02, so there is no table to
- * point a foreign key at yet. The column exists now so overrides recorded
- * during Epic-01 are not lost when scheduling lands, and the day/time of the
- * assignment is stored alongside it so the record is self-describing without
- * an events table to join.
- *
- * Append-only: nothing mutates a row once written.
+ * eventId is a nullable stub — there is no events table to point at yet — so the
+ * day and time are stored alongside it and the row stands on its own.
  */
 @Entity({ name: 'coach_availability_overrides' })
 export class CoachAvailabilityOverride {

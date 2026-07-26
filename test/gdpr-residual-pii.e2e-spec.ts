@@ -11,16 +11,12 @@ import { User } from '../src/modules/users/entities/user.entity';
 import { Role } from '../src/modules/users/entities/user.enums';
 
 /**
- * US-01.13, the copies of a person's data that live outside `users`.
- *
- * The erasure path anonymised the account and the profiles it owned, which
- * covered the common case and hid three that it did not: a *child* login is not
+ * The copies of a person's data that live outside `users`: a child login is not
  * the owner of its own profile, a coach's address is copied into
  * `share_links.target_email`, and the invitation actions copy it again into
- * `audit_logs.metadata`. Each left readable PII behind after a right-to-erasure
- * request was honoured.
+ * `audit_logs.metadata`. Each survived a completed erasure.
  */
-describe('GDPR residual PII (e2e, US-01.13)', () => {
+describe('GDPR residual PII (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

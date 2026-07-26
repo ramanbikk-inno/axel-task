@@ -54,7 +54,7 @@ describe('Input validation (e2e)', () => {
     ...over,
   });
 
-  describe('child birthDate (US-01.03)', () => {
+  describe('child birthDate', () => {
     it('accepts a plain calendar date', async () => {
       const token = await parentToken('p1@example.com');
 
@@ -129,7 +129,7 @@ describe('Input validation (e2e)', () => {
     });
   });
 
-  describe('trainer creation (US-01.01)', () => {
+  describe('trainer creation', () => {
     it('requires a trainer name, not just a business name', async () => {
       const token = await adminToken();
 
@@ -212,7 +212,7 @@ describe('Input validation (e2e)', () => {
     });
   });
 
-  describe('GDPR deletion reason (US-01.13)', () => {
+  describe('GDPR deletion reason', () => {
     const makeTrainer = async (token: string): Promise<string> => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/users')

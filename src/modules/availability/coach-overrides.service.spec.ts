@@ -97,7 +97,7 @@ const dto = {
   overrideReason: 'Only coach certified for this age group.',
 };
 
-describe('CoachOverridesService (US-01.10)', () => {
+describe('CoachOverridesService', () => {
   it('records the override against the coach and the acting trainer', async () => {
     const { service, save } = makeService();
 
@@ -153,7 +153,7 @@ describe('CoachOverridesService (US-01.10)', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('notifies the coach (Q-01.06)', async () => {
+  it('notifies the coach', async () => {
     const { service, sendOverrideEmail } = makeService();
 
     await service.record(principal('trainer-user'), dto);

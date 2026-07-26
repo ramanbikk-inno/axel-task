@@ -36,19 +36,13 @@ export class ContextService {
   ) {}
 
   /**
-   * The profiles this principal is allowed to look through.
-   *
-   * Keyed on `principal.userId` and nothing the caller supplied — that is the
-   * whole tenancy boundary for context switching. A parent sees their own
-   * profile and their children's; anyone else sees none, because switching
-   * contexts is a player/parent affordance (a Coach's tenancy comes from their
-   * employer, not from a selection they make).
+   * The profiles this principal may look through. Keyed on `principal.userId`
+   * and nothing the caller supplied — that is the whole tenancy boundary.
    */
   private async switchableProfiles(principal: Principal): Promise<PlayerProfile[]> {
-    // US-01.06: "Context selector shows only child's own trainer contexts (no
-    // parent data)." A child's profile is owned by the parent, so the owner
-    // clause below would match the *parent's* whole family for them — hence
-    // the separate branch keyed on the one profile this login is.
+    // A child sees only their own trainer contexts. Their profile is owned by
+    // the parent, so the owner clause below would match the whole family —
+    // hence the separate branch keyed on the one profile this login is.
     if (principal.isChild) {
       return principal.childPlayerProfileId === null
         ? []
@@ -61,8 +55,8 @@ export class ContextService {
   }
 
   /**
-   * Every (profile, trainer) pair the principal may switch to, which is exactly
-   * what the context selector in US-01.04 renders.
+   * Every (profile, trainer) pair the principal may switch to — what the context
+   * selector renders.
    */
   async listOptions(principal: Principal): Promise<ContextOption[]> {
     const profiles = await this.switchableProfiles(principal);

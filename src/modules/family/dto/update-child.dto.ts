@@ -14,10 +14,9 @@ import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 import { IsOptionalNotNull } from '../../../shared/validation/presence';
 
 /**
- * Section 8 leaves the shape open ("Emergency contact info"), and nothing
- * queries into it, so it is stored as jsonb. Validated all the same: it is
- * third-party PII and ends up in front of a trainer in an emergency, so an
- * unbounded blob is not good enough.
+ * Stored as jsonb because the shape is open-ended and nothing queries into it.
+ * Validated all the same: it is third-party PII shown to a trainer in an
+ * emergency, so an unbounded blob will not do.
  */
 export class EmergencyContactDto {
   @ApiPropertyOptional({ example: 'Jane Smith' })
@@ -41,16 +40,9 @@ export class EmergencyContactDto {
 }
 
 /**
- * Amend a child profile (US-01.03 / US-01.11).
- *
- * Every field is optional and only the ones present are written, so a client
- * sending one key cannot blank the rest. `skillLevel` is deliberately absent:
- * section 8 says the trainer sets it, not the parent.
- *
- * The split between `@IsOptionalNotNull` and `@IsOptional` below is the
- * difference between a field a parent may clear and one they may not, and it
- * has to match the entity's own nullability — see the note on
- * `IsOptionalNotNull`.
+ * Only the fields present are written, so sending one key cannot blank the rest.
+ * `skillLevel` is absent on purpose: the trainer sets it, not the parent.
+ * `@IsOptionalNotNull` vs `@IsOptional` marks which fields a parent may clear.
  */
 export class UpdateChildDto {
   @ApiPropertyOptional({ example: 'Maya Smith' })

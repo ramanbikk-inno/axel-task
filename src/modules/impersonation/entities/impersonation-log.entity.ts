@@ -1,7 +1,7 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
- * Audit trail for Super Admin impersonation sessions (US-01.07): who
+ * Audit trail for Super Admin impersonation sessions: who
  * impersonated whom, when it started/ended, and how long it lasted.
  */
 @Entity({ name: 'impersonation_logs' })

@@ -3,7 +3,7 @@ import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 
-/** Super Admin edit of a user's common profile fields (US-01.11). */
+/** Super Admin edit of a user's common profile fields. */
 export class AdminUpdateUserDto {
   @ApiPropertyOptional()
   @IsOptional()

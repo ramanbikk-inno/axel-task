@@ -2,13 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayMaxSize, ArrayUnique, IsArray, IsOptional, IsUUID } from 'class-validator';
 
 /**
- * US-01.02: "If Parent with Children: Show selection prompt — 'Who will train
- * with [New Trainer]?' … Only selected family members associated with new
- * trainer."
- *
- * Optional, so the existing single-player flow keeps working unchanged: a
- * caller who sends nothing joins with their own profile, which is what
- * happened before this field existed.
+ * Which family members join the new trainer. Optional: a caller who sends
+ * nothing joins with their own profile, as the single-player flow always did.
  */
 export class JoinMembersDto {
   @ApiPropertyOptional({
