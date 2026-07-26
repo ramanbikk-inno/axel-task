@@ -418,10 +418,8 @@ export class CoachesService {
 
   /** New coach accepts an invite: creates the Coach account + profile. */
   async accept(code: string, dto: AcceptCoachInviteDto): Promise<{ message: string }> {
-    // Outside the transaction: argon2id is ~40ms of CPU and the transaction below
-    // holds a row lock on the invite the whole time. Whether we need the hash is
-    // only known once that lock is held, so it is computed unconditionally and
-    // discarded when an existing account is re-homed instead.
+    // Before the transaction, which row-locks the invite: argon2id's ~40ms must
+    // not run under it. Discarded when an existing account is re-homed instead.
     const passwordHash = await this.passwords.hash(dto.password);
 
     let verificationToken = '';

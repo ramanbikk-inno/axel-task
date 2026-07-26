@@ -64,10 +64,8 @@ export class AuthService {
   ) {}
 
   /**
-   * Minors cannot hold an account in their own name; they belong to a parent's
-   * account as a child profile. Threshold is MIN_SELF_REGISTRATION_AGE, default
-   * 18. Every door onto an own-name account calls this — both registration
-   * paths and the edit that can move a birth date afterwards.
+   * Minors belong to a parent's account as a child profile, not their own. Every
+   * path onto an own-name account must call this, including the edit.
    */
   assertOldEnoughForOwnAccount(birthDate: string): void {
     const born = parseCalendarDate(birthDate);
@@ -215,10 +213,8 @@ export class AuthService {
     // address is already taken.
     this.assertOldEnoughForOwnAccount(dto.birthDate);
 
-    // Unconditionally, and before both the existence check and the transaction.
-    // Hashing only for addresses that turn out to be free would make a taken one
-    // answer ~40ms faster — the one fact the generic message hides — and doing it
-    // inside the transaction would hold a pooled connection for that whole time.
+    // Before the existence check, not just before the transaction: hashing only
+    // for free addresses makes a taken one answer ~40ms faster.
     const passwordHash = await this.passwords.hash(dto.password);
 
     const existing = await this.usersService.findByEmail(dto.email);
@@ -227,10 +223,8 @@ export class AuthService {
       return { message: REGISTER_MESSAGE };
     }
 
-    // The existence check above is a read, so two concurrent registrations of one
-    // address can both pass it. The loser hits uq_users_email, and surfacing that
-    // as a 409 would tell an unauthenticated caller the address is taken — the one
-    // thing the generic message exists to hide. Swallowed to the same no-op.
+    // Two concurrent registrations of one address both pass the read above; the
+    // loser hits uq_users_email, and a 409 would reveal the address is taken.
     let created: { email: string; verificationToken: string };
     try {
       created = await this.registerInTransaction(dto, passwordHash);
@@ -252,10 +246,8 @@ export class AuthService {
   }
 
   /**
-   * The account, its profile and its verification token, or none of them. A
-   * half-finished registration would cost the birth date permanently — the
-   * profile is the only thing that holds one and nothing asks again — and could
-   * leave an account with no way to verify itself.
+   * All three writes or none. A half-finished registration leaves an account that
+   * can never verify itself, and loses the birth date nothing asks for again.
    */
   private async registerInTransaction(
     dto: RegisterDto,
@@ -634,10 +626,8 @@ export class AuthService {
   }
 
   /**
-   * As above, for any role. Used by the ShareLink join and coach-invite flows.
-   * Takes a hash rather than a password on purpose: argon2id costs ~40ms of CPU
-   * and every caller runs this inside a transaction, so hashing here would hold
-   * a pooled connection open doing nothing. Hash first, then open it.
+   * As above, for any role. Takes a hash, not a password: every caller runs this
+   * inside a transaction, and argon2id's ~40ms must not hold a pooled connection.
    */
   async createUnverifiedAccount(
     input: {

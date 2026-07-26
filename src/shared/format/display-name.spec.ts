@@ -1,10 +1,6 @@
 import { displayNameFor } from './display-name';
 
-/**
- * Shared by registration, the join flow and the trainer roster, so the fallback
- * behaviour has to be the same in all three: a profile with no name shows the
- * email rather than an empty string.
- */
+/** A profile with no name shows the email rather than an empty string. */
 describe('displayNameFor', () => {
   it('joins both names when both are set', () => {
     expect(displayNameFor({ firstName: 'Sam', lastName: 'Smith' }, 'a@b.com')).toBe('Sam Smith');

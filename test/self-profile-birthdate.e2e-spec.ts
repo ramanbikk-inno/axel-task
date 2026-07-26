@@ -12,12 +12,7 @@ import { UsersService } from '../src/modules/users/users.service';
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
-/**
- * Registration collects a birth date to run the minimum-age check, so it has to
- * keep it. It used to be validated and dropped: the self profile was created
- * later with a null date and no endpoint could ever set one, while the ShareLink
- * registration path persisted the same field.
- */
+/** Registration collects a birth date for the age check, so it has to keep it. */
 describe('Birth date on the account holder’s own profile (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
@@ -161,10 +156,8 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       const taken = 'taken@example.com';
       await ctx.registerVerifiedPlayer({ email: taken });
 
-      // The existence check runs before the transaction, so two concurrent
-      // registrations of one address can both pass it and the loser hits
-      // uq_users_email. Forcing the check to miss reproduces that window without
-      // depending on timing.
+      // Forcing the existence check to miss reproduces the concurrent-registration
+      // window without depending on timing.
       const users = app.get(UsersService);
       jest.spyOn(users, 'findByEmail').mockResolvedValueOnce(null);
 

@@ -137,11 +137,7 @@ function buildSelf(over: Partial<PlayerProfile> = {}, found = true): SelfStub {
   return { service: new PlayersService(profiles), findOne, save, row };
 }
 
-/**
- * The account holder's own profile. Same three-state partial-update rule as the
- * child path, plus one thing that only matters here: the lookup is scoped to
- * `isChild: false`, which is what keeps a child's row out of reach.
- */
+/** The lookup is scoped to isChild: false, keeping a child's row out of reach. */
 describe('PlayersService.updateSelfProfile', () => {
   it('resolves only the non-child profile for the owner', async () => {
     const { service, findOne } = buildSelf();

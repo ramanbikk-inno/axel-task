@@ -135,10 +135,8 @@ export class EnrollmentService {
    * join confirmation.
    */
   async registerViaShareLink(code: string, dto: JoinRegisterDto): Promise<JoinResult> {
-    // The same age floor /auth/register enforces. Checked here too because this
-    // is a second, equally public way to mint an account — a gate on only one of
-    // two doors is not a gate. Before the transaction, so an underage attempt
-    // never takes a use off the trainer's link.
+    // Registration's age floor applies here too — a second public way to mint an
+    // account. Before the transaction, so a refusal costs no link use.
     this.authService.assertOldEnoughForOwnAccount(dto.birthDate);
 
     // Also before it: argon2id is ~40ms of CPU, and the transaction holds a row

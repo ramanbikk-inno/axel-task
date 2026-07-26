@@ -309,9 +309,7 @@ describe('AuthService (login + register)', () => {
       manager,
     );
 
-    // This helper runs inside a caller's transaction every time it is used, so
-    // hashing here would put argon2 back on a held connection — in the coach
-    // invite and ShareLink join flows as well as registration.
+    // Hashing here would put argon2 back inside all three callers' transactions.
     expect(passwords.hash).not.toHaveBeenCalled();
     expect(usersService.create).toHaveBeenCalledWith(
       expect.objectContaining({ passwordHash: 'pre-computed-hash' }),

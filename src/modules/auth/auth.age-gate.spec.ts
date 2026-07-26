@@ -13,12 +13,7 @@ class FixedClock extends ClockService {
   }
 }
 
-/**
- * `assertOldEnoughForOwnAccount` reads only the clock and the configured
- * threshold, so the rest of AuthService's dependencies are left unset rather
- * than stubbed into noise. If that ever stops being true this will fail loudly
- * on a null dereference, which is the correct outcome.
- */
+/** Only the clock and config are read, so every other dependency stays unset. */
 function build(minimumAge?: number): AuthService {
   const config = {
     get: jest.fn().mockReturnValue(minimumAge),

@@ -76,8 +76,7 @@ export class ProfileController {
 
   /**
    * The account holder's own trainee profile. NotAChildGuard because a child
-   * shares the PlayerParent role but has no self profile — theirs is the child
-   * row their parent owns, edited through /players/children/:id.
+   * shares the PlayerParent role but has no self profile of its own.
    */
   @Patch('me/player')
   @HttpCode(200)

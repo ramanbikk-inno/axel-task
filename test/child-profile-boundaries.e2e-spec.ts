@@ -5,16 +5,7 @@ import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { PlayerProfile } from '../src/modules/players/entities/player-profile.entity';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
-/**
- * What a child login may do on the self-profile routes.
- *
- * A child account carries `Role.PlayerParent`, so `@Roles(Role.PlayerParent)`
- * admits it on every one of these routes by construction. A child has no self
- * profile — their profile is the child row their parent owns — so a route that
- * treats "no self profile" as "create one" will mint a second, non-child profile
- * for them, and now that it carries a birth date the minimum-age floor forces
- * that row to claim they are an adult.
- */
+/** A child carries Role.PlayerParent, so @Roles alone admits it to these routes. */
 describe('Child login against the self-profile routes (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;

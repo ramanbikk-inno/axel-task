@@ -163,9 +163,7 @@ export class ProfileService {
 
   async updatePlayer(actor: Principal, dto: UpdatePlayerProfileDto): Promise<MyProfileView> {
     // Also guarded on the route. Kept here because the fallback below creates a
-    // profile when the caller has none, and a child never legitimately has one:
-    // without this, a child login mints a second non-child profile for itself,
-    // which the age floor then forces to claim they are an adult.
+    // profile when the caller has none, and a child must never get one.
     if (actor.isChild) {
       throw new ForbiddenException({
         errorCode: ErrorCode.CHILD_ACTION_NOT_ALLOWED,
