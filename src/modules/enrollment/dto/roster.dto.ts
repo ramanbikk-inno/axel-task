@@ -31,6 +31,23 @@ export class RosterEntryView {
   @ApiProperty() connectedAt!: Date;
 }
 
+/**
+ * Section 8: "Skill level (set by trainer)", and US-01.11 lists it among the
+ * fields a player may *not* edit. The column existed from the start with no
+ * write path at all, so the roster always reported null.
+ */
+export class UpdateRosterEntryDto {
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 'Intermediate',
+    description: 'Free text pending Q-01.01, which has not fixed the vocabulary. Null clears it.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  skillLevel?: string | null;
+}
+
 export class RosterQueryDto {
   @ApiPropertyOptional({ description: 'Match on player or account name/email' })
   @IsOptional()

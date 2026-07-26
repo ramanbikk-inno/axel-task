@@ -5,6 +5,7 @@ import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { EnrollmentModule } from '../enrollment/enrollment.module';
 import { MailModule } from '../mail/mail.module';
+import { PlayersModule } from '../players/players.module';
 import { TrainersModule } from '../trainers/trainers.module';
 import { UsersModule } from '../users/users.module';
 import { CoachesController } from './coaches.controller';
@@ -16,6 +17,7 @@ import { CoachProfile } from './entities/coach-profile.entity';
     TypeOrmModule.forFeature([CoachProfile]),
     TrainersModule,
     EnrollmentModule,
+    PlayersModule,
     AuthModule,
     AuditModule,
     UsersModule,

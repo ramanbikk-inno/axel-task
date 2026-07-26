@@ -14,6 +14,7 @@ import { User } from '../users/entities/user.entity';
 import { UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
 import { ImpersonationHistoryView } from './dto/impersonation-history.dto';
+import { ImpersonationLogService } from './impersonation-log.service';
 import { ImpersonationLog } from './entities/impersonation-log.entity';
 
 /** Impersonation sessions are hard-capped at one hour (US-01.07). */
@@ -50,6 +51,7 @@ export class ImpersonationService {
     private readonly usersService: UsersService,
     private readonly abilityFactory: AbilityFactory,
     private readonly audit: AuditService,
+    private readonly impersonationLogs: ImpersonationLogService,
   ) {}
 
   async start(
@@ -173,16 +175,7 @@ export class ImpersonationService {
     }
 
     const now = this.clock.now();
-    const log = await this.logs.findOne({
-      where: { sessionId: principal.sessionId, endedAt: IsNull() },
-    });
-    if (log) {
-      const durationSeconds = Math.max(
-        0,
-        Math.round((now.getTime() - log.startedAt.getTime()) / 1000),
-      );
-      await this.logs.update({ id: log.id }, { endedAt: now, durationSeconds });
-    }
+    await this.impersonationLogs.closeForSession(principal.sessionId, now);
 
     await this.sessions.update(
       { id: principal.sessionId },
@@ -220,12 +213,28 @@ export class ImpersonationService {
       where.targetUserId = query.targetUserId;
     }
 
-    const [logs, total] = await this.logs.findAndCount({
+    let [logs, total] = await this.logs.findAndCount({
       where,
       order: { startedAt: 'DESC', id: 'DESC' },
       skip: (page - 1) * pageSize,
       take: pageSize,
     });
+
+    // Sessions that hit the one-hour cap end without anything running: the
+    // expiry is enforced lazily on the next request, so there is no moment at
+    // which a close could have been written. Reconcile those rows against the
+    // session before reporting, then re-read the page — otherwise the report
+    // shows a null end time and duration for a session that plainly finished.
+    const openIds = logs.filter((l) => l.endedAt === null).map((l) => l.id);
+    if (openIds.length > 0) {
+      await this.impersonationLogs.reconcileOpenLogs(openIds, this.clock.now());
+      [logs, total] = await this.logs.findAndCount({
+        where,
+        order: { startedAt: 'DESC', id: 'DESC' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      });
+    }
 
     const actionsBySession = await this.audit.findByImpersonationSessions(
       logs.map((l) => l.sessionId),

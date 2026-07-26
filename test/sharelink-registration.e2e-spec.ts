@@ -77,6 +77,7 @@ describe('ShareLink registration + multi-trainer (e2e, US-01.02)', () => {
     const reg = await request(app.getHttpServer())
       .post(`/api/v1/join/${code}/register`)
       .send({
+        birthDate: '1994-03-22',
         email: playerEmail,
         password: 'Str0ng!Passw0rd',
         firstName: 'Nate',
@@ -175,7 +176,12 @@ describe('ShareLink registration + multi-trainer (e2e, US-01.02)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/v1/join/${code}/register`)
-      .send({ email: 'taken@example.com', password: 'Str0ng!Passw0rd', firstName: 'Dup' })
+      .send({
+        email: 'taken@example.com',
+        password: 'Str0ng!Passw0rd',
+        firstName: 'Dup',
+        birthDate: '1994-03-22',
+      })
       .expect(409)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.EMAIL_ALREADY_EXISTS));
   });
@@ -183,7 +189,7 @@ describe('ShareLink registration + multi-trainer (e2e, US-01.02)', () => {
   it('an invalid code is rejected', async () => {
     await request(app.getHttpServer())
       .post(`/api/v1/join/nope-not-real/register`)
-      .send({ email: 'x@example.com', password: 'Str0ng!Passw0rd' })
+      .send({ email: 'x@example.com', password: 'Str0ng!Passw0rd', birthDate: '1994-03-22' })
       .expect(404)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.SHARE_LINK_INVALID));
 

@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { MailService } from '../mail/mail.service';
 import { TrainersService } from '../trainers/trainers.service';
@@ -18,6 +20,8 @@ import {
 import { CoachAvailabilityOverride } from './entities/coach-availability-override.entity';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+export const AUDIT_COACH_OVERRIDE_RECORDED = 'coach.availability-overridden';
 
 function toView(row: CoachAvailabilityOverride): CoachOverrideView {
   return {
@@ -54,9 +58,11 @@ export class CoachOverridesService {
     private readonly trainersService: TrainersService,
     private readonly usersService: UsersService,
     private readonly mail: MailService,
+    private readonly audit: AuditService,
   ) {}
 
-  async record(trainerUserId: string, dto: RecordCoachOverrideDto): Promise<CoachOverrideView> {
+  async record(actor: Principal, dto: RecordCoachOverrideDto): Promise<CoachOverrideView> {
+    const trainerUserId = actor.userId;
     const coach = await this.coachLookup.requireInOwnOrg(trainerUserId, dto.coachProfileId);
     const startMinute = toMinutes(dto.startTime);
     const endMinute = toMinutes(dto.endTime);
@@ -91,6 +97,19 @@ export class CoachOverridesService {
         overriddenByUserId: trainerUserId,
       }),
     );
+
+    await this.audit.record({
+      action: AUDIT_COACH_OVERRIDE_RECORDED,
+      actor,
+      target: { type: 'CoachProfile', id: coach.id },
+      metadata: {
+        overrideId: saved.id,
+        hadConflict,
+        dayOfWeek: dto.dayOfWeek,
+        startMinute,
+        endMinute,
+      },
+    });
 
     // Nothing was overridden, so there is nothing to tell the coach about.
     if (hadConflict) {

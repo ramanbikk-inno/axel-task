@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Req,
   UseGuards,
@@ -22,6 +23,7 @@ import { Role } from '../users/entities/user.enums';
 import { AddTrainerByCodeDto, AddTrainerDto } from './dto/add-trainer.dto';
 import { ChildLoginStatusView, ChildLoginView, CreateChildLoginDto } from './dto/child-login.dto';
 import { CreateChildDto } from './dto/create-child.dto';
+import { UpdateChildDto } from './dto/update-child.dto';
 import { FamilyContextView } from './dto/family-context.view';
 import { PlayerProfileView } from './dto/player-profile.view';
 import { FamilyService } from './family.service';
@@ -56,7 +58,21 @@ export class FamilyController {
   @ApiOkResponse({ type: PlayerProfileView })
   async createChild(@Body() dto: CreateChildDto, @Req() req: Request): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.createChild(principal.userId, dto);
+    return this.family.createChild(principal, dto);
+  }
+
+  /** Amend a child profile (US-01.03 / US-01.11). Parent-only. */
+  @Patch('children/:profileId')
+  @HttpCode(200)
+  @UseGuards(NotAChildGuard)
+  @ApiOkResponse({ type: PlayerProfileView })
+  async updateChild(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @Body() dto: UpdateChildDto,
+    @Req() req: Request,
+  ): Promise<PlayerProfileView> {
+    const principal = req.user as Principal;
+    return this.family.updateChild(principal, profileId, dto);
   }
 
   /**
@@ -73,7 +89,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<ChildLoginView> {
     const principal = req.user as Principal;
-    return this.family.createChildLogin(principal.userId, profileId, dto);
+    return this.family.createChildLogin(principal, profileId, dto);
   }
 
   @Get('children/:profileId/login')
@@ -96,7 +112,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<void> {
     const principal = req.user as Principal;
-    await this.family.revokeChildLogin(principal.userId, profileId);
+    await this.family.revokeChildLogin(principal, profileId);
   }
 
   @Post(':profileId/trainers')
@@ -109,7 +125,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.addTrainerFromExisting(principal.userId, profileId, dto.trainerProfileId);
+    return this.family.addTrainerFromExisting(principal, profileId, dto.trainerProfileId);
   }
 
   @Post(':profileId/trainers/by-code')
@@ -122,7 +138,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.addTrainerByCode(principal.userId, profileId, dto.code);
+    return this.family.addTrainerByCode(principal, profileId, dto.code);
   }
 
   @Delete(':profileId/trainers/:trainerProfileId')
@@ -135,6 +151,6 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.removeTrainer(principal.userId, profileId, trainerProfileId);
+    return this.family.removeTrainer(principal, profileId, trainerProfileId);
   }
 }

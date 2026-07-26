@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
+import { IsOptionalNotNull } from '../../../shared/validation/presence';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml'];
 
@@ -44,55 +45,57 @@ export class UploadPhotoDto {
 }
 
 export class UpdateTrainerProfileDto {
+  /** An organisation has to be called something, so this one cannot be cleared. */
   @ApiPropertyOptional()
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsString()
   @MinLength(1)
   @MaxLength(200)
   businessName?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(300)
-  website?: string;
+  website?: string | null;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  address?: string;
+  address?: string | null;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(2000)
-  description?: string;
+  description?: string | null;
 }
 
 export class UpdatePlayerProfileDto {
+  /** The one field on a profile that must always hold a value. */
   @ApiPropertyOptional()
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsString()
   @MinLength(1)
   @MaxLength(120)
   displayName?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(120)
-  school?: string;
+  school?: string | null;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(30)
-  jerseyNumber?: string;
+  jerseyNumber?: string | null;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
   @MaxLength(30)
-  gender?: string;
+  gender?: string | null;
 }

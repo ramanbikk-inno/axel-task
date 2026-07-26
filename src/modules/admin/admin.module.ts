@@ -5,6 +5,7 @@ import { ClockModule } from '../../shared/clock/clock.module';
 import { AbilityModule } from '../ability/ability.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
+import { EnrollmentModule } from '../enrollment/enrollment.module';
 import { MailModule } from '../mail/mail.module';
 import { PlayersModule } from '../players/players.module';
 import { StorageModule } from '../storage/storage.module';
@@ -23,6 +24,9 @@ import { UserDeletionLog } from './entities/user-deletion-log.entity';
     AbilityModule,
     AuditModule,
     PlayersModule,
+    // For ShareLinksService: a GDPR erasure has to reach the coach-invitation
+    // copy of the person's email, which lives in this module's table.
+    EnrollmentModule,
     StorageModule,
     ClockModule,
     TypeOrmModule.forFeature([UserDeletionLog]),

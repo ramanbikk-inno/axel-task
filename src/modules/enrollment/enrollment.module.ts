@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
 import { PlayersModule } from '../players/players.module';
@@ -24,6 +25,7 @@ import { TrainerPlayerAssociation } from './entities/trainer-player-association.
     PlayersModule,
     TrainersModule,
     MailModule,
+    AuditModule,
   ],
   controllers: [ShareLinksController, JoinController],
   providers: [EnrollmentService, ShareLinksService, AssociationsService],

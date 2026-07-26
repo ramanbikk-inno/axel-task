@@ -39,6 +39,15 @@ export const envSchema = z.object({
    */
   TRUST_PROXY: z.string().default(''),
 
+  /**
+   * Minimum age for holding an account in your own name. Section 9 states
+   * "ALL players under 18 require parent-managed accounts"; Q-01.05 is still
+   * open on whether 16-18s may be independent, so the rule ships enforced at
+   * the spec's number and the open question becomes a config change rather
+   * than a code change.
+   */
+  MIN_SELF_REGISTRATION_AGE: z.coerce.number().int().min(0).max(120).default(18),
+
   ARGON_MEMORY_KIB: z.coerce.number().int().positive().default(19456),
   ARGON_TIME_COST: z.coerce.number().int().positive().default(2),
   ARGON_PARALLELISM: z.coerce.number().int().positive().default(1),

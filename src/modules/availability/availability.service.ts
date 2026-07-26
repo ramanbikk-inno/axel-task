@@ -8,6 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { AssociationsService } from '../enrollment/associations.service';
 import { AssociationStatus } from '../enrollment/entities/trainer-player-association.entity';
@@ -25,6 +27,9 @@ import {
   TrainerAvailabilityQuery,
 } from './dto/availability.dto';
 import { AvailabilitySlot } from './entities/availability-slot.entity';
+
+export const AUDIT_PLAYER_AVAILABILITY_SET = 'availability.player-set';
+export const AUDIT_COACH_AVAILABILITY_SET = 'availability.coach-set';
 
 /**
  * Exactly one owner per slot, mirroring the CHK_availability_slots_owner XOR in
@@ -140,16 +145,24 @@ export class AvailabilityService {
     private readonly usersService: UsersService,
     private readonly coachLookup: CoachLookupService,
     private readonly associations: AssociationsService,
+    private readonly audit: AuditService,
   ) {}
 
   /** Replace a player profile's full availability set (US-01.09). Owner-only. */
   async setForProfile(
-    ownerUserId: string,
+    actor: Principal,
     profileId: string,
     input: AvailabilitySlotInput[],
   ): Promise<AvailabilitySlotView[]> {
-    await this.requireOwnedProfile(ownerUserId, profileId);
-    return this.replaceSlots({ playerProfileId: profileId }, input);
+    await this.requireOwnedProfile(actor.userId, profileId);
+    const slots = await this.replaceSlots({ playerProfileId: profileId }, input);
+    await this.audit.record({
+      action: AUDIT_PLAYER_AVAILABILITY_SET,
+      actor,
+      target: { type: 'PlayerProfile', id: profileId },
+      metadata: { slotCount: slots.length },
+    });
+    return slots;
   }
 
   async getForProfile(ownerUserId: string, profileId: string): Promise<AvailabilitySlotView[]> {
@@ -159,11 +172,18 @@ export class AvailabilityService {
 
   /** Replace the calling coach's own weekly availability — "My Times" (US-01.10). */
   async setForCoach(
-    coachUserId: string,
+    actor: Principal,
     input: AvailabilitySlotInput[],
   ): Promise<AvailabilitySlotView[]> {
-    const coach = await this.coachLookup.requireOwnProfile(coachUserId);
-    return this.replaceSlots({ coachProfileId: coach.id }, input);
+    const coach = await this.coachLookup.requireOwnProfile(actor.userId);
+    const slots = await this.replaceSlots({ coachProfileId: coach.id }, input);
+    await this.audit.record({
+      action: AUDIT_COACH_AVAILABILITY_SET,
+      actor,
+      target: { type: 'CoachProfile', id: coach.id },
+      metadata: { slotCount: slots.length },
+    });
+    return slots;
   }
 
   async getForCoach(coachUserId: string): Promise<AvailabilitySlotView[]> {

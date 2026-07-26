@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
+import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
-import { PlayerProfile } from './entities/player-profile.entity';
+import { EmergencyContact, PlayerProfile } from './entities/player-profile.entity';
 
 export interface CreatePlayerProfileInput {
   ownerUserId: string;
@@ -87,23 +88,93 @@ export class PlayersService {
     return this.profiles.save(profile);
   }
 
+  /**
+   * Apply a partial update to a child profile (US-01.03).
+   *
+   * Only keys the caller actually supplied are written. `school`,
+   * `jerseyNumber` and `emergencyContact` accept an explicit null, which is how
+   * a parent clears one — hence the `undefined` check rather than a truthiness
+   * test, which would silently ignore the clear.
+   */
+  async updateChildProfile(
+    id: string,
+    input: {
+      displayName?: string;
+      birthDate?: string;
+      gender?: string;
+      school?: string | null;
+      jerseyNumber?: string | null;
+      emergencyContact?: EmergencyContact | null;
+    },
+    manager?: EntityManager,
+  ): Promise<PlayerProfile> {
+    const repository = this.repo(manager);
+    const patch: QueryDeepPartialEntity<PlayerProfile> = {};
+    if (input.displayName !== undefined) {
+      patch.displayName = input.displayName;
+    }
+    if (input.birthDate !== undefined) {
+      patch.birthDate = input.birthDate;
+    }
+    if (input.gender !== undefined) {
+      patch.gender = input.gender;
+    }
+    if (input.school !== undefined) {
+      patch.school = input.school;
+    }
+    if (input.jerseyNumber !== undefined) {
+      patch.jerseyNumber = input.jerseyNumber;
+    }
+    if (input.emergencyContact !== undefined) {
+      patch.emergencyContact = input.emergencyContact;
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await repository.update({ id }, patch);
+    }
+    return (await repository.findOne({ where: { id } })) as PlayerProfile;
+  }
+
+  /** Set the skill level a trainer assesses for a player (section 8). */
+  async setSkillLevel(
+    id: string,
+    skillLevel: string | null,
+    manager?: EntityManager,
+  ): Promise<PlayerProfile> {
+    const repository = this.repo(manager);
+    await repository.update({ id }, { skillLevel });
+    return (await repository.findOne({ where: { id } })) as PlayerProfile;
+  }
+
+  /** The PII an erasure has to clear off a trainee profile (US-01.13). */
+  private static readonly ANONYMIZED_PROFILE = {
+    displayName: 'Deleted User',
+    school: null,
+    jerseyNumber: null,
+    gender: null,
+    birthDate: null,
+    // Third-party PII: an emergency contact is somebody else's name and
+    // phone number, which has no business surviving this account.
+    emergencyContact: null,
+    skillLevel: null,
+  } as const;
+
   /** GDPR anonymization of every profile owned by a user (US-01.13). */
   async anonymizeByOwner(ownerUserId: string, manager?: EntityManager): Promise<void> {
-    const repository = this.repo(manager);
-    await repository.update(
-      { ownerUserId },
-      {
-        displayName: 'Deleted User',
-        school: null,
-        jerseyNumber: null,
-        gender: null,
-        birthDate: null,
-        // Third-party PII: an emergency contact is somebody else's name and
-        // phone number, which has no business surviving this account.
-        emergencyContact: null,
-        skillLevel: null,
-      },
-    );
+    await this.repo(manager).update({ ownerUserId }, { ...PlayersService.ANONYMIZED_PROFILE });
+  }
+
+  /**
+   * GDPR anonymization of the profile a child *login* belongs to.
+   *
+   * A child's profile is owned by the parent, so erasing the child's own
+   * account never matched `anonymizeByOwner` and left the child's name, birth
+   * date, school and emergency contact fully intact — an erasure that erased
+   * nothing but the login. Deleting the parent still reaches these rows through
+   * the owner path; this covers the case where the child account is the target.
+   */
+  async anonymizeByChildUserId(childUserId: string, manager?: EntityManager): Promise<void> {
+    await this.repo(manager).update({ childUserId }, { ...PlayersService.ANONYMIZED_PROFILE });
   }
 
   /** The child login accounts attached to a user's profiles, if any. */

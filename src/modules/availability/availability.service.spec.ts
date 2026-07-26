@@ -3,6 +3,9 @@ import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 
 import { AvailabilityService } from './availability.service';
 import { AvailabilitySlot } from './entities/availability-slot.entity';
+import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
+import { Role } from '../users/entities/user.enums';
 import { AssociationsService } from '../enrollment/associations.service';
 import {
   AssociationStatus,
@@ -14,6 +17,19 @@ import { CoachLookupService } from './coach-lookup.service';
 import { UsersService } from '../users/users.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AvailabilitySlotInput } from './dto/availability.dto';
+
+/**
+ * These tests exercise ownership and window maths, not authorization, so the
+ * principal only has to carry a user id — the service reads nothing else off it
+ * beyond handing it to the audit trail.
+ */
+const principal = (userId: string): Principal =>
+  ({
+    userId,
+    role: Role.PlayerParent,
+    sessionId: 'session-1',
+    impersonating: false,
+  }) as Principal;
 
 const slotRow = (
   playerProfileId: string,
@@ -126,6 +142,9 @@ const makeService = (): {
 
   const usersService = { findById: userFindById } as unknown as UsersService;
 
+  const auditRecord = jest.fn().mockResolvedValue(undefined);
+  const audit = { record: auditRecord } as unknown as AuditService;
+
   const service = new AvailabilityService(
     slots,
     dataSource,
@@ -133,6 +152,7 @@ const makeService = (): {
     usersService,
     coachLookup,
     associations,
+    audit,
   );
 
   return {
@@ -158,7 +178,7 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(null);
 
       try {
-        await service.setForProfile('owner', 'missing', [input(1, '17:00', '20:00')]);
+        await service.setForProfile(principal('owner'), 'missing', [input(1, '17:00', '20:00')]);
         fail('expected throw');
       } catch (err) {
         expect(err).toBeInstanceOf(NotFoundException);
@@ -173,7 +193,7 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(profile('p1', 'Kid', 'someone-else'));
 
       try {
-        await service.setForProfile('owner', 'p1', [input(1, '17:00', '20:00')]);
+        await service.setForProfile(principal('owner'), 'p1', [input(1, '17:00', '20:00')]);
         fail('expected throw');
       } catch (err) {
         expect(err).toBeInstanceOf(ForbiddenException);
@@ -187,7 +207,7 @@ describe('AvailabilityService', () => {
       const { service, findById } = makeService();
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
-      await service.setForProfile('owner', 'p1', [input(1, '17:00', '20:00')]);
+      await service.setForProfile(principal('owner'), 'p1', [input(1, '17:00', '20:00')]);
 
       expect(findById).toHaveBeenCalledTimes(1);
     });
@@ -199,7 +219,7 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
       try {
-        await service.setForProfile('owner', 'p1', [input(1, '20:00', '17:00')]);
+        await service.setForProfile(principal('owner'), 'p1', [input(1, '20:00', '17:00')]);
         fail('expected throw');
       } catch (err) {
         expect(err).toBeInstanceOf(BadRequestException);
@@ -214,7 +234,7 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
       await expect(
-        service.setForProfile('owner', 'p1', [input(1, '17:00', '17:00')]),
+        service.setForProfile(principal('owner'), 'p1', [input(1, '17:00', '17:00')]),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -223,7 +243,7 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
       try {
-        await service.setForProfile('owner', 'p1', [
+        await service.setForProfile(principal('owner'), 'p1', [
           input(1, '17:00', '20:00'),
           input(1, '19:00', '21:00'),
         ]);
@@ -242,7 +262,7 @@ describe('AvailabilityService', () => {
 
       // Later-starting window listed first: the sort-then-compare must still catch it.
       await expect(
-        service.setForProfile('owner', 'p1', [
+        service.setForProfile(principal('owner'), 'p1', [
           input(1, '19:00', '21:00'),
           input(1, '17:00', '20:00'),
         ]),
@@ -255,7 +275,7 @@ describe('AvailabilityService', () => {
 
       // Items 0 and 2 overlap (09:00-10:00 vs 09:30-09:45); item 1 sits far away.
       await expect(
-        service.setForProfile('owner', 'p1', [
+        service.setForProfile(principal('owner'), 'p1', [
           input(1, '09:00', '10:00'),
           input(1, '15:00', '16:00'),
           input(1, '09:30', '09:45'),
@@ -268,7 +288,7 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
       await expect(
-        service.setForProfile('owner', 'p1', [
+        service.setForProfile(principal('owner'), 'p1', [
           input(1, '17:00', '20:00'),
           input(1, '17:00', '20:00'),
         ]),
@@ -279,7 +299,7 @@ describe('AvailabilityService', () => {
       const { service, findById, txSave } = makeService();
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
-      await service.setForProfile('owner', 'p1', [
+      await service.setForProfile(principal('owner'), 'p1', [
         input(1, '17:00', '18:00'),
         input(1, '18:00', '19:00'),
       ]);
@@ -291,7 +311,7 @@ describe('AvailabilityService', () => {
       const { service, findById, txSave } = makeService();
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
-      await service.setForProfile('owner', 'p1', [
+      await service.setForProfile(principal('owner'), 'p1', [
         input(1, '17:00', '20:00'),
         input(2, '17:00', '20:00'),
       ]);
@@ -305,7 +325,7 @@ describe('AvailabilityService', () => {
       const { service, findById, txDelete, txSave, txCreate } = makeService();
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
-      await service.setForProfile('owner', 'p1', [input(1, '17:00', '20:00')]);
+      await service.setForProfile(principal('owner'), 'p1', [input(1, '17:00', '20:00')]);
 
       expect(txDelete).toHaveBeenCalledWith({ playerProfileId: 'p1', coachProfileId: IsNull() });
       expect(txCreate).toHaveBeenCalledWith(
@@ -327,7 +347,7 @@ describe('AvailabilityService', () => {
       const { service, findById, txDelete, txSave } = makeService();
       findById.mockResolvedValue(profile('p1', 'Kid'));
 
-      const result = await service.setForProfile('owner', 'p1', []);
+      const result = await service.setForProfile(principal('owner'), 'p1', []);
 
       expect(txDelete).toHaveBeenCalledWith({ playerProfileId: 'p1', coachProfileId: IsNull() });
       expect(txSave).not.toHaveBeenCalled();
@@ -339,7 +359,9 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(profile('p1', 'Kid'));
       slotsFind.mockResolvedValue([slotRow('p1', 1, 1020, 1200)]);
 
-      const result = await service.setForProfile('owner', 'p1', [input(1, '17:00', '20:00')]);
+      const result = await service.setForProfile(principal('owner'), 'p1', [
+        input(1, '17:00', '20:00'),
+      ]);
 
       expect(result).toEqual([
         { dayOfWeek: 1, startTime: '17:00', endTime: '20:00', isAvailable: true },
@@ -523,7 +545,7 @@ describe('AvailabilityService', () => {
       coachFindOne.mockResolvedValue(null);
 
       try {
-        await service.setForCoach('coach-user', [input(1, '16:00', '20:00')]);
+        await service.setForCoach(principal('coach-user'), [input(1, '16:00', '20:00')]);
         fail('expected throw');
       } catch (err) {
         expect(err).toBeInstanceOf(ForbiddenException);
@@ -537,7 +559,7 @@ describe('AvailabilityService', () => {
       const { service, coachFindOne, txDelete, txCreate } = makeService();
       coachFindOne.mockResolvedValue(coachRow);
 
-      await service.setForCoach('coach-user', [input(1, '16:00', '20:00')]);
+      await service.setForCoach(principal('coach-user'), [input(1, '16:00', '20:00')]);
 
       // Both owner columns are pinned so a coach id can never delete or read
       // rows that happen to share the value with a player id.
@@ -552,7 +574,10 @@ describe('AvailabilityService', () => {
       coachFindOne.mockResolvedValue(coachRow);
 
       await expect(
-        service.setForCoach('coach-user', [input(1, '16:00', '20:00'), input(1, '18:00', '21:00')]),
+        service.setForCoach(principal('coach-user'), [
+          input(1, '16:00', '20:00'),
+          input(1, '18:00', '21:00'),
+        ]),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(txSave).not.toHaveBeenCalled();
     });
@@ -561,7 +586,7 @@ describe('AvailabilityService', () => {
       const { service, coachFindOne, txSave } = makeService();
       coachFindOne.mockResolvedValue(coachRow);
 
-      await service.setForCoach('coach-user', [
+      await service.setForCoach(principal('coach-user'), [
         input(1, '16:00', '18:00'),
         input(1, '19:00', '21:00'),
       ]);
@@ -576,7 +601,7 @@ describe('AvailabilityService', () => {
       const { service, coachFindOne, txSave } = makeService();
       coachFindOne.mockResolvedValue(coachRow);
 
-      await service.setForCoach('coach-user', [
+      await service.setForCoach(principal('coach-user'), [
         input(1, '16:00', '20:00'),
         { ...input(1, '17:00', '18:00'), isAvailable: false },
       ]);
@@ -589,7 +614,7 @@ describe('AvailabilityService', () => {
       coachFindOne.mockResolvedValue(coachRow);
 
       await expect(
-        service.setForCoach('coach-user', [
+        service.setForCoach(principal('coach-user'), [
           { ...input(1, '17:00', '19:00'), isAvailable: false },
           { ...input(1, '18:00', '20:00'), isAvailable: false },
         ]),

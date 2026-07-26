@@ -93,6 +93,30 @@ export class AuditService {
     return repository.save(repository.create({ ...row, createdAt: this.clock.now() }));
   }
 
+  /**
+   * Redact a person's email address out of retained audit metadata (US-01.13).
+   *
+   * The trail itself must survive an erasure — it is the compliance record —
+   * but the coach-invitation actions copy the recipient's address into
+   * `metadata.email`, so anonymising `users` alone left the address readable in
+   * every impersonation-history and audit view. Only that one key is touched:
+   * the action, actor, target and timestamps are exactly what the log exists to
+   * preserve, and rewriting the whole document would destroy them.
+   *
+   * `->>` compares the extracted text, so rows whose metadata has no `email`
+   * key are simply not matched.
+   */
+  async scrubEmailFromMetadata(email: string, manager?: EntityManager): Promise<void> {
+    const repository: Repository<AuditLog> =
+      manager !== undefined ? manager.getRepository(AuditLog) : this.auditRepository;
+    await repository
+      .createQueryBuilder()
+      .update(AuditLog)
+      .set({ metadata: () => `jsonb_set("metadata", '{email}', '"[redacted]"')` })
+      .where(`LOWER("metadata" ->> 'email') = LOWER(:email)`, { email })
+      .execute();
+  }
+
   async findByTarget(targetUserId: string): Promise<AuditLog[]> {
     return this.auditRepository.find({
       where: { targetUserId },

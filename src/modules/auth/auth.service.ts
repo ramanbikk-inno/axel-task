@@ -1,16 +1,20 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   GoneException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { ImpersonationLogService } from '../impersonation/impersonation-log.service';
 import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -46,7 +50,45 @@ export class AuthService {
     private readonly mail: MailService,
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
+    private readonly impersonationLogs: ImpersonationLogService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Section 9: "ALL players under 18 require parent-managed accounts (no
+   * independent accounts for minors)." A minor joins through a parent's
+   * `POST /players/children`, which is bounded 1-18 from the other side.
+   *
+   * The threshold is MIN_SELF_REGISTRATION_AGE (default 18) because Q-01.05 is
+   * still open on whether 16-18s may hold their own account; resolving it is a
+   * config change, not a code change. Shared by both registration paths, since
+   * a rule enforced on only one of them is not enforced.
+   */
+  assertOldEnoughToSelfRegister(birthDate: string): void {
+    const born = parseCalendarDate(birthDate);
+    if (born === null) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        message: 'birthDate must be a calendar date in YYYY-MM-DD format.',
+      });
+    }
+
+    const now = this.clock.now();
+    if (born.getTime() > now.getTime()) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        message: 'birthDate cannot be in the future.',
+      });
+    }
+
+    const minimumAge = this.config.get<number>('MIN_SELF_REGISTRATION_AGE') ?? 18;
+    if (ageInYears(born, now) < minimumAge) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION,
+        message: `You must be at least ${minimumAge} to create your own account. Ask a parent to add you to their account.`,
+      });
+    }
+  }
 
   private async getDummyHash(): Promise<string> {
     if (this.dummyHash === null) {
@@ -167,6 +209,10 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<{ message: string }> {
+    // Before the existence check, so the age rule cannot be probed for whether
+    // an address is already taken — both paths must look identical.
+    this.assertOldEnoughToSelfRegister(dto.birthDate);
+
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
       // Enumeration-safe: no-op, never throw EMAIL_ALREADY_EXISTS here.
@@ -402,6 +448,10 @@ export class AuthService {
     const now = this.clock.now();
     await this.refreshTokens.update({ id: row.id }, { revokedAt: now });
     await this.sessions.update({ id: row.sessionId }, { revokedAt: now, revokedReason: 'logout' });
+    // Logging out of an impersonation session ends it just as surely as
+    // /impersonation/exit does; without this the audit row stays open and the
+    // compliance report never learns when the admin stopped.
+    await this.impersonationLogs.closeForSession(row.sessionId, now);
   }
 
   /**
@@ -415,6 +465,10 @@ export class AuthService {
       { revokedAt: now, revokedReason: reason },
     );
     await this.refreshTokens.update({ userId, revokedAt: IsNull() }, { revokedAt: now });
+    // Any of those sessions may have been an admin impersonating this user —
+    // deactivation, erasure and password change all land here. The impersonated
+    // user is the session's owner, so they are the log's target.
+    await this.impersonationLogs.closeForTargetUser(userId, now);
   }
 
   async forgotPassword(email: string): Promise<void> {

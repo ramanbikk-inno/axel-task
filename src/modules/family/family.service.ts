@@ -8,9 +8,10 @@ import {
 import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { PasswordService } from '../../shared/crypto/password.service';
-import { parseCalendarDate } from '../../shared/validation/calendar-date';
+import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { ContextService } from '../auth/context.service';
@@ -25,8 +26,16 @@ import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
 import { ChildLoginStatusView, ChildLoginView } from './dto/child-login.dto';
 import { CreateChildDto } from './dto/create-child.dto';
+import { UpdateChildDto } from './dto/update-child.dto';
 import { FamilyContextView } from './dto/family-context.view';
 import { PlayerProfileView, TrainerContextView } from './dto/player-profile.view';
+
+export const AUDIT_CHILD_CREATED = 'family.child-created';
+export const AUDIT_CHILD_UPDATED = 'family.child-updated';
+export const AUDIT_CHILD_LOGIN_CREATED = 'family.child-login-created';
+export const AUDIT_CHILD_LOGIN_REVOKED = 'family.child-login-revoked';
+export const AUDIT_FAMILY_TRAINER_ADDED = 'family.trainer-added';
+export const AUDIT_FAMILY_TRAINER_REMOVED = 'family.trainer-removed';
 
 @Injectable()
 export class FamilyService {
@@ -41,6 +50,7 @@ export class FamilyService {
     private readonly passwords: PasswordService,
     private readonly auth: AuthService,
     private readonly clock: ClockService,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -63,7 +73,8 @@ export class FamilyService {
   }
 
   /** Create a child profile and optionally connect it to the parent's trainers. */
-  async createChild(parentUserId: string, dto: CreateChildDto): Promise<PlayerProfileView> {
+  async createChild(actor: Principal, dto: CreateChildDto): Promise<PlayerProfileView> {
+    const parentUserId = actor.userId;
     const birthDate = this.requireChildAge(dto.birthDate);
 
     const owned = await this.playersService.findByOwner(parentUserId);
@@ -117,7 +128,93 @@ export class FamilyService {
       return created;
     });
 
+    await this.audit.record({
+      action: AUDIT_CHILD_CREATED,
+      actor,
+      target: { type: 'PlayerProfile', id: child.id },
+      metadata: { trainerProfileIds: requested },
+    });
+
     const [view] = await this.buildViews([child]);
+    return view;
+  }
+
+  /**
+   * Amend a child profile (US-01.03 / US-01.11).
+   *
+   * Every field CreateChildDto accepts was write-once: a parent who mistyped a
+   * name, or whose child changed school, had no remedy short of a database
+   * edit. This is also the only way `emergency_contact` becomes reachable —
+   * the column existed but no request DTO carried it, so the one person who
+   * needs it in an emergency could never see it.
+   *
+   * Parent-only, by the same NotAChildGuard as the rest of family management:
+   * US-01.06 lets a child "update basic profile info", but not through the
+   * route that can also move their birth date.
+   */
+  async updateChild(
+    actor: Principal,
+    profileId: string,
+    dto: UpdateChildDto,
+  ): Promise<PlayerProfileView> {
+    const profile = await this.requireOwnedProfile(actor.userId, profileId);
+    if (!profile.isChild) {
+      // The account holder's own profile is edited through PATCH /profile/me,
+      // which knows about the user row behind it. Routing it here would let a
+      // parent put themselves outside the 1-18 bound below.
+      throw new BadRequestException({
+        errorCode: ErrorCode.NOT_A_CHILD_PROFILE,
+        message: 'Use /profile/me to edit your own profile.',
+      });
+    }
+
+    // Validated only when supplied, so an untouched profile is never re-checked
+    // against a bound it may have aged out of since it was created.
+    const newBirthDate: string | undefined =
+      dto.birthDate === undefined ? undefined : this.requireChildAge(dto.birthDate);
+    const birthDate = newBirthDate ?? profile.birthDate;
+    const displayName = dto.displayName ?? profile.displayName;
+
+    // Re-run the create-time duplicate rule whenever either half of the identity
+    // moves, or renaming would be a way round it.
+    if (dto.displayName !== undefined || dto.birthDate !== undefined) {
+      const owned = await this.playersService.findByOwner(actor.userId);
+      const duplicate = owned.some(
+        (p) =>
+          p.id !== profile.id &&
+          p.isChild &&
+          p.displayName.trim().toLowerCase() === displayName.trim().toLowerCase() &&
+          p.birthDate === birthDate,
+      );
+      if (duplicate) {
+        throw new ConflictException({
+          errorCode: ErrorCode.DUPLICATE_CHILD,
+          message: 'A child with the same name and birth date already exists.',
+        });
+      }
+    }
+
+    const updated = await this.playersService.updateChildProfile(profile.id, {
+      displayName: dto.displayName,
+      birthDate: newBirthDate,
+      gender: dto.gender,
+      school: dto.school,
+      jerseyNumber: dto.jerseyNumber,
+      emergencyContact: dto.emergencyContact,
+    });
+
+    await this.audit.record({
+      action: AUDIT_CHILD_UPDATED,
+      actor,
+      target: { type: 'PlayerProfile', id: profile.id },
+      // Which fields moved, never their values: this row outlives the data and
+      // must not become a second copy of the PII the erasure path clears.
+      metadata: {
+        fields: Object.keys(dto).filter((k) => dto[k as keyof UpdateChildDto] !== undefined),
+      },
+    });
+
+    const [view] = await this.buildViews([updated]);
     return view;
   }
 
@@ -140,10 +237,11 @@ export class FamilyService {
 
   /** Connect an owned profile to a trainer the parent is already associated with. */
   async addTrainerFromExisting(
-    parentUserId: string,
+    actor: Principal,
     profileId: string,
     trainerProfileId: string,
   ): Promise<PlayerProfileView> {
+    const parentUserId = actor.userId;
     const profile = await this.requireOwnedProfile(parentUserId, profileId);
 
     const owned = await this.playersService.findByOwner(parentUserId);
@@ -156,17 +254,24 @@ export class FamilyService {
     }
 
     await this.associations.associate({ trainerProfileId, playerProfileId: profile.id });
+    await this.audit.record({
+      action: AUDIT_FAMILY_TRAINER_ADDED,
+      actor,
+      target: { type: 'PlayerProfile', id: profile.id },
+      metadata: { trainerProfileId, via: 'my-trainers' },
+    });
     const [view] = await this.buildViews([profile]);
     return view;
   }
 
   /** Connect an owned profile to a (possibly new) trainer via a ShareLink code. */
   async addTrainerByCode(
-    parentUserId: string,
+    actor: Principal,
     profileId: string,
     code: string,
   ): Promise<PlayerProfileView> {
-    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+    const profile = await this.requireOwnedProfile(actor.userId, profileId);
+    let joinedTrainerProfileId: string | null = null;
 
     await this.dataSource.transaction(async (manager: EntityManager) => {
       // Player links only: a parent pasting a coach invite code here used to
@@ -188,6 +293,14 @@ export class FamilyService {
       if (created) {
         await this.shareLinks.incrementUse(link.id, manager);
       }
+      joinedTrainerProfileId = link.trainerProfileId;
+    });
+
+    await this.audit.record({
+      action: AUDIT_FAMILY_TRAINER_ADDED,
+      actor,
+      target: { type: 'PlayerProfile', id: profile.id },
+      metadata: { trainerProfileId: joinedTrainerProfileId, via: 'share-link' },
     });
 
     const [view] = await this.buildViews([profile]);
@@ -199,11 +312,11 @@ export class FamilyService {
    * (soft-deleted) so history is preserved.
    */
   async removeTrainer(
-    parentUserId: string,
+    actor: Principal,
     profileId: string,
     trainerProfileId: string,
   ): Promise<PlayerProfileView> {
-    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+    const profile = await this.requireOwnedProfile(actor.userId, profileId);
 
     const updated = await this.associations.setStatus(
       trainerProfileId,
@@ -222,6 +335,13 @@ export class FamilyService {
     // selection dangling until the user happens to switch again.
     await this.context.clearForAssociation(profile.id, trainerProfileId);
 
+    await this.audit.record({
+      action: AUDIT_FAMILY_TRAINER_REMOVED,
+      actor,
+      target: { type: 'PlayerProfile', id: profile.id },
+      metadata: { trainerProfileId },
+    });
+
     const [view] = await this.buildViews([profile]);
     return view;
   }
@@ -236,10 +356,11 @@ export class FamilyService {
    * is not a child.
    */
   async createChildLogin(
-    parentUserId: string,
+    actor: Principal,
     profileId: string,
     input: { email: string; password: string },
   ): Promise<ChildLoginView> {
+    const parentUserId = actor.userId;
     const profile = await this.requireOwnedProfile(parentUserId, profileId);
     if (!profile.isChild) {
       throw new BadRequestException({
@@ -287,6 +408,13 @@ export class FamilyService {
       return created;
     });
 
+    await this.audit.record({
+      action: AUDIT_CHILD_LOGIN_CREATED,
+      actor,
+      targetUserId: childUser.id,
+      target: { type: 'PlayerProfile', id: profile.id },
+    });
+
     return {
       playerProfileId: profile.id,
       displayName: profile.displayName,
@@ -301,8 +429,8 @@ export class FamilyService {
    * live child session keeps working for up to its refresh lifetime after the
    * parent has withdrawn access.
    */
-  async revokeChildLogin(parentUserId: string, profileId: string): Promise<void> {
-    const profile = await this.requireOwnedProfile(parentUserId, profileId);
+  async revokeChildLogin(actor: Principal, profileId: string): Promise<void> {
+    const profile = await this.requireOwnedProfile(actor.userId, profileId);
     if (profile.childUserId === null) {
       throw new NotFoundException({
         errorCode: ErrorCode.NOT_FOUND,
@@ -316,6 +444,12 @@ export class FamilyService {
       await this.usersService.setStatus(childUserId, UserStatus.Inactive, manager);
     });
     await this.auth.revokeAllUserSessions(childUserId, 'child-login-revoked');
+    await this.audit.record({
+      action: AUDIT_CHILD_LOGIN_REVOKED,
+      actor,
+      targetUserId: childUserId,
+      target: { type: 'PlayerProfile', id: profile.id },
+    });
   }
 
   async childLoginStatus(parentUserId: string, profileId: string): Promise<ChildLoginStatusView> {
@@ -376,6 +510,7 @@ export class FamilyService {
         trainerProfileId: a.trainerProfileId,
         businessName: nameById.get(a.trainerProfileId) ?? 'Unknown',
         status: a.status,
+        connectedAt: a.connectedAt,
       });
       byProfile.set(a.playerProfileId, list);
     }
@@ -401,13 +536,7 @@ export class FamilyService {
       });
     }
 
-    const now = this.clock.now();
-    let age = now.getUTCFullYear() - born.getUTCFullYear();
-    const monthDelta = now.getUTCMonth() - born.getUTCMonth();
-    if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < born.getUTCDate())) {
-      age -= 1;
-    }
-
+    const age = ageInYears(born, this.clock.now());
     if (age < 1 || age > 18) {
       throw new BadRequestException({
         errorCode: ErrorCode.CHILD_AGE_INVALID,

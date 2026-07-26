@@ -145,4 +145,26 @@ export class ShareLinksService {
       .where('id = :id', { id })
       .execute();
   }
+
+  /**
+   * Erase a person's address from any coach invitation still holding it, and
+   * retire the link (US-01.13).
+   *
+   * `target_email` is the one place a coach's email is copied out of `users`,
+   * so an erasure that only anonymised the account left the address sitting in
+   * this table — reachable by the trainer's invitation list. Deactivating as
+   * well as nulling matters: a pending invite whose recipient no longer exists
+   * must not stay redeemable, and an invite with no address cannot be resent.
+   *
+   * Matched case-insensitively because `users.email` is citext while this
+   * column is plain text, so the stored copy need not match byte-for-byte.
+   */
+  async scrubTargetEmail(email: string, manager?: EntityManager): Promise<void> {
+    await this.repo(manager)
+      .createQueryBuilder()
+      .update(ShareLink)
+      .set({ targetEmail: null, active: false })
+      .where('LOWER("target_email") = LOWER(:email)', { email })
+      .execute();
+  }
 }

@@ -1,9 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -19,7 +22,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { CreateShareLinkDto } from './dto/create-share-link.dto';
-import { RosterEntryView, RosterQueryDto } from './dto/roster.dto';
+import { RosterEntryView, RosterQueryDto, UpdateRosterEntryDto } from './dto/roster.dto';
 import { EnrollmentService, ResolvedShareLink } from './enrollment.service';
 import { ShareLink } from './entities/share-link.entity';
 
@@ -66,6 +69,38 @@ export class ShareLinksController {
   @ApiOkResponse({ type: [RosterEntryView] })
   async roster(@Query() query: RosterQueryDto, @Req() req: Request): Promise<RosterEntryView[]> {
     return this.enrollment.roster(req.user as Principal, query);
+  }
+
+  /** Section 8: skill level is the trainer's assessment, not the player's. */
+  @Patch('trainers/me/roster/:playerProfileId')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Trainer)
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: RosterEntryView })
+  async updateRosterEntry(
+    @Param('playerProfileId', ParseUUIDPipe) playerProfileId: string,
+    @Body() dto: UpdateRosterEntryDto,
+    @Req() req: Request,
+  ): Promise<RosterEntryView> {
+    return this.enrollment.setRosterSkillLevel(
+      req.user as Principal,
+      playerProfileId,
+      dto.skillLevel ?? null,
+    );
+  }
+
+  /** Off-board a player from this trainer's roster (section 3). */
+  @Delete('trainers/me/roster/:playerProfileId')
+  @HttpCode(204)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.Trainer)
+  @ApiBearerAuth()
+  async removeRosterEntry(
+    @Param('playerProfileId', ParseUUIDPipe) playerProfileId: string,
+    @Req() req: Request,
+  ): Promise<void> {
+    await this.enrollment.removeFromRoster(req.user as Principal, playerProfileId);
   }
 
   @Post('sharelinks')

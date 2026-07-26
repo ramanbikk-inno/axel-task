@@ -63,10 +63,7 @@ export class TrainersController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: BrandingView })
   async updateBranding(@Body() dto: UpdateBrandingDto, @Req() req: Request): Promise<BrandingView> {
-    const profile = await this.trainers.setPrimaryColor(
-      (req.user as Principal).userId,
-      dto.primaryColor,
-    );
+    const profile = await this.trainers.setPrimaryColor(req.user as Principal, dto.primaryColor);
     return toBranding(profile);
   }
 
@@ -77,7 +74,7 @@ export class TrainersController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: BrandingView })
   async uploadLogo(@Body() dto: UploadLogoDto, @Req() req: Request): Promise<BrandingView> {
-    const profile = await this.trainers.setLogoFromUpload((req.user as Principal).userId, dto);
+    const profile = await this.trainers.setLogoFromUpload(req.user as Principal, dto);
     return toBranding(profile);
   }
 
@@ -88,7 +85,7 @@ export class TrainersController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: BrandingView })
   async removeLogo(@Req() req: Request): Promise<BrandingView> {
-    const profile = await this.trainers.removeLogo((req.user as Principal).userId);
+    const profile = await this.trainers.removeLogo(req.user as Principal);
     return toBranding(profile);
   }
 

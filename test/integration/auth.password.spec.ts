@@ -1,8 +1,10 @@
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { IsNull } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
 import { Principal } from '../../src/modules/auth/principal';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
@@ -126,6 +128,19 @@ describe('AuthService password reset & change', () => {
         { provide: PasswordService, useValue: passwords },
         { provide: MailService, useValue: mail },
         { provide: UsersService, useValue: usersService },
+        {
+          provide: ImpersonationLogService,
+          useValue: {
+            closeForSession: jest.fn().mockResolvedValue(undefined),
+            closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (k: string): unknown => (k === 'MIN_SELF_REGISTRATION_AGE' ? 18 : undefined),
+          },
+        },
         { provide: ClockService, useValue: new FakeClock() },
       ],
     }).compile();

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AuditModule } from '../audit/audit.module';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { EnrollmentModule } from '../enrollment/enrollment.module';
 import { MailModule } from '../mail/mail.module';
@@ -29,6 +30,7 @@ import { CoachAvailabilityOverride } from './entities/coach-availability-overrid
     UsersModule,
     EnrollmentModule,
     MailModule,
+    AuditModule,
   ],
   controllers: [
     PlayerAvailabilityController,

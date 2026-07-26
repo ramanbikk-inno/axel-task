@@ -12,9 +12,12 @@ import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
+import { AssociationsService } from '../enrollment/associations.service';
 import { ShareLink, ShareLinkType } from '../enrollment/entities/share-link.entity';
+import { AssociationStatus } from '../enrollment/entities/trainer-player-association.entity';
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { MailService } from '../mail/mail.service';
+import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { User } from '../users/entities/user.entity';
 import { Role } from '../users/entities/user.enums';
@@ -25,6 +28,7 @@ import {
   CoachInvitationView,
   CoachView,
   InviteCoachDto,
+  PublicCoachView,
   ResolvedCoachInviteView,
   UpdateCoachProfileDto,
 } from './dto/coach.dto';
@@ -47,6 +51,8 @@ export class CoachesService {
     private readonly dataSource: DataSource,
     private readonly trainersService: TrainersService,
     private readonly shareLinks: ShareLinksService,
+    private readonly associations: AssociationsService,
+    private readonly playersService: PlayersService,
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
     private readonly mail: MailService,
@@ -291,6 +297,99 @@ export class CoachesService {
     return this.buildCoachViews(profiles);
   }
 
+  /**
+   * Is this principal inside the named trainer organisation?
+   *
+   * "Public" here means public *to the organisation*, not to the internet. A
+   * Trainer's and a Coach's org is already resolved per request into
+   * `trainerOrgId` — their own for a Trainer, their employer's for a Coach, and
+   * null once an engagement ends — so that is the comparison rather than a
+   * fresh lookup that could disagree with it. A player or parent belongs
+   * wherever one of their profiles is actively associated.
+   */
+  private async isOrgMember(principal: Principal, trainerProfileId: string): Promise<boolean> {
+    if (principal.role === Role.SuperAdmin) {
+      return true;
+    }
+    if (principal.role === Role.Trainer || principal.role === Role.Coach) {
+      return principal.trainerOrgId === trainerProfileId;
+    }
+
+    // A child login may only look through the one profile it is, exactly as in
+    // the context selector — never their parent's or a sibling's.
+    const profileIds = principal.isChild
+      ? principal.childPlayerProfileId === null
+        ? []
+        : [principal.childPlayerProfileId]
+      : (await this.playersService.findByOwner(principal.userId)).map((p) => p.id);
+    if (profileIds.length === 0) {
+      return false;
+    }
+
+    const links = await this.associations.findByPlayerProfiles(profileIds);
+    return links.some(
+      (l) => l.trainerProfileId === trainerProfileId && l.status === AssociationStatus.Active,
+    );
+  }
+
+  /**
+   * The coaches a trainer's organisation shows to its members (US-01.08,
+   * "Public profile management").
+   *
+   * `publicVisible` had no consumer at all: it was stored, editable and
+   * returned to the trainer, but nothing ever filtered on it, so a coach who
+   * ticked the box appeared nowhere and one who cleared it was hidden from
+   * nowhere. This is the read it gates.
+   *
+   * Active engagements only — an off-boarded coach is not staff — and the view
+   * is deliberately narrower than CoachView, which carries the email and
+   * employment dates that belong to the trainer's own roster screen.
+   *
+   * Scoped to the organisation's own members. Authentication alone is not the
+   * boundary: without the membership check any logged-in account — including a
+   * competing trainer — could read any org's staff list, names, credentials and
+   * all, from nothing but its id. 404 rather than 403, matching every other
+   * cross-tenant miss here, so the reply does not confirm that the id names a
+   * real organisation.
+   */
+  async listPublicCoaches(
+    principal: Principal,
+    trainerProfileId: string,
+  ): Promise<PublicCoachView[]> {
+    if (!(await this.isOrgMember(principal, trainerProfileId))) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'Trainer not found.',
+      });
+    }
+
+    const profiles = await this.coaches.find({
+      where: {
+        trainerProfileId,
+        status: CoachStatus.Active,
+        publicVisible: true,
+      },
+      order: { joinedAt: 'ASC' },
+    });
+    if (profiles.length === 0) {
+      return [];
+    }
+
+    const users = await this.usersService.findByIds(profiles.map((p) => p.userId));
+    const userById = new Map(users.map((u) => [u.id, u]));
+    return profiles.map((p) => {
+      const u = userById.get(p.userId);
+      return {
+        id: p.id,
+        firstName: u?.firstName ?? null,
+        lastName: u?.lastName ?? null,
+        bio: p.bio,
+        credentials: p.credentials,
+        certifications: p.certifications,
+      };
+    });
+  }
+
   private async buildCoachViews(profiles: CoachProfile[]): Promise<CoachView[]> {
     const users = await this.usersService.findByIds(profiles.map((p) => p.userId));
     const userById = new Map(users.map((u) => [u.id, u]));
@@ -303,6 +402,8 @@ export class CoachesService {
         firstName: u?.firstName ?? null,
         lastName: u?.lastName ?? null,
         bio: p.bio,
+        credentials: p.credentials,
+        certifications: p.certifications,
         publicVisible: p.publicVisible,
         status: p.status,
         joinedAt: p.joinedAt,
