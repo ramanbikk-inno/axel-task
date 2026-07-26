@@ -9,6 +9,7 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { MailService } from '../mail/mail.service';
@@ -50,6 +51,10 @@ function displayNameFor(
   return full !== '' ? full : fallback;
 }
 
+export const AUDIT_SHARE_LINK_CREATED = 'sharelink.created';
+export const AUDIT_ENROLLMENT_JOINED = 'enrollment.joined';
+export const AUDIT_ENROLLMENT_REGISTERED = 'enrollment.registered';
+
 @Injectable()
 export class EnrollmentService {
   private readonly logger = new Logger(EnrollmentService.name);
@@ -64,6 +69,7 @@ export class EnrollmentService {
     private readonly associations: AssociationsService,
     private readonly mail: MailService,
     private readonly clock: ClockService,
+    private readonly audit: AuditService,
   ) {}
 
   /** Public: resolve a ShareLink for the join page (trainer name + validity). */
@@ -101,11 +107,18 @@ export class EnrollmentService {
         message: 'No trainer profile for this account.',
       });
     }
-    return this.shareLinks.create({
+    const link = await this.shareLinks.create({
       trainerProfileId: trainerProfile.id,
       type: ShareLinkType.PlayerStatic,
       createdByUserId: principal.userId,
     });
+    await this.audit.record({
+      action: AUDIT_SHARE_LINK_CREATED,
+      actor: principal,
+      target: { type: 'ShareLink', id: link.id },
+      metadata: { linkType: ShareLinkType.PlayerStatic },
+    });
+    return link;
   }
 
   async listTrainerShareLinks(principal: Principal): Promise<ShareLink[]> {
@@ -178,6 +191,16 @@ export class EnrollmentService {
       await this.shareLinks.incrementUse(link.id, manager);
 
       return { user, profile, association, trainerProfileId: link.trainerProfileId };
+    });
+
+    // recordSystemAction, not record: this endpoint is public, so there is no
+    // authenticated principal to attribute it to — and the account being
+    // created is the subject of the action, not its actor.
+    await this.audit.recordSystemAction({
+      action: AUDIT_ENROLLMENT_REGISTERED,
+      targetUserId: result.user.id,
+      target: { type: 'TrainerOrg', id: result.trainerProfileId },
+      metadata: { playerProfileId: result.profile.id },
     });
 
     const trainerName = await this.trainerName(result.trainerProfileId);
@@ -300,6 +323,16 @@ export class EnrollmentService {
         created: createdAny,
         trainerProfileId: link.trainerProfileId,
       };
+    });
+
+    await this.audit.record({
+      action: AUDIT_ENROLLMENT_JOINED,
+      actor: principal,
+      target: { type: 'TrainerOrg', id: result.trainerProfileId },
+      metadata: {
+        playerProfileIds: result.profiles.map((p) => p.id),
+        created: result.created,
+      },
     });
 
     return {

@@ -14,6 +14,7 @@ import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
+import { ShareLinksService } from '../enrollment/share-links.service';
 import { MailService } from '../mail/mail.service';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { User } from '../users/entities/user.entity';
@@ -44,6 +45,7 @@ export class AdminService {
     private readonly mail: MailService,
     private readonly audit: AuditService,
     private readonly playersService: PlayersService,
+    private readonly shareLinks: ShareLinksService,
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly clock: ClockService,
   ) {}
@@ -250,11 +252,20 @@ export class AdminService {
 
     const now = this.clock.now();
     const photoPublicId = target.photoPublicId;
+    // Captured before anonymisation overwrites the column: the copies of this
+    // address living outside `users` can only be found by the original value.
+    const originalEmail = target.email;
 
     // Cascades to the children's own logins. A parent's erasure that left
     // their child's account signed-in-able, with the child's name and email
     // still on it, would not be an erasure of the family's data at all.
     const childUserIds = await this.playersService.childUserIdsByOwner(target.id);
+    // A child login carries its own address, so the family's erasure has to
+    // sweep those out of the same off-`users` copies.
+    const erasedEmails = [
+      originalEmail,
+      ...(await this.usersService.findByIds(childUserIds)).map((u) => u.email),
+    ];
 
     await this.dataSource.transaction(async (manager: EntityManager) => {
       const deletionLogs = manager.getRepository(UserDeletionLog);
@@ -275,8 +286,22 @@ export class AdminService {
 
       await this.usersService.anonymize(target.id, manager);
       await this.playersService.anonymizeByOwner(target.id, manager);
+      // Covers the target being a child login rather than a parent: that
+      // profile is owned by the parent, so the owner sweep above never reaches
+      // it and the child's name, birth date, school and emergency contact
+      // would survive their own erasure.
+      await this.playersService.anonymizeByChildUserId(target.id, manager);
       for (const childUserId of childUserIds) {
         await this.usersService.anonymize(childUserId, manager);
+        await this.playersService.anonymizeByChildUserId(childUserId, manager);
+      }
+
+      // Copies of the address that live outside `users`. These take the
+      // pre-anonymisation values, which is why they run against the emails
+      // captured above rather than re-reading rows this transaction just wrote.
+      for (const email of erasedEmails) {
+        await this.shareLinks.scrubTargetEmail(email, manager);
+        await this.audit.scrubEmailFromMetadata(email, manager);
       }
 
       await this.audit.record(

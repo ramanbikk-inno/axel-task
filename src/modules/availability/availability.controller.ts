@@ -61,7 +61,7 @@ export class PlayerAvailabilityController {
     @Body() dto: SetAvailabilityDto,
     @Req() req: Request,
   ): Promise<AvailabilitySlotView[]> {
-    return this.availability.setForProfile((req.user as Principal).userId, profileId, dto.slots);
+    return this.availability.setForProfile(req.user as Principal, profileId, dto.slots);
   }
 }
 
@@ -88,7 +88,7 @@ export class CoachAvailabilityController {
   @HttpCode(200)
   @ApiOkResponse({ type: [AvailabilitySlotView] })
   async set(@Body() dto: SetAvailabilityDto, @Req() req: Request): Promise<AvailabilitySlotView[]> {
-    return this.availability.setForCoach((req.user as Principal).userId, dto.slots);
+    return this.availability.setForCoach(req.user as Principal, dto.slots);
   }
 
   /** The coach's side of Q-01.06: they can see every override filed against them. */
@@ -173,7 +173,7 @@ export class CoachOverridesController {
     @Body() dto: RecordCoachOverrideDto,
     @Req() req: Request,
   ): Promise<CoachOverrideView> {
-    return this.overrides.record((req.user as Principal).userId, dto);
+    return this.overrides.record(req.user as Principal, dto);
   }
 
   @Get()

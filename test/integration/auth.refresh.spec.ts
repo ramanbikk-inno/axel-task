@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../../src/modules/users/entities/user.enums';
@@ -117,6 +118,13 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
         { provide: PasswordService, useValue: { hash: jest.fn(), verify: jest.fn() } },
         { provide: MailService, useValue: {} },
         { provide: UsersService, useValue: { findById: jest.fn(async () => user) } },
+        {
+          provide: ImpersonationLogService,
+          useValue: {
+            closeForSession: jest.fn().mockResolvedValue(undefined),
+            closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         { provide: ClockService, useValue: clock },
       ],
     }).compile();

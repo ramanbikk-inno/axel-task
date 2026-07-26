@@ -2,6 +2,9 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
+import { Role } from '../users/entities/user.enums';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { CoachLookupService } from './coach-lookup.service';
 import { MailService } from '../mail/mail.service';
@@ -12,6 +15,15 @@ import { CoachOverridesService } from './coach-overrides.service';
 import { CoachAvailabilityOverride } from './entities/coach-availability-override.entity';
 
 const COACH = { id: 'c1', userId: 'coach-user', trainerProfileId: 't1' } as CoachProfile;
+
+/** Only the user id is read here; the rest is what the audit trail stamps. */
+const principal = (userId: string): Principal =>
+  ({
+    userId,
+    role: Role.Trainer,
+    sessionId: 'session-1',
+    impersonating: false,
+  }) as Principal;
 
 const makeService = (): {
   service: CoachOverridesService;
@@ -52,6 +64,8 @@ const makeService = (): {
   const mail = {
     sendCoachAvailabilityOverrideEmail: sendOverrideEmail,
   } as unknown as MailService;
+  const auditRecord = jest.fn().mockResolvedValue(undefined);
+  const audit = { record: auditRecord } as unknown as AuditService;
 
   return {
     service: new CoachOverridesService(
@@ -61,6 +75,7 @@ const makeService = (): {
       trainersService,
       usersService,
       mail,
+      audit,
     ),
     save,
     findAndCount,
@@ -86,7 +101,7 @@ describe('CoachOverridesService (US-01.10)', () => {
   it('records the override against the coach and the acting trainer', async () => {
     const { service, save } = makeService();
 
-    const result = await service.record('trainer-user', dto);
+    const result = await service.record(principal('trainer-user'), dto);
 
     expect(save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -106,7 +121,7 @@ describe('CoachOverridesService (US-01.10)', () => {
   it('stores the event id when the caller has one (Epic-02 seam)', async () => {
     const { service, save } = makeService();
 
-    await service.record('trainer-user', { ...dto, eventId: 'e-9' });
+    await service.record(principal('trainer-user'), { ...dto, eventId: 'e-9' });
 
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ eventId: 'e-9' }));
   });
@@ -114,7 +129,7 @@ describe('CoachOverridesService (US-01.10)', () => {
   it('goes through the tenancy gate before writing', async () => {
     const { service, requireInOwnOrg } = makeService();
 
-    await service.record('trainer-user', dto);
+    await service.record(principal('trainer-user'), dto);
 
     expect(requireInOwnOrg).toHaveBeenCalledWith('trainer-user', 'c1');
   });
@@ -123,7 +138,9 @@ describe('CoachOverridesService (US-01.10)', () => {
     const { service, requireInOwnOrg, save } = makeService();
     requireInOwnOrg.mockRejectedValue(new ForbiddenException());
 
-    await expect(service.record('trainer-user', dto)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.record(principal('trainer-user'), dto)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
     expect(save).not.toHaveBeenCalled();
   });
 
@@ -131,7 +148,7 @@ describe('CoachOverridesService (US-01.10)', () => {
     const { service, save } = makeService();
 
     await expect(
-      service.record('trainer-user', { ...dto, startTime: '18:00', endTime: '16:00' }),
+      service.record(principal('trainer-user'), { ...dto, startTime: '18:00', endTime: '16:00' }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(save).not.toHaveBeenCalled();
   });
@@ -139,7 +156,7 @@ describe('CoachOverridesService (US-01.10)', () => {
   it('notifies the coach (Q-01.06)', async () => {
     const { service, sendOverrideEmail } = makeService();
 
-    await service.record('trainer-user', dto);
+    await service.record(principal('trainer-user'), dto);
 
     expect(sendOverrideEmail).toHaveBeenCalledWith('coach@example.com', {
       trainerName: 'Elite Soccer',
@@ -156,7 +173,9 @@ describe('CoachOverridesService (US-01.10)', () => {
 
     // The row is already committed; surfacing a 500 here would invite a retry
     // that appends a second override for the same assignment.
-    await expect(service.record('trainer-user', dto)).resolves.toMatchObject({ id: 'o1' });
+    await expect(service.record(principal('trainer-user'), dto)).resolves.toMatchObject({
+      id: 'o1',
+    });
   });
 
   it('lists a trainer own organisation overrides', async () => {
@@ -214,7 +233,7 @@ describe('CoachOverridesService (US-01.10)', () => {
     const { service, save, isCoachFreeFor } = makeService();
     isCoachFreeFor.mockResolvedValue(false);
 
-    const result = await service.record('trainer-user', dto);
+    const result = await service.record(principal('trainer-user'), dto);
 
     expect(isCoachFreeFor).toHaveBeenCalledWith('c1', 1, 960, 1080);
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ hadConflict: true }));
@@ -226,7 +245,7 @@ describe('CoachOverridesService (US-01.10)', () => {
     const { service, save, isCoachFreeFor } = makeService();
     isCoachFreeFor.mockResolvedValue(true);
 
-    const result = await service.record('trainer-user', dto);
+    const result = await service.record(principal('trainer-user'), dto);
 
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ hadConflict: false }));
     expect(result.hadConflict).toBe(false);
@@ -236,7 +255,7 @@ describe('CoachOverridesService (US-01.10)', () => {
     const { service, sendOverrideEmail, isCoachFreeFor } = makeService();
     isCoachFreeFor.mockResolvedValue(true);
 
-    await service.record('trainer-user', dto);
+    await service.record(principal('trainer-user'), dto);
 
     expect(sendOverrideEmail).not.toHaveBeenCalled();
   });

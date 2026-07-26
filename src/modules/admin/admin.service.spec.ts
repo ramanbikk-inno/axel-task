@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { StorageService } from '../storage/storage.service';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
+import { ShareLinksService } from '../enrollment/share-links.service';
 import { MailService } from '../mail/mail.service';
 import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
@@ -42,6 +43,9 @@ describe('AdminService.createTrainer', () => {
     const mail = { sendTrainerInviteEmail: sendTrainerInvite } as unknown as MailService;
     const audit = { record: auditRecord } as unknown as AuditService;
     const playersService = {} as unknown as PlayersService;
+    const shareLinks = {
+      scrubTargetEmail: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ShareLinksService;
     const dataSource = {
       transaction: async <T>(cb: (mgr: EntityManager) => Promise<T>): Promise<T> =>
         cb({} as EntityManager),
@@ -61,6 +65,7 @@ describe('AdminService.createTrainer', () => {
       mail,
       audit,
       playersService,
+      shareLinks,
       storage,
       clock,
     );

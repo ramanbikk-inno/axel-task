@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
-import { CoachProfile } from '../coaches/entities/coach-profile.entity';
+import { CoachProfile, CoachStatus } from '../coaches/entities/coach-profile.entity';
 import { TrainersService } from '../trainers/trainers.service';
 import { CoachLookupService } from './coach-lookup.service';
 
@@ -40,7 +40,43 @@ describe('CoachLookupService', () => {
 
       // Keying on anything the caller supplies would be an IDOR: one coach
       // could read another's profile by guessing an id.
-      expect(findOne).toHaveBeenCalledWith({ where: { userId: 'coach-user' } });
+      expect(findOne).toHaveBeenCalledWith({
+        where: { userId: 'coach-user', status: CoachStatus.Active },
+      });
+    });
+
+    /**
+     * Off-boarding keeps the row and the unique index is partial, so a coach
+     * who was let go and re-hired has two. Without the status predicate,
+     * findOne picked between them arbitrarily and My Times writes could land on
+     * the ended engagement — the coach saw a saved schedule while the trainer's
+     * conflict check, which resolves the coach through the org-scoped id, read
+     * an empty one.
+     */
+    it('resolves the active engagement for a re-hired coach, not the ended one', async () => {
+      const { service, findOne } = makeService(null);
+      const ended = { id: 'c-old', userId: 'coach-user', status: CoachStatus.Inactive };
+      const active = { id: 'c-new', userId: 'coach-user', status: CoachStatus.Active };
+      findOne.mockImplementation(async (opts: { where: { status?: CoachStatus } }) =>
+        [ended, active].find((r) => r.status === opts.where.status),
+      );
+
+      await expect(service.requireOwnProfile('coach-user')).resolves.toMatchObject({
+        id: 'c-new',
+      });
+    });
+
+    it('refuses an off-boarded coach: their tenancy ended with the row', async () => {
+      const { service, findOne } = makeService(null);
+      // Only the Inactive row exists, so the Active-scoped query matches nothing.
+      findOne.mockResolvedValue(null);
+
+      await expect(service.requireOwnProfile('coach-user')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(findOne).toHaveBeenCalledWith({
+        where: { userId: 'coach-user', status: CoachStatus.Active },
+      });
     });
 
     it('throws 403 COACH_PROFILE_NOT_FOUND when the account is not a coach', async () => {
@@ -65,7 +101,23 @@ describe('CoachLookupService', () => {
       await service.requireInOwnOrg('trainer-user', 'c1');
 
       // Dropping trainerProfileId here would let any trainer read any coach.
-      expect(findOne).toHaveBeenCalledWith({ where: { id: 'c1', trainerProfileId: 't1' } });
+      expect(findOne).toHaveBeenCalledWith({
+        where: { id: 'c1', trainerProfileId: 't1', status: CoachStatus.Active },
+      });
+    });
+
+    it('hides an off-boarded coach from their former employer', async () => {
+      // The ended row still carries the old trainerProfileId, so without the
+      // status predicate the previous employer keeps a live read on someone who
+      // no longer works for them.
+      const { service, findOne } = makeService(null);
+
+      await expect(service.requireInOwnOrg('trainer-user', 'c-old')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(findOne).toHaveBeenCalledWith({
+        where: { id: 'c-old', trainerProfileId: 't1', status: CoachStatus.Active },
+      });
     });
 
     it('reports a foreign-org coach as 404, not 403, so ids cannot be probed', async () => {

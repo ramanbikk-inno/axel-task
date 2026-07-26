@@ -8,6 +8,7 @@ import { AuthSession } from '../auth/entities/auth-session.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { UsersModule } from '../users/users.module';
 import { ImpersonationController } from './impersonation.controller';
+import { ImpersonationLogModule } from './impersonation-log.module';
 import { ImpersonationService } from './impersonation.service';
 import { ImpersonationLog } from './entities/impersonation-log.entity';
 
@@ -18,6 +19,7 @@ import { ImpersonationLog } from './entities/impersonation-log.entity';
     UsersModule,
     AbilityModule,
     AuditModule,
+    ImpersonationLogModule,
   ],
   controllers: [ImpersonationController],
   providers: [ImpersonationService],

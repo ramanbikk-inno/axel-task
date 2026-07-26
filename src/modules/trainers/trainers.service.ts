@@ -4,10 +4,16 @@ import { EntityManager, In, Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { decodeImageUpload } from '../../shared/files/image-content';
+import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from './entities/trainer-profile.entity';
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+
+export const AUDIT_BRANDING_COLOR_SET = 'trainer.branding-color-set';
+export const AUDIT_BRANDING_LOGO_SET = 'trainer.branding-logo-set';
+export const AUDIT_BRANDING_LOGO_REMOVED = 'trainer.branding-logo-removed';
 
 export interface CreateTrainerProfileInput {
   userId: string;
@@ -25,6 +31,7 @@ export class TrainersService {
     @InjectRepository(TrainerProfile)
     private readonly trainersRepository: Repository<TrainerProfile>,
     @Inject(STORAGE) private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   async create(input: CreateTrainerProfileInput, manager?: EntityManager): Promise<TrainerProfile> {
@@ -88,18 +95,25 @@ export class TrainersService {
   }
 
   /** Set the trainer's primary brand color (US-01.14). */
-  async setPrimaryColor(userId: string, primaryColor: string): Promise<TrainerProfile> {
-    const profile = await this.requireOwnProfile(userId);
+  async setPrimaryColor(actor: Principal, primaryColor: string): Promise<TrainerProfile> {
+    const profile = await this.requireOwnProfile(actor.userId);
     profile.primaryColor = primaryColor;
-    return this.trainersRepository.save(profile);
+    const saved = await this.trainersRepository.save(profile);
+    await this.audit.record({
+      action: AUDIT_BRANDING_COLOR_SET,
+      actor,
+      target: { type: 'TrainerOrg', id: profile.id },
+      metadata: { primaryColor },
+    });
+    return saved;
   }
 
   /** Validate + store an uploaded logo, returning the updated profile (US-01.14). */
   async setLogoFromUpload(
-    userId: string,
+    actor: Principal,
     input: { fileName: string; mimeType: string; dataBase64: string },
   ): Promise<TrainerProfile> {
-    const profile = await this.requireOwnProfile(userId);
+    const profile = await this.requireOwnProfile(actor.userId);
 
     const { buffer } = decodeImageUpload({
       dataBase64: input.dataBase64,
@@ -124,12 +138,18 @@ export class TrainersService {
     if (previousPublicId !== null && previousPublicId !== stored.publicId) {
       await this.discardAsset(previousPublicId);
     }
+    await this.audit.record({
+      action: AUDIT_BRANDING_LOGO_SET,
+      actor,
+      target: { type: 'TrainerOrg', id: profile.id },
+      metadata: { replacedPrevious: previousPublicId !== null },
+    });
     return saved;
   }
 
   /** Remove the logo and the stored asset behind it (US-01.14). */
-  async removeLogo(userId: string): Promise<TrainerProfile> {
-    const profile = await this.requireOwnProfile(userId);
+  async removeLogo(actor: Principal): Promise<TrainerProfile> {
+    const profile = await this.requireOwnProfile(actor.userId);
     if (profile.logoUrl === null && profile.logoPublicId === null) {
       throw new NotFoundException({
         errorCode: ErrorCode.NOT_FOUND,
@@ -144,6 +164,11 @@ export class TrainersService {
     if (previousPublicId !== null) {
       await this.discardAsset(previousPublicId);
     }
+    await this.audit.record({
+      action: AUDIT_BRANDING_LOGO_REMOVED,
+      actor,
+      target: { type: 'TrainerOrg', id: profile.id },
+    });
     return saved;
   }
 

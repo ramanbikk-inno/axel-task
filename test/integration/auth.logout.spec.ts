@@ -2,6 +2,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
 import { AuthSession } from '../../src/modules/auth/entities/auth-session.entity';
@@ -59,6 +60,13 @@ describe('AuthService.logout', () => {
         { provide: PasswordService, useValue: { hash: jest.fn(), verify: jest.fn() } },
         { provide: MailService, useValue: {} },
         { provide: UsersService, useValue: { findById: jest.fn() } },
+        {
+          provide: ImpersonationLogService,
+          useValue: {
+            closeForSession: jest.fn().mockResolvedValue(undefined),
+            closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         { provide: ClockService, useValue: new FakeClock() },
       ],
     }).compile();

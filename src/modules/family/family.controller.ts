@@ -56,7 +56,7 @@ export class FamilyController {
   @ApiOkResponse({ type: PlayerProfileView })
   async createChild(@Body() dto: CreateChildDto, @Req() req: Request): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.createChild(principal.userId, dto);
+    return this.family.createChild(principal, dto);
   }
 
   /**
@@ -73,7 +73,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<ChildLoginView> {
     const principal = req.user as Principal;
-    return this.family.createChildLogin(principal.userId, profileId, dto);
+    return this.family.createChildLogin(principal, profileId, dto);
   }
 
   @Get('children/:profileId/login')
@@ -96,7 +96,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<void> {
     const principal = req.user as Principal;
-    await this.family.revokeChildLogin(principal.userId, profileId);
+    await this.family.revokeChildLogin(principal, profileId);
   }
 
   @Post(':profileId/trainers')
@@ -109,7 +109,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.addTrainerFromExisting(principal.userId, profileId, dto.trainerProfileId);
+    return this.family.addTrainerFromExisting(principal, profileId, dto.trainerProfileId);
   }
 
   @Post(':profileId/trainers/by-code')
@@ -122,7 +122,7 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.addTrainerByCode(principal.userId, profileId, dto.code);
+    return this.family.addTrainerByCode(principal, profileId, dto.code);
   }
 
   @Delete(':profileId/trainers/:trainerProfileId')
@@ -135,6 +135,6 @@ export class FamilyController {
     @Req() req: Request,
   ): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
-    return this.family.removeTrainer(principal.userId, profileId, trainerProfileId);
+    return this.family.removeTrainer(principal, profileId, trainerProfileId);
   }
 }

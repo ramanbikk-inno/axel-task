@@ -11,6 +11,7 @@ import { EntityManager, IsNull, Repository } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { ImpersonationLogService } from '../impersonation/impersonation-log.service';
 import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -46,6 +47,7 @@ export class AuthService {
     private readonly mail: MailService,
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
+    private readonly impersonationLogs: ImpersonationLogService,
   ) {}
 
   private async getDummyHash(): Promise<string> {
@@ -402,6 +404,10 @@ export class AuthService {
     const now = this.clock.now();
     await this.refreshTokens.update({ id: row.id }, { revokedAt: now });
     await this.sessions.update({ id: row.sessionId }, { revokedAt: now, revokedReason: 'logout' });
+    // Logging out of an impersonation session ends it just as surely as
+    // /impersonation/exit does; without this the audit row stays open and the
+    // compliance report never learns when the admin stopped.
+    await this.impersonationLogs.closeForSession(row.sessionId, now);
   }
 
   /**
@@ -415,6 +421,10 @@ export class AuthService {
       { revokedAt: now, revokedReason: reason },
     );
     await this.refreshTokens.update({ userId, revokedAt: IsNull() }, { revokedAt: now });
+    // Any of those sessions may have been an admin impersonating this user —
+    // deactivation, erasure and password change all land here. The impersonated
+    // user is the session's owner, so they are the log's target.
+    await this.impersonationLogs.closeForTargetUser(userId, now);
   }
 
   async forgotPassword(email: string): Promise<void> {

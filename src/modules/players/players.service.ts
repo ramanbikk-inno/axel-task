@@ -87,23 +87,35 @@ export class PlayersService {
     return this.profiles.save(profile);
   }
 
+  /** The PII an erasure has to clear off a trainee profile (US-01.13). */
+  private static readonly ANONYMIZED_PROFILE = {
+    displayName: 'Deleted User',
+    school: null,
+    jerseyNumber: null,
+    gender: null,
+    birthDate: null,
+    // Third-party PII: an emergency contact is somebody else's name and
+    // phone number, which has no business surviving this account.
+    emergencyContact: null,
+    skillLevel: null,
+  } as const;
+
   /** GDPR anonymization of every profile owned by a user (US-01.13). */
   async anonymizeByOwner(ownerUserId: string, manager?: EntityManager): Promise<void> {
-    const repository = this.repo(manager);
-    await repository.update(
-      { ownerUserId },
-      {
-        displayName: 'Deleted User',
-        school: null,
-        jerseyNumber: null,
-        gender: null,
-        birthDate: null,
-        // Third-party PII: an emergency contact is somebody else's name and
-        // phone number, which has no business surviving this account.
-        emergencyContact: null,
-        skillLevel: null,
-      },
-    );
+    await this.repo(manager).update({ ownerUserId }, { ...PlayersService.ANONYMIZED_PROFILE });
+  }
+
+  /**
+   * GDPR anonymization of the profile a child *login* belongs to.
+   *
+   * A child's profile is owned by the parent, so erasing the child's own
+   * account never matched `anonymizeByOwner` and left the child's name, birth
+   * date, school and emergency contact fully intact — an erasure that erased
+   * nothing but the login. Deleting the parent still reaches these rows through
+   * the owner path; this covers the case where the child account is the target.
+   */
+  async anonymizeByChildUserId(childUserId: string, manager?: EntityManager): Promise<void> {
+    await this.repo(manager).update({ childUserId }, { ...PlayersService.ANONYMIZED_PROFILE });
   }
 
   /** The child login accounts attached to a user's profiles, if any. */

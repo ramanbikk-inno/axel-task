@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
 import { TokenService } from '../../src/modules/auth/token.service';
 import { User } from '../../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../../src/modules/users/entities/user.enums';
@@ -115,6 +116,13 @@ describe('AuthService (login + register)', () => {
         { provide: PasswordService, useValue: passwords },
         { provide: MailService, useValue: mail },
         { provide: UsersService, useValue: usersService },
+        {
+          provide: ImpersonationLogService,
+          useValue: {
+            closeForSession: jest.fn().mockResolvedValue(undefined),
+            closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         { provide: ClockService, useValue: new ClockService() },
       ],
     }).compile();
