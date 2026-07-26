@@ -67,7 +67,7 @@ export class ImpersonationController {
     return { message: 'Exited impersonation.' };
   }
 
-  /** US-01.07: "Audit report available: Impersonation History for compliance". */
+  /** The impersonation history report, for compliance. */
   @Get('impersonation/history')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard, RolesGuard)

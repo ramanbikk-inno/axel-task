@@ -1,21 +1,18 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * The columns Epic-01 section 8 calls for that the schema never grew. Schema
- * only — every column is nullable or defaulted, so nothing behaves differently
- * until the feature PRs that consume them land.
- *
- * Grouped into one migration because they are one unit of "the data model now
- * matches the spec", and splitting them would mean five migrations that each
- * leave the schema in a state no code targets.
+ * Columns the data model was missing. Schema only — every column is nullable or
+ * defaulted, so nothing behaves differently until the code consuming them lands.
+ * Grouped into one migration because splitting them would leave the schema in
+ * states no code targets.
  */
 export class Epic01SchemaCompletion1700001100000 implements MigrationInterface {
   name = 'Epic01SchemaCompletion1700001100000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // --- player_profiles: the child account link and the fields section 8 lists ---
+    // --- player_profiles: the child account link and the trainee fields ---
 
-    // US-01.06: a child profile may have its own login. Nullable because most
+    // A child profile may have its own login. Nullable because most
     // child profiles never get one, and UNIQUE because one user account cannot
     // be two children. SET NULL rather than CASCADE: deleting the login must
     // not take the training history with it.
@@ -31,7 +28,7 @@ export class Epic01SchemaCompletion1700001100000 implements MigrationInterface {
         WHERE "child_user_id" IS NOT NULL
     `);
     // An adult's own profile must never carry a child login. Without this the
-    // child-permission checks in US-01.06 could be turned on for a parent by
+    // child-permission checks could be turned on for a parent by
     // writing one column.
     await queryRunner.query(`
       ALTER TABLE "player_profiles"
@@ -39,12 +36,12 @@ export class Epic01SchemaCompletion1700001100000 implements MigrationInterface {
         CHECK ("child_user_id" IS NULL OR "is_child" = true)
     `);
 
-    // US-01.05: "Token approval setting is per-child", default OFF.
+    // Token approval is per child, default OFF.
     await queryRunner.query(`
       ALTER TABLE "player_profiles"
         ADD COLUMN "allow_child_token_spend_no_approval" boolean NOT NULL DEFAULT false
     `);
-    // Set by the trainer, not the player (section 8).
+    // Set by the trainer, not the player.
     await queryRunner.query(`ALTER TABLE "player_profiles" ADD COLUMN "skill_level" text`);
     // jsonb rather than three columns: the shape (name/phone/relationship) is
     // not fixed by the spec and is never queried on.
@@ -81,7 +78,7 @@ export class Epic01SchemaCompletion1700001100000 implements MigrationInterface {
 
     // --- audit_logs: attribution and a non-user target ---
 
-    // US-01.07 requires that actions taken *during* an impersonation are
+    // Actions taken *during* an impersonation have to be
     // attributable to the admin behind them. actor_user_id is the impersonated
     // user, which is the truth about who the request claimed to be but not
     // about who was at the keyboard.

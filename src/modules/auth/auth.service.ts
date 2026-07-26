@@ -55,14 +55,9 @@ export class AuthService {
   ) {}
 
   /**
-   * Section 9: "ALL players under 18 require parent-managed accounts (no
-   * independent accounts for minors)." A minor joins through a parent's
-   * `POST /players/children`, which is bounded 1-18 from the other side.
-   *
-   * The threshold is MIN_SELF_REGISTRATION_AGE (default 18) because Q-01.05 is
-   * still open on whether 16-18s may hold their own account; resolving it is a
-   * config change, not a code change. Shared by both registration paths, since
-   * a rule enforced on only one of them is not enforced.
+   * Minors cannot hold an account in their own name; they belong to a parent's
+   * account as a child profile. Threshold is MIN_SELF_REGISTRATION_AGE, default
+   * 18. Both registration paths must call this — a gate on one door is no gate.
    */
   assertOldEnoughToSelfRegister(birthDate: string): void {
     const born = parseCalendarDate(birthDate);
@@ -145,7 +140,7 @@ export class AuthService {
     const user = await this.usersService.findByEmailWithPassword(dto.email);
 
     if (!user || user.passwordHash === null || user.passwordHash === undefined) {
-      // Constant-time: verify against a real argon2id dummy hash so timing matches the found path.
+      // Verify against a real argon2id dummy hash so timing matches the found path.
       await this.passwords.verify(await this.getDummyHash(), dto.password);
       throw new UnauthorizedException({
         errorCode: ErrorCode.INVALID_CREDENTIALS,
@@ -186,13 +181,9 @@ export class AuthService {
       });
     }
 
-    // Login is the only moment we hold the plaintext, so it is the only chance
-    // to migrate a hash made under weaker argon2 parameters. Without this,
-    // raising ARGON_MEMORY_KIB only protects accounts created afterwards.
-    //
-    // Deliberately not setPasswordAndBumpVersion: the password did not change,
-    // only its cost parameters, so bumping tokenVersion would sign the user out
-    // of every other device for an upgrade they never asked for.
+    // Login is the only moment we hold the plaintext, so it is the only chance to
+    // rehash under stronger argon2 parameters. Not setPasswordAndBumpVersion:
+    // the password did not change, and bumping would sign the user out everywhere.
     if (this.passwords.needsRehash(user.passwordHash)) {
       await this.usersService.updatePasswordHash(user.id, await this.passwords.hash(dto.password));
     }
@@ -209,8 +200,8 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<{ message: string }> {
-    // Before the existence check, so the age rule cannot be probed for whether
-    // an address is already taken — both paths must look identical.
+    // Before the existence check, or the response tells the caller whether the
+    // address is already taken.
     this.assertOldEnoughToSelfRegister(dto.birthDate);
 
     const existing = await this.usersService.findByEmail(dto.email);
@@ -280,10 +271,7 @@ export class AuthService {
     await this.mail.sendWelcomeEmail(user.email, user.firstName ?? '');
   }
 
-  /**
-   * A token issued while an account was healthy must not become a way back in
-   * after a Super Admin deactivates or deletes it.
-   */
+  /** A token issued while the account was healthy must not survive its deactivation. */
   private assertAccountUsable(user: User): void {
     if (user.status === UserStatus.Deleted) {
       throw new ForbiddenException({
@@ -301,10 +289,9 @@ export class AuthService {
 
   async resendVerification(email: string): Promise<void> {
     const user = await this.usersService.findByEmail(email);
-    // Silent no-op rather than an error, to stay enumeration-safe. Deactivated
-    // and deleted accounts get no new token: redeeming one is pointless now
-    // that verification no longer reactivates, and it would mean mailing a
-    // `deleted_<id>@example.com` address.
+    // Silent no-op rather than an error, to stay enumeration-safe. Deactivated and
+    // deleted accounts get none: verification no longer reactivates, and an erased
+    // account's address is now `deleted_<id>@example.com`.
     if (!user || user.emailVerified || user.status !== UserStatus.Active) {
       return;
     }
@@ -361,7 +348,7 @@ export class AuthService {
       });
     }
 
-    // Hard session expiry (e.g. impersonation sessions are capped at 1 hour).
+    // Hard session expiry — impersonation sessions are capped at an hour.
     if (session.expiresAt && session.expiresAt.getTime() < this.clock.now().getTime()) {
       await this.sessions.update(
         { id: session.id },
@@ -448,16 +435,12 @@ export class AuthService {
     const now = this.clock.now();
     await this.refreshTokens.update({ id: row.id }, { revokedAt: now });
     await this.sessions.update({ id: row.sessionId }, { revokedAt: now, revokedReason: 'logout' });
-    // Logging out of an impersonation session ends it just as surely as
-    // /impersonation/exit does; without this the audit row stays open and the
-    // compliance report never learns when the admin stopped.
+    // Logging out ends an impersonation as surely as /impersonation/exit does;
+    // without this the audit row stays open forever.
     await this.impersonationLogs.closeForSession(row.sessionId, now);
   }
 
-  /**
-   * Revoke every active session and refresh token for a user (e.g. when a
-   * Super Admin deactivates the account). Historical rows are preserved.
-   */
+  /** Revoke every active session and refresh token. Historical rows are kept. */
   async revokeAllUserSessions(userId: string, reason: string): Promise<void> {
     const now = this.clock.now();
     await this.sessions.update(
@@ -465,9 +448,8 @@ export class AuthService {
       { revokedAt: now, revokedReason: reason },
     );
     await this.refreshTokens.update({ userId, revokedAt: IsNull() }, { revokedAt: now });
-    // Any of those sessions may have been an admin impersonating this user —
-    // deactivation, erasure and password change all land here. The impersonated
-    // user is the session's owner, so they are the log's target.
+    // Any of those sessions may have been an admin impersonating this user. The
+    // impersonated user owns the session, so they are the log's target.
     await this.impersonationLogs.closeForTargetUser(userId, now);
   }
 
@@ -523,16 +505,10 @@ export class AuthService {
   }
 
   /**
-   * Note the `principal`, not just a user id: this is one of the few endpoints
-   * that must refuse to run inside an impersonation session.
-   *
-   * It ends by revoking every session and minting a *fresh, non-impersonated*
-   * one. Reached while impersonating, that converts a one-hour supervised
-   * session into an ordinary durable login as the target, with no
-   * `impersonated_by` on the new row and nothing in the impersonation log to
-   * show for it. The current-password check is not the safeguard people assume:
-   * on a support call the user often reads their own password out, and the
-   * admin may have just set it themselves.
+   * Takes the principal because this must refuse to run inside an impersonation:
+   * it mints a fresh non-impersonated session, which would silently upgrade a
+   * capped supervised session into a durable login as the target. The
+   * current-password check is not a safeguard — the admin may have just set it.
    */
   async changePassword(
     principal: Principal,
@@ -566,11 +542,9 @@ export class AuthService {
     const passwordHash = await this.passwords.hash(input.newPassword);
     await this.usersService.setPasswordAndBumpVersion(userId, passwordHash);
 
-    // Changing your password is the standard remediation after a device is
-    // lost or a session is stolen, and it did nothing to existing sessions —
-    // the thief stayed logged in indefinitely via refresh rotation. Drop every
-    // session and hand the caller a fresh pair so they are not signed out by
-    // their own password change.
+    // A password change is the standard remediation for a stolen session, so it
+    // has to drop every existing one. The caller gets a fresh pair so they are
+    // not signed out by their own change.
     await this.revokeAllUserSessions(userId, 'password-change');
 
     // Re-read so the new tokens carry the bumped tokenVersion.
@@ -588,10 +562,8 @@ export class AuthService {
   }
 
   /**
-   * Create an unverified PlayerParent account and its email-verification token
-   * inside a caller-provided transaction, returning the plaintext token so the
-   * caller can send the verification email after the transaction commits. Used
-   * by the ShareLink join flow (US-01.02).
+   * Create an unverified PlayerParent account inside the caller's transaction.
+   * Returns the plaintext token so the email is sent only after it commits.
    */
   async createUnverifiedPlayer(
     input: {
@@ -607,10 +579,7 @@ export class AuthService {
   }
 
   /**
-   * Create an unverified account with the given role and its email-verification
-   * token inside a caller transaction, returning the plaintext token so the
-   * caller can send the email after commit. Used by the ShareLink join flow
-   * (PlayerParent, US-01.02) and the coach-invite flow (Coach, US-01.08).
+   * As above, for any role. Used by the ShareLink join and coach-invite flows.
    */
   async createUnverifiedAccount(
     input: {

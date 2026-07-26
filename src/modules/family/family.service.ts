@@ -140,17 +140,11 @@ export class FamilyService {
   }
 
   /**
-   * Amend a child profile (US-01.03 / US-01.11).
+   * Amend a child profile — every creation field, plus `emergency_contact`,
+   * which no request DTO previously carried.
    *
-   * Every field CreateChildDto accepts was write-once: a parent who mistyped a
-   * name, or whose child changed school, had no remedy short of a database
-   * edit. This is also the only way `emergency_contact` becomes reachable —
-   * the column existed but no request DTO carried it, so the one person who
-   * needs it in an emergency could never see it.
-   *
-   * Parent-only, by the same NotAChildGuard as the rest of family management:
-   * US-01.06 lets a child "update basic profile info", but not through the
-   * route that can also move their birth date.
+   * Parent-only: a child may edit basic profile info, but not through a route
+   * that can also move their birth date.
    */
   async updateChild(
     actor: Principal,
@@ -221,8 +215,7 @@ export class FamilyService {
   /**
    * Context-switcher data: the parent's own context + each child's contexts.
    *
-   * A child sees a flat list of their own trainers with no "Me" section, which
-   * is exactly the shape US-01.06 documents for the child selector.
+   * A child sees a flat list of their own trainers, with no "Me" section.
    */
   async getContext(principal: Principal): Promise<FamilyContextView> {
     const views = await this.listFamily(principal);
@@ -347,13 +340,9 @@ export class FamilyService {
   }
 
   /**
-   * Give a child profile its own login (US-01.06).
-   *
-   * The account is a PlayerParent like any other player; what makes it a child
-   * account is `player_profiles.child_user_id` pointing at it, which the
-   * session validator reads on every request. The database enforces both rules
-   * that matter: the link is unique, and a CHECK refuses it on a profile that
-   * is not a child.
+   * Give a child profile its own login. The account is an ordinary PlayerParent;
+   * what makes it a child is `player_profiles.child_user_id` pointing at it. The
+   * link is unique and a CHECK refuses it on a profile that is not a child.
    */
   async createChildLogin(
     actor: Principal,
@@ -519,13 +508,9 @@ export class FamilyService {
   }
 
   /**
-   * Enforce the 1-18 rule and return the normalised YYYY-MM-DD date.
-   *
-   * Fails closed on an unparseable value. The previous version returned NaN for
-   * anything Date could not read, and `NaN < 1` and `NaN > 18` are both false,
-   * so the range check waved it through — an adult could be stored as a child.
-   * The DTO now rejects those inputs too; this is the second line of defence,
-   * because the service is also reachable from paths that do not share the DTO.
+   * Enforce the 1-18 rule and return the normalised YYYY-MM-DD date. Fails closed
+   * on an unparseable value: NaN compares false against both bounds, so a bad
+   * date used to sail through. Second line of defence behind the DTO.
    */
   private requireChildAge(rawBirthDate: string): string {
     const born = parseCalendarDate(rawBirthDate);

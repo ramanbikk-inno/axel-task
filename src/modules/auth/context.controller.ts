@@ -17,7 +17,7 @@ import { Principal } from './principal';
 import { TokenService } from './token.service';
 
 /**
- * Multi-trainer players see separated views (spec section 9): the client picks
+ * Multi-trainer players see separated views: the client picks
  * a context, and everything downstream is scoped to it. Restricted to
  * PlayerParent because that is the only role whose tenancy is a choice —
  * a Coach's comes from their employer and a Trainer's from their own org.

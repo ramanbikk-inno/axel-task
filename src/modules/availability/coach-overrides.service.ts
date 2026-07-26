@@ -40,11 +40,9 @@ function toView(row: CoachAvailabilityOverride): CoachOverrideView {
 }
 
 /**
- * US-01.10: a trainer may schedule a coach outside their stated availability,
- * but the reason is mandatory and the decision is logged. Q-01.06 — the coach
- * IS notified — applies to rows that actually overrode something: when the
- * server recomputes no conflict, nothing was overridden and an email claiming
- * otherwise would be false. `hadConflict` records which case each row was.
+ * A trainer may schedule a coach outside their stated availability, but the
+ * reason is mandatory and the decision is logged. The coach is only notified
+ * when something was actually overridden — `hadConflict` records which.
  */
 @Injectable()
 export class CoachOverridesService {
@@ -118,11 +116,7 @@ export class CoachOverridesService {
     return toView(saved);
   }
 
-  /**
-   * The override log is only useful if someone can read it. A trainer sees
-   * every override their organisation recorded; a coach sees the ones filed
-   * against them, which is the disclosure half of Q-01.06.
-   */
+  /** A trainer sees their organisation's overrides; a coach sees their own. */
   async listForTrainer(
     trainerUserId: string,
     query: ListCoachOverridesQuery,

@@ -8,7 +8,7 @@ import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
-describe('Parent manages child-trainer associations (e2e, US-01.04)', () => {
+describe('Parent manages child-trainer associations (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 

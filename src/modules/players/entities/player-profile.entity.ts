@@ -25,8 +25,7 @@ export interface EmergencyContact {
 /**
  * A trainee profile owned by a user account. The account holder has one "self"
  * profile (isChild=false); parents additionally own one profile per child
- * (isChild=true) — see US-01.03. Associations to trainers live in
- * trainer_player_associations.
+ * (isChild=true). Associations to trainers live in trainer_player_associations.
  */
 @Entity({ name: 'player_profiles' })
 export class PlayerProfile {
@@ -60,7 +59,7 @@ export class PlayerProfile {
   jerseyNumber!: string | null;
 
   /**
-   * The child's own login account, when one has been issued (US-01.06). Null
+   * The child's own login account, when one has been issued. Null
    * for every adult profile and for children who only ever appear through
    * their parent. A database CHECK keeps it null unless isChild is true.
    */
@@ -71,7 +70,7 @@ export class PlayerProfile {
   @JoinColumn({ name: 'child_user_id' })
   childUser!: User | null;
 
-  /** US-01.05, per child, default OFF: tokens still need a parent's yes. */
+  /** Per child, default OFF: token spending still needs a parent's approval. */
   @Column({ name: 'allow_child_token_spend_no_approval', type: 'boolean', default: false })
   allowChildTokenSpendNoApproval!: boolean;
 

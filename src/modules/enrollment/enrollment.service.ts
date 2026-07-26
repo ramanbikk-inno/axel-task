@@ -96,12 +96,12 @@ export class EnrollmentService {
   }
 
   /**
-   * Generate a static player ShareLink for the calling trainer (US-01.02).
+   * Generate a static player ShareLink for the calling trainer.
    *
    * Player links only. Coach invites are single-use, 7-day and bound to a
    * target email, all of which this endpoint would leave unset — minting one
    * here produced a "coach invite" that never expires and never runs out.
-   * They belong to POST /coaches/invitations (US-01.08).
+   * They belong to POST /coaches/invitations.
    */
   async createTrainerShareLink(principal: Principal): Promise<ShareLink> {
     const trainerProfile = await this.trainersService.findByUserId(principal.userId);
@@ -227,15 +227,9 @@ export class EnrollmentService {
   }
 
   /**
-   * Existing logged-in player joins another trainer via a ShareLink — no
-   * duplicate account, just a new association (multi-trainer support).
-   */
-  /**
-   * The "Who will train with [New Trainer]?" prompt from US-01.02.
-   *
-   * Lists the caller's own profiles — themselves and each child — with the
-   * ones already connected flagged, so the client can pre-tick and disable
-   * them rather than offering a choice that would be a no-op.
+   * The "Who will train with [New Trainer]?" prompt: the caller's own profiles
+   * and each child's, with the already-connected ones flagged so the client can
+   * pre-tick and disable them.
    */
   async eligibleMembers(code: string, principal: Principal): Promise<JoinMembersPromptView> {
     const link = await this.shareLinks.requireUsable(code, ShareLinkType.PlayerStatic);
@@ -271,9 +265,8 @@ export class EnrollmentService {
    * Existing logged-in player joins another trainer via a ShareLink — no
    * duplicate account, just new associations (multi-trainer support).
    *
-   * With `playerProfileIds`, only those family members are connected, which is
-   * what US-01.02 asks for. Without it, the caller's own profile joins, which
-   * is what this endpoint did before and what a player with no children still
+   * With `playerProfileIds`, only those family members are connected. Without it
+   * the caller's own profile joins, which is what a player with no children
    * means by "join".
    */
   async joinAsExistingPlayer(
@@ -401,13 +394,9 @@ export class EnrollmentService {
   }
 
   /**
-   * US-01.06: a child clicking a trainer's ShareLink is blocked, and the parent
-   * is emailed the link so they can complete the registration.
-   *
-   * Deliberately best-effort. The block is the security control and must hold
-   * whether or not the mail provider is reachable; swallowing the failure here
-   * keeps a provider outage from turning a 403 into a 500 that looks, to the
-   * child, like the link might work on a retry.
+   * A child clicking a trainer's ShareLink is blocked and the parent is emailed
+   * the link instead. Best-effort: the block is the control, so a mail outage
+   * must not turn the 403 into a 500 that looks worth retrying.
    */
   private async notifyParentOfChildJoinAttempt(principal: Principal, code: string): Promise<void> {
     try {
@@ -438,7 +427,7 @@ export class EnrollmentService {
   }
 
   /**
-   * The trainer's roster (US-01.02: "Player profile created in trainer's CRM").
+   * The trainer's roster: every player profile connected to them.
    *
    * Scoped to the caller's own organisation, resolved from their user id — a
    * trainer cannot pass an org id and read someone else's roster, because
@@ -539,7 +528,7 @@ export class EnrollmentService {
     return { trainerProfileId: trainer.id, profile };
   }
 
-  /** Record the trainer's assessment of a player's skill level (section 8). */
+  /** Record the trainer's assessment of a player's skill level. */
   async setRosterSkillLevel(
     principal: Principal,
     playerProfileId: string,
@@ -570,13 +559,12 @@ export class EnrollmentService {
   }
 
   /**
-   * Remove a player from the trainer's own roster (section 3, "Manage own
-   * organization users").
+   * Remove a player from the trainer's own roster.
    *
    * Deactivated rather than deleted, matching the family-side removal in
-   * US-01.04: history is preserved and the pairing can be re-established. Until
-   * this existed only the family could sever the link, so a trainer had no way
-   * to off-board a player who had left.
+   * mirroring the family-side removal: history is preserved and the pairing can
+   * be re-established. Until this existed only the family could sever the link,
+   * so a trainer had no way to off-board a player who had left.
    */
   async removeFromRoster(principal: Principal, playerProfileId: string): Promise<void> {
     const { trainerProfileId, profile } = await this.requireRosterMember(

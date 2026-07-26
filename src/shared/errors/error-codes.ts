@@ -38,7 +38,7 @@ export enum ErrorCode {
   DUPLICATE_CHILD = 'DUPLICATE_CHILD',
   NOT_A_CHILD_PROFILE = 'NOT_A_CHILD_PROFILE',
   CHILD_LOGIN_EXISTS = 'CHILD_LOGIN_EXISTS',
-  /** US-01.06: a child cannot add trainers; the parent must complete it. */
+  /** A child cannot add trainers; the parent must complete it. */
   CHILD_CANNOT_ADD_TRAINER = 'CHILD_CANNOT_ADD_TRAINER',
   /** A family-management action only the parent account may take. */
   CHILD_ACTION_NOT_ALLOWED = 'CHILD_ACTION_NOT_ALLOWED',

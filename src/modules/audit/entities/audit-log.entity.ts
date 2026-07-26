@@ -2,8 +2,8 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
  * Append-only administrative audit trail. Records sensitive operations such as
- * trainer creation (US-01.01), user deactivation/reactivation (US-01.12) and
- * user deletion (US-01.13). Rows are never updated or removed so history is
+ * trainer creation, user deactivation/reactivation and
+ * user deletion. Rows are never updated or removed so history is
  * preserved for compliance even after the referenced users are anonymized.
  */
 @Entity({ name: 'audit_logs' })
@@ -25,7 +25,7 @@ export class AuditLog {
 
   /**
    * The admin who was really at the keyboard, when the action was taken inside
-   * an impersonation session (US-01.07). `actorUserId` stays the impersonated
+   * an impersonation session. `actorUserId` stays the impersonated
    * user — that is the truth about who the request claimed to be — so both
    * questions can be answered from one row.
    */

@@ -59,7 +59,7 @@ export class PlayersService {
     return this.profiles.find({ where: { id: In(ids) } });
   }
 
-  /** Update the account holder's own (self) profile fields (US-01.11). */
+  /** Update the account holder's own (self) profile fields. */
   async updateSelfProfile(
     ownerUserId: string,
     input: {
@@ -89,7 +89,7 @@ export class PlayersService {
   }
 
   /**
-   * Apply a partial update to a child profile (US-01.03).
+   * Apply a partial update to a child profile.
    *
    * Only keys the caller actually supplied are written. `school`,
    * `jerseyNumber` and `emergencyContact` accept an explicit null, which is how
@@ -135,7 +135,7 @@ export class PlayersService {
     return (await repository.findOne({ where: { id } })) as PlayerProfile;
   }
 
-  /** Set the skill level a trainer assesses for a player (section 8). */
+  /** Set the skill level a trainer assesses for a player. */
   async setSkillLevel(
     id: string,
     skillLevel: string | null,
@@ -146,7 +146,7 @@ export class PlayersService {
     return (await repository.findOne({ where: { id } })) as PlayerProfile;
   }
 
-  /** The PII an erasure has to clear off a trainee profile (US-01.13). */
+  /** The PII an erasure has to clear off a trainee profile. */
   private static readonly ANONYMIZED_PROFILE = {
     displayName: 'Deleted User',
     school: null,
@@ -159,19 +159,15 @@ export class PlayersService {
     skillLevel: null,
   } as const;
 
-  /** GDPR anonymization of every profile owned by a user (US-01.13). */
+  /** GDPR anonymization of every profile owned by a user. */
   async anonymizeByOwner(ownerUserId: string, manager?: EntityManager): Promise<void> {
     await this.repo(manager).update({ ownerUserId }, { ...PlayersService.ANONYMIZED_PROFILE });
   }
 
   /**
-   * GDPR anonymization of the profile a child *login* belongs to.
-   *
-   * A child's profile is owned by the parent, so erasing the child's own
-   * account never matched `anonymizeByOwner` and left the child's name, birth
-   * date, school and emergency contact fully intact — an erasure that erased
-   * nothing but the login. Deleting the parent still reaches these rows through
-   * the owner path; this covers the case where the child account is the target.
+   * Anonymise the profile a child *login* belongs to. It is owned by the parent,
+   * so `anonymizeByOwner` never matches it when the child's own account is the
+   * one being erased.
    */
   async anonymizeByChildUserId(childUserId: string, manager?: EntityManager): Promise<void> {
     await this.repo(manager).update({ childUserId }, { ...PlayersService.ANONYMIZED_PROFILE });

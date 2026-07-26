@@ -10,14 +10,14 @@ import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
 
 /**
- * US-01.06, child login with constraints.
+ * Child login and its constraints.
  *
  * The case worth being careful about is that a child account carries the same
  * PlayerParent role as its parent. Every `@Roles(Role.PlayerParent)` route
  * admits it by construction, so what a child can actually do is decided by the
  * child branch in AbilityFactory and by NotAChildGuard — not by the role.
  */
-describe('Child login (e2e, US-01.06)', () => {
+describe('Child login (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 
@@ -207,7 +207,7 @@ describe('Child login (e2e, US-01.06)', () => {
         .set(auth(s.childToken))
         .expect(200);
 
-      // US-01.06: "Simple trainer list (no 'Me' section like parents have)".
+      // A child gets a flat trainer list, with no "Me" section.
       expect(res.body.self).toBeNull();
       expect(res.body.children).toHaveLength(1);
       expect(res.body.children[0].id).toBe(s.childProfileId);

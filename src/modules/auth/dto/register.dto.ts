@@ -43,10 +43,7 @@ export class RegisterDto {
   @IsPhoneNumberLoose()
   phone?: string;
 
-  /**
-   * Required, not optional: section 9 forbids an independent account for a
-   * minor, and that cannot be enforced against a field the caller may omit.
-   */
+  /** Required: the minimum-age rule cannot be enforced on a field callers may omit. */
   @ApiProperty({ example: '1994-03-22', description: 'Date of birth (YYYY-MM-DD)' })
   @IsCalendarDate()
   birthDate!: string;

@@ -228,7 +228,7 @@ describe('AbilityFactory', () => {
   });
 
   /**
-   * US-01.06. The trap here is that a child shares the PlayerParent role, so
+   * The trap here is that a child shares the PlayerParent role, so
    * without a dedicated branch they inherit rules scoped by `ownerUserId` —
    * which for a child login matches nothing, since their profile belongs to
    * the parent. They would see none of their own data while still holding the

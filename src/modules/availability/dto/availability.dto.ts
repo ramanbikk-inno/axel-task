@@ -158,7 +158,7 @@ export class RecordCoachOverrideDto {
   @Matches(HHMM, { message: 'endTime must be HH:MM (24h)' })
   endTime!: string;
 
-  @ApiProperty({ minLength: 5, maxLength: 1000, description: 'Required (US-01.10)' })
+  @ApiProperty({ minLength: 5, maxLength: 1000, description: 'Required' })
   // Trimmed first so a whitespace-only reason fails validation here rather
   // than hitting the CHK_coach_availability_overrides_reason constraint.
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))

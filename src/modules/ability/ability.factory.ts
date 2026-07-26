@@ -40,17 +40,9 @@ type Cannot = AbilityBuilder<AppAbility>['cannot'];
 @Injectable()
 export class AbilityFactory {
   /**
-   * US-01.06. A child account shares the PlayerParent role but not its
-   * permissions, and the difference is not cosmetic: the parent rules are
-   * scoped by `ownerUserId`, which for a child login matches *nothing* — their
-   * profile is owned by the parent. Falling through to them would leave a
-   * child unable to see their own data while still holding the parent's
-   * unconditioned `Create PlayerProfile` and association rights, which is the
-   * exact combination US-01.06 forbids.
-   *
-   * Everything here keys on `childPlayerProfileId`: the one profile this login
-   * *is*. There is no rule that can reach a sibling, because no rule mentions
-   * the parent's other profiles at all.
+   * A child shares the PlayerParent role but not its permissions: the parent
+   * rules key on `ownerUserId`, which matches nothing for a child login. Every
+   * rule here keys on `childPlayerProfileId`, so none can reach a sibling.
    */
   private applyChildRules(principal: Principal, can: Can, cannot: Cannot): void {
     const ownProfile: MongoQuery = { id: principal.childPlayerProfileId } as MongoQuery;
@@ -116,10 +108,9 @@ export class AbilityFactory {
       }
 
       case Role.Coach: {
-        // Spec section 6: a Coach works for exactly one trainer, is view-only on
-        // most features, and may edit their own profile and availability.
-        // A Coach's org is their employer's, resolved per request from
-        // coach_profiles.trainer_profile_id.
+        // A Coach works for exactly one trainer, is view-only on most features,
+        // and may edit their own profile and availability. Their org comes from
+        // coach_profiles.trainer_profile_id, resolved per request.
         const ownProfile: MongoQuery = { userId: principal.userId } as MongoQuery;
         const orgScope: MongoQuery = { trainerOrgId: principal.trainerOrgId } as MongoQuery;
 
@@ -150,7 +141,7 @@ export class AbilityFactory {
         }
 
         // Self-service over the profiles this account owns — the parent's own
-        // profile and each child's (US-01.03 / US-01.04).
+        // profile and each child's.
         const owned: MongoQuery = { ownerUserId: principal.userId } as MongoQuery;
 
         can(Action.Read, 'PlayerProfile', owned);

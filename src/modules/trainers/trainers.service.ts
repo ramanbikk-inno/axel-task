@@ -65,7 +65,7 @@ export class TrainersService {
     return this.trainersRepository.find({ where: { id: In(ids) } });
   }
 
-  /** Update the trainer's own organization fields (US-01.11 role-specific). */
+  /** Update the trainer's own organization fields (role-specific). */
   async updateProfileByUserId(
     userId: string,
     input: {
@@ -94,7 +94,7 @@ export class TrainersService {
     return this.trainersRepository.save(profile);
   }
 
-  /** Set the trainer's primary brand color (US-01.14). */
+  /** Set the trainer's primary brand color. */
   async setPrimaryColor(actor: Principal, primaryColor: string | null): Promise<TrainerProfile> {
     const profile = await this.requireOwnProfile(actor.userId);
     profile.primaryColor = primaryColor;
@@ -108,7 +108,7 @@ export class TrainersService {
     return saved;
   }
 
-  /** Validate + store an uploaded logo, returning the updated profile (US-01.14). */
+  /** Validate + store an uploaded logo, returning the updated profile. */
   async setLogoFromUpload(
     actor: Principal,
     input: { fileName: string; mimeType: string; dataBase64: string },
@@ -147,7 +147,7 @@ export class TrainersService {
     return saved;
   }
 
-  /** Remove the logo and the stored asset behind it (US-01.14). */
+  /** Remove the logo and the stored asset behind it. */
   async removeLogo(actor: Principal): Promise<TrainerProfile> {
     const profile = await this.requireOwnProfile(actor.userId);
     if (profile.logoUrl === null && profile.logoPublicId === null) {

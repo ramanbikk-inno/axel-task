@@ -23,7 +23,7 @@ export class AuthSession {
 
   /**
    * When set, this session is a Super Admin impersonation session and this
-   * column holds the impersonating admin's user id (US-01.07).
+   * column holds the impersonating admin's user id.
    */
   @Column({ name: 'impersonated_by', type: 'uuid', nullable: true })
   impersonatedBy!: string | null;

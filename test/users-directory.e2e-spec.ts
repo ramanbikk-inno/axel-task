@@ -6,7 +6,7 @@ import { AuditLog } from '../src/modules/audit/entities/audit-log.entity';
 import { User } from '../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
 
-describe('Users directory + creation audit log (e2e, US-01.01)', () => {
+describe('Users directory + creation audit log (e2e)', () => {
   let ctx: E2EContext;
   let app: INestApplication;
 
