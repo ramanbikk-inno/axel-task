@@ -112,6 +112,102 @@ describe('PlayersService.updateChildProfile', () => {
   });
 });
 
+interface SelfStub {
+  service: PlayersService;
+  findOne: jest.Mock;
+  save: jest.Mock;
+  row: PlayerProfile;
+}
+
+function buildSelf(over: Partial<PlayerProfile> = {}, found = true): SelfStub {
+  const row = {
+    id: 'self-1',
+    ownerUserId: 'user-1',
+    isChild: false,
+    displayName: 'Sam Smith',
+    birthDate: '1994-03-22',
+    gender: 'male',
+    school: 'Riverside',
+    jerseyNumber: '7',
+    ...over,
+  } as PlayerProfile;
+  const findOne = jest.fn().mockResolvedValue(found ? row : null);
+  const save = jest.fn().mockImplementation((p: PlayerProfile) => Promise.resolve(p));
+  const profiles = { findOne, save } as unknown as Repository<PlayerProfile>;
+  return { service: new PlayersService(profiles), findOne, save, row };
+}
+
+/**
+ * The account holder's own profile. Same three-state partial-update rule as the
+ * child path, plus one thing that only matters here: the lookup is scoped to
+ * `isChild: false`, which is what keeps a child's row out of reach.
+ */
+describe('PlayersService.updateSelfProfile', () => {
+  it('resolves only the non-child profile for the owner', async () => {
+    const { service, findOne } = buildSelf();
+
+    await service.updateSelfProfile('user-1', { displayName: 'Sam' });
+
+    expect(findOne).toHaveBeenCalledWith({ where: { ownerUserId: 'user-1', isChild: false } });
+  });
+
+  it('writes a supplied birth date', async () => {
+    const { service, save } = buildSelf();
+
+    await service.updateSelfProfile('user-1', { birthDate: '1990-06-15' });
+
+    expect(save.mock.calls[0][0]).toMatchObject({ birthDate: '1990-06-15' });
+  });
+
+  it('leaves the birth date alone when the caller does not mention it', async () => {
+    const { service, save } = buildSelf();
+
+    await service.updateSelfProfile('user-1', { school: 'Oakwood' });
+
+    expect(save.mock.calls[0][0]).toMatchObject({
+      birthDate: '1994-03-22',
+      school: 'Oakwood',
+    });
+  });
+
+  it('clears the nullable fields on an explicit null', async () => {
+    const { service, save } = buildSelf();
+
+    await service.updateSelfProfile('user-1', { school: null, jerseyNumber: null, gender: null });
+
+    expect(save.mock.calls[0][0]).toMatchObject({
+      school: null,
+      jerseyNumber: null,
+      gender: null,
+      // Not swept up by the clears beside it.
+      birthDate: '1994-03-22',
+    });
+  });
+
+  it('returns null rather than creating anything when there is no self profile', async () => {
+    const { service, save } = buildSelf({}, false);
+
+    // ProfileService relies on this to decide whether to create one.
+    const result = await service.updateSelfProfile('user-1', { birthDate: '1990-06-15' });
+
+    expect(result).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('saves once, with the whole row', async () => {
+    const { service, save } = buildSelf();
+
+    await service.updateSelfProfile('user-1', { displayName: 'Sam', birthDate: '1990-06-15' });
+
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0]).toMatchObject({
+      id: 'self-1',
+      displayName: 'Sam',
+      birthDate: '1990-06-15',
+    });
+  });
+});
+
 describe('PlayersService.setSkillLevel', () => {
   it('records the trainer’s assessment', async () => {
     const { service, update } = build();
