@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-27
+
+### Added
+
+- Expire idle sessions at refresh via configurable `SESSION_IDLE_TIMEOUT` (default 24h) (cc4eb4c)
+- Let a parent set a child profile's photo (cc4eb4c)
+- Let Super Admin edit trainer/coach/player role-specific profile fields (cc4eb4c)
+
+### Fixed
+
+- Keep the birth date registration collects; add a minimum self-registration age gate and close four defects it exposed (733a418)
+
 ## [0.1.0] - 2026-07-26
 
 First tagged release. Covers Epic-01 (User Management & Authentication).
