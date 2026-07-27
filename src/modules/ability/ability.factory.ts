@@ -57,9 +57,7 @@ export class AbilityFactory {
     // read-only: the child sees their own contexts and cannot change them.
     can(Action.Read, 'TrainerPlayerAssociation', ownAssociations);
     can(Action.Read, 'Branding');
-    // Availability is unconditioned for the same reason as the parent branch —
-    // availability_slots stores playerProfileId, and the owning check lives in
-    // AvailabilityService, which for a child resolves to their one profile.
+    // Unconditioned; AvailabilityService.requireAccessibleProfile does the narrowing.
     can(Action.Manage, 'Availability');
 
     // "Add new trainers (ShareLink registration blocked)" and "Change trainer

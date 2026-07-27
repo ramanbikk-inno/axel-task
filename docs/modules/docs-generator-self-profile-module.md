@@ -70,6 +70,7 @@ Updates the account holder's own trainee profile. Creates one if the account pre
 | `school` | yes | |
 | `jerseyNumber` | yes | |
 | `gender` | yes | |
+| `emergencyContact` | yes | An adult who trains needs one on file as much as a child does |
 
 #### Responses
 
@@ -83,9 +84,27 @@ Updates the account holder's own trainee profile. Creates one if the account pre
 
 Supplying `birthDate` re-runs the same floor as registration. Without that, the age rule would hold only at signup and one PATCH would undo it.
 
+### `PATCH /profile/me/child`
+
+The child counterpart of the route above. Writes only `school` and `jerseyNumber`, on the profile named by `principal.childPlayerProfileId` — never on anything the caller supplied, so a child cannot reach a sibling.
+
+**Guards:** `JwtAuthGuard`, `RolesGuard` + `@Roles(Role.PlayerParent)`. No `NotAChildGuard`; the service refuses a non-child instead.
+
+Deliberately a separate path and DTO rather than a branch inside `me/player`. That route can create a profile and move a birth date, and neither may ever happen on a child's behalf — so the child path is one where those fields simply do not exist, and sending one is a `422` rather than a silently ignored key.
+
+| Status | Condition |
+| --- | --- |
+| `200` | Updated profile |
+| `403` `NOT_A_CHILD_PROFILE` | Caller is not a child login |
+| `422` `VALIDATION_ERROR` | Any field outside `school`/`jerseyNumber` — `forbidNonWhitelisted` |
+
 ### `GET /profile/me`
 
-Returns `player.birthDate` alongside the rest of the self profile. `player` is `null` for accounts with no self profile.
+Returns `player.birthDate` alongside the rest of the self profile. `player` is `null` only for accounts with no trainee profile at all.
+
+For a child login `player` is the profile their parent owns, resolved via `child_user_id`, with `isChild: true`. Keying the lookup solely on `ownerUserId` reported a child as having no profile, which reads as "no data" rather than "your data".
+
+`photoUrl` at the top level is the person's photo, whichever row holds it: `users.photo_url` for an account holder, `player_profiles.photo_url` for a child. A caller does not have to know which of the two they are.
 
 ### Why a bad date is sometimes 422 and sometimes 400
 
@@ -116,16 +135,31 @@ Applied to: `UpdatePlayerProfileDto.displayName`/`birthDate`, `UpdateChildDto.di
 
 A child login is a `User` with `Role.PlayerParent` and `isChild` set on the resolved `Principal`. The role is shared with real parents, so **`@Roles(Role.PlayerParent)` admits a child by construction** — role checks alone are never sufficient to exclude one.
 
-A child has no self profile. Theirs is the child row their parent owns, edited through `/players/children/:id`. So a route treating "no self profile" as "create one" will mint a *second*, non-child profile owned by the child user — and because that profile now carries a birth date, the minimum-age floor forces the new row to assert the child is an adult. The result is two contradictory records for one person, with `findSelfProfile` resolving to the adult one.
+A child has no *self* profile. Theirs is the child row their parent owns, reached through `child_user_id`. So a route treating "no self profile" as "create one" will mint a *second*, non-child profile owned by the child user — and because that profile now carries a birth date, the minimum-age floor forces the new row to assert the child is an adult. The result is two contradictory records for one person, with `findSelfProfile` resolving to the adult one.
 
 `PATCH /profile/me/player` is closed in **two independent places**, each sufficient on its own:
 
 1. `NotAChildGuard` on the route, matching every family-management endpoint.
 2. An `isChild` check in `ProfileService.updatePlayer`, because the create fallback is the actual hazard and a route decorator is easy to drop in a later refactor.
 
-What a child login may still do, each covered by a test: read its own account (`GET /profile/me`), edit its own name and phone (`PATCH /profile/me`), and see its own trainer contexts and none of the parent's. It is refused `PATCH /profile/me/trainer`.
+### What a child login *can* do
 
-Routes carrying `NotAChildGuard`: all eight family-management endpoints, `POST /join/:code`, and `PATCH /profile/me/player`.
+`AbilityFactory` grants a child `Read`/`Update PlayerProfile` on their own row and `Manage Availability`. Those grants originally reached nothing: every service resolved a profile by `ownerUserId` — their *parent's* id — and every writing route sat behind `NotAChildGuard`. The rules and the routes now agree, and each pairing is covered by `test/child-self-service.e2e-spec.ts`.
+
+| Capability | Route | How the target is resolved |
+| --- | --- | --- |
+| Read own account and trainee profile | `GET /profile/me` | `findSelfProfile` ?? `findByChildUserId` |
+| Edit own name and phone | `PATCH /profile/me` | `principal.userId` |
+| Edit own school and jersey number | `PATCH /profile/me/child` | `principal.childPlayerProfileId` |
+| Set and clear own photo | `POST`/`DELETE /profile/me/photo` | `principal.childPlayerProfileId` → the **profile** row |
+| Set and read own Best Times | `PUT`/`GET /players/:id/availability` | `AvailabilityService.requireAccessibleProfile` |
+| See own trainer contexts, not the parent's | `GET /auth/context`, `GET /players` | explicit `isChild` branch |
+
+It is still refused `PATCH /profile/me/player`, `PATCH /profile/me/trainer`, and everything behind `NotAChildGuard`.
+
+A child's photo goes to `player_profiles.photo_url`, not `users.photo_url`: that is the column the family view, the context selector and the trainer's roster read, so writing the account row left the upload invisible to everyone but the child.
+
+Routes carrying `NotAChildGuard`: all eleven family-management endpoints, `GET /join/:code/members`, and `PATCH /profile/me/player`. `POST /join/:code` checks `isChild` in the service instead, because a child clicking a ShareLink must also email their parent (US-01.06) rather than simply being refused.
 
 ## Age computation
 
@@ -150,6 +184,7 @@ It does not normalise input; that is the DTO's job. A display name of `' '` pass
 | --- | --- | --- |
 | `test/self-profile-birthdate.e2e-spec.ts` | 25 | Persistence, read-back, ShareLink parity, roster propagation, PATCH correction, the floor on PATCH, malformed dates, rollback |
 | `test/child-profile-boundaries.e2e-spec.ts` | 9 | What a child may and may not do on these routes |
+| `test/child-self-service.e2e-spec.ts` | 14 | What a child *can* do for itself: Best Times, own basics, own photo |
 | `test/patch-null-handling.e2e-spec.ts` | 18 | Three-state semantics across all four PATCH endpoints |
 | `src/modules/auth/auth.age-gate.spec.ts` | 17 | Boundary days, leap years, configured thresholds, malformed input |
 | `src/modules/players/players.service.spec.ts` | 16 | `updateSelfProfile` scoping and partial-update rules |

@@ -141,7 +141,7 @@ export class AvailabilityService {
     profileId: string,
     input: AvailabilitySlotInput[],
   ): Promise<AvailabilitySlotView[]> {
-    await this.requireOwnedProfile(actor.userId, profileId);
+    await this.requireAccessibleProfile(actor, profileId);
     const slots = await this.replaceSlots({ playerProfileId: profileId }, input);
     await this.audit.record({
       action: AUDIT_PLAYER_AVAILABILITY_SET,
@@ -152,8 +152,8 @@ export class AvailabilityService {
     return slots;
   }
 
-  async getForProfile(ownerUserId: string, profileId: string): Promise<AvailabilitySlotView[]> {
-    await this.requireOwnedProfile(ownerUserId, profileId);
+  async getForProfile(actor: Principal, profileId: string): Promise<AvailabilitySlotView[]> {
+    await this.requireAccessibleProfile(actor, profileId);
     return this.listSlots({ playerProfileId: profileId });
   }
 
@@ -427,7 +427,8 @@ export class AvailabilityService {
     return name.length > 0 ? name : user.email;
   }
 
-  private async requireOwnedProfile(ownerUserId: string, profileId: string): Promise<void> {
+  /** A parent reaches every profile they own; a child reaches only their own. */
+  private async requireAccessibleProfile(actor: Principal, profileId: string): Promise<void> {
     const profile = await this.playersService.findById(profileId);
     if (!profile) {
       throw new NotFoundException({
@@ -435,7 +436,11 @@ export class AvailabilityService {
         message: 'Player profile not found.',
       });
     }
-    if (profile.ownerUserId !== ownerUserId) {
+
+    const permitted = actor.isChild
+      ? profile.id === actor.childPlayerProfileId
+      : profile.ownerUserId === actor.userId;
+    if (!permitted) {
       throw new ForbiddenException({
         errorCode: ErrorCode.PROFILE_NOT_OWNED,
         message: 'You do not own this player profile.',

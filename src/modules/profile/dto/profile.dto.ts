@@ -1,6 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 
+import { EmergencyContactDto } from '../../players/dto/emergency-contact.dto';
 import { IsCalendarDate } from '../../../shared/validation/calendar-date';
 import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 import { IsOptionalNotNull } from '../../../shared/validation/presence';
@@ -105,4 +115,26 @@ export class UpdatePlayerProfileDto {
   @IsOptionalNotNull()
   @IsCalendarDate()
   birthDate?: string;
+
+  @ApiPropertyOptional({ type: EmergencyContactDto, nullable: true })
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => EmergencyContactDto)
+  emergencyContact?: EmergencyContactDto | null;
+}
+
+/** Name and birth date are excluded: the parent set those, and birthDate drives the age gate. */
+export class UpdateOwnChildProfileDto {
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  school?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  jerseyNumber?: string | null;
 }

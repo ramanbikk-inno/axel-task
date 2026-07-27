@@ -27,7 +27,11 @@ import { UpdatePlayerProfileDto, UpdateTrainerProfileDto } from '../profile/dto/
 import { Role } from '../users/entities/user.enums';
 import { AdminService } from './admin.service';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
-import { AdminPlayerProfileView, AdminTrainerProfileView } from './dto/admin-profile.view';
+import {
+  AdminPlayerProfileView,
+  AdminTrainerProfileView,
+  AdminUserDetailView,
+} from './dto/admin-profile.view';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { DeleteUserDto, UserStatusChangeDto } from './dto/user-status-change.dto';
@@ -61,6 +65,17 @@ export class AdminController {
   @ApiOkResponse({ type: PaginatedUsersDto })
   async listUsers(@Query() query: ListUsersQueryDto): Promise<PaginatedUsersDto> {
     return this.adminService.listUsers(query);
+  }
+
+  @Get(':id')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Read, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: AdminUserDetailView })
+  async getUser(@Param('id', ParseUUIDPipe) id: string): Promise<AdminUserDetailView> {
+    return this.adminService.getUser(id);
   }
 
   @Post(':id/deactivate')

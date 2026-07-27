@@ -18,6 +18,7 @@ import { Role } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
 import { MyProfileView } from './dto/my-profile.view';
 import {
+  UpdateOwnChildProfileDto,
   UpdatePlayerProfileDto,
   UpdateProfileDto,
   UpdateTrainerProfileDto,
@@ -85,32 +86,50 @@ export class ProfileService {
       label: 'Profile photo',
     });
 
-    const previous = await this.requireUser(userId);
+    // A child's photo belongs on their player profile, not on `users`.
+    const childProfileId = actor.isChild ? this.requireChildProfileId(actor) : null;
+    const previousPublicId =
+      childProfileId === null
+        ? (await this.requireUser(userId)).photoPublicId
+        : (await this.loadChildProfile(childProfileId)).photoPublicId;
+
     const stored = await this.storage.upload({
       buffer,
       fileName: dto.fileName,
       mimeType: dto.mimeType,
       folder: 'avatars',
     });
-    const user = await this.usersService.setPhoto(userId, stored);
+    if (childProfileId === null) {
+      await this.usersService.setPhoto(userId, stored);
+    } else {
+      await this.playersService.setPhoto(childProfileId, stored);
+    }
 
     // Only after the row points at the new asset: deleting first would leave a
     // profile referencing nothing if the upload then failed.
-    if (previous.photoPublicId !== null && previous.photoPublicId !== stored.publicId) {
-      await discardAsset(this.storage, previous.photoPublicId, this.logger);
+    if (previousPublicId !== null && previousPublicId !== stored.publicId) {
+      await discardAsset(this.storage, previousPublicId, this.logger);
     }
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_UPDATED,
       actor,
       targetUserId: userId,
+      ...(childProfileId === null
+        ? {}
+        : { target: { type: 'PlayerProfile' as const, id: childProfileId } }),
       metadata: { fileName: dto.fileName },
     });
-    return this.buildView(user);
+    return this.getMe(userId);
   }
 
   /** Remove the photo and the stored asset behind it. */
   async removePhoto(actor: Principal): Promise<MyProfileView> {
-    const existing = await this.requireUser(actor.userId);
+    const childProfileId = actor.isChild ? this.requireChildProfileId(actor) : null;
+    const existing =
+      childProfileId === null
+        ? await this.requireUser(actor.userId)
+        : await this.loadChildProfile(childProfileId);
+
     if (existing.photoUrl === null && existing.photoPublicId === null) {
       throw new NotFoundException({
         errorCode: ErrorCode.NOT_FOUND,
@@ -118,7 +137,11 @@ export class ProfileService {
       });
     }
 
-    const user = await this.usersService.setPhoto(actor.userId, null);
+    if (childProfileId === null) {
+      await this.usersService.setPhoto(actor.userId, null);
+    } else {
+      await this.playersService.setPhoto(childProfileId, null);
+    }
     if (existing.photoPublicId !== null) {
       await discardAsset(this.storage, existing.photoPublicId, this.logger);
     }
@@ -126,8 +149,22 @@ export class ProfileService {
       action: AUDIT_PROFILE_PHOTO_REMOVED,
       actor,
       targetUserId: actor.userId,
+      ...(childProfileId === null
+        ? {}
+        : { target: { type: 'PlayerProfile' as const, id: childProfileId } }),
     });
-    return this.buildView(user);
+    return this.getMe(actor.userId);
+  }
+
+  private async loadChildProfile(profileId: string): Promise<PlayerProfile> {
+    const profile = await this.playersService.findById(profileId);
+    if (!profile) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.PLAYER_PROFILE_NOT_FOUND,
+        message: 'Player profile not found.',
+      });
+    }
+    return profile;
   }
 
   async updateTrainer(actor: Principal, dto: UpdateTrainerProfileDto): Promise<MyProfileView> {
@@ -156,7 +193,8 @@ export class ProfileService {
 
   async updatePlayer(actor: Principal, dto: UpdatePlayerProfileDto): Promise<MyProfileView> {
     // Also guarded on the route. Kept here because the fallback below creates a
-    // profile when the caller has none, and a child must never get one.
+    // profile when the caller has none, and a child must never get one — nor
+    // move their own birth date, which is what the age gate reads.
     if (actor.isChild) {
       throw new ForbiddenException({
         errorCode: ErrorCode.CHILD_ACTION_NOT_ALLOWED,
@@ -178,6 +216,7 @@ export class ProfileService {
       jerseyNumber: dto.jerseyNumber,
       gender: dto.gender,
       birthDate: dto.birthDate,
+      emergencyContact: dto.emergencyContact,
     });
     if (!profile) {
       // Only accounts predating registration-time profile creation reach this.
@@ -189,6 +228,7 @@ export class ProfileService {
         jerseyNumber: dto.jerseyNumber ?? null,
         gender: dto.gender ?? null,
         birthDate: dto.birthDate ?? null,
+        emergencyContact: dto.emergencyContact ?? null,
       });
     }
     await this.audit.record({
@@ -201,6 +241,35 @@ export class ProfileService {
     return this.getMe(userId);
   }
 
+  async updateOwnChildProfile(
+    actor: Principal,
+    dto: UpdateOwnChildProfileDto,
+  ): Promise<MyProfileView> {
+    const profileId = this.requireChildProfileId(actor);
+    const updated = await this.playersService.updateOwnChildProfile(profileId, {
+      school: dto.school,
+      jerseyNumber: dto.jerseyNumber,
+    });
+    await this.audit.record({
+      action: AUDIT_PLAYER_PROFILE_UPDATED,
+      actor,
+      targetUserId: actor.userId,
+      target: { type: 'PlayerProfile', id: updated.id },
+      metadata: { fields: changedFields(dto) },
+    });
+    return this.getMe(actor.userId);
+  }
+
+  private requireChildProfileId(actor: Principal): string {
+    if (!actor.isChild || actor.childPlayerProfileId === null) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.NOT_A_CHILD_PROFILE,
+        message: 'This endpoint is for child logins. Use /profile/me/player instead.',
+      });
+    }
+    return actor.childPlayerProfileId;
+  }
+
   private async buildView(user: User): Promise<MyProfileView> {
     let trainer: TrainerProfile | null = null;
     let player: PlayerProfile | null = null;
@@ -208,9 +277,15 @@ export class ProfileService {
       trainer = await this.trainersService.findByUserId(user.id);
     }
     if (user.role === Role.PlayerParent) {
-      player = await this.playersService.findSelfProfile(user.id);
+      player = await this.traineeProfileFor(user.id);
     }
     return MyProfileView.build(user, trainer, player);
+  }
+
+  /** For a child login, `ownerUserId` finds nothing — their profile is the parent's. */
+  private async traineeProfileFor(userId: string): Promise<PlayerProfile | null> {
+    const own = await this.playersService.findSelfProfile(userId);
+    return own ?? (await this.playersService.findByChildUserId(userId));
   }
 
   private nameOf(user: User): string {

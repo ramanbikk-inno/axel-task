@@ -119,4 +119,85 @@ describe('Users directory + creation audit log (e2e)', () => {
       .set('Authorization', `Bearer ${res.body.accessToken as string}`)
       .expect(403);
   });
+
+  /** The read that pairs with the four role-profile PATCH routes. */
+  describe('GET /users/:id', () => {
+    it('returns a trainer with their organisation profile', async () => {
+      const token = await adminLogin();
+      await createTrainer(token, 'detail.trainer@example.com', 'Detail Academy');
+      const target = (await ctx.dataSource
+        .getRepository(User)
+        .findOne({ where: { email: 'detail.trainer@example.com' } })) as User;
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/users/${target.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.user.email).toBe('detail.trainer@example.com');
+      expect(res.body.user.role).toBe(Role.Trainer);
+      expect(res.body.trainer.businessName).toBe('Detail Academy');
+      expect(res.body.player).toBeNull();
+      expect(res.body.coach).toBeNull();
+    });
+
+    it('returns a player with their trainee profile, and never a password hash', async () => {
+      const token = await adminLogin();
+      const player = await ctx.registerVerifiedPlayer({ email: 'detail.player@example.com' });
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/users/${player.userId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.user.role).toBe(Role.PlayerParent);
+      expect(res.body.player).not.toBeNull();
+      expect(res.body.player.isChild).toBe(false);
+      expect(res.body.trainer).toBeNull();
+      expect(JSON.stringify(res.body)).not.toContain('argon2');
+      expect(res.body.user.passwordHash).toBeUndefined();
+    });
+
+    it('404s on an unknown user and 400s on a non-UUID', async () => {
+      const token = await adminLogin();
+
+      await request(app.getHttpServer())
+        .get('/api/v1/users/2c9f4b1e-0000-4000-8000-000000000000')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(404);
+
+      await request(app.getHttpServer())
+        .get('/api/v1/users/not-a-uuid')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(400);
+    });
+
+    it('rejects a non-SuperAdmin caller with 403', async () => {
+      const player = await ctx.registerVerifiedPlayer({ email: 'detail.nosy@example.com' });
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: player.email, password: player.password })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/api/v1/users/${player.userId}`)
+        .set('Authorization', `Bearer ${res.body.accessToken as string}`)
+        .expect(403);
+    });
+
+    // Locks the AppModule import order that keeps users/:id from swallowing this route.
+    it('does not swallow the sibling impersonation routes', async () => {
+      const token = await adminLogin();
+
+      await request(app.getHttpServer())
+        .get('/api/v1/users/impersonation/history')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get('/api/v1/users/impersonation/context')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+    });
+  });
 });
