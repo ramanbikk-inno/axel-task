@@ -6,6 +6,9 @@ import { z } from 'zod';
  */
 export const MIN_SELF_REGISTRATION_AGE_DEFAULT = 18;
 
+/** How long a session may sit unrefreshed before it is treated as abandoned. */
+export const SESSION_IDLE_TIMEOUT_DEFAULT = '24h';
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -55,6 +58,9 @@ export const envSchema = z.object({
     .min(0)
     .max(120)
     .default(MIN_SELF_REGISTRATION_AGE_DEFAULT),
+
+  /** Idle session cut off at the next refresh, ahead of the full JWT_REFRESH_TTL. */
+  SESSION_IDLE_TIMEOUT: z.string().min(1).default(SESSION_IDLE_TIMEOUT_DEFAULT),
 
   ARGON_MEMORY_KIB: z.coerce.number().int().positive().default(19456),
   ARGON_TIME_COST: z.coerce.number().int().positive().default(2),

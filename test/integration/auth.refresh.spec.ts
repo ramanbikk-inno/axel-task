@@ -22,6 +22,14 @@ import { ClockService } from '../../src/shared/clock/clock.service';
 import { ErrorCode } from '../../src/shared/errors/error-codes';
 import { RefreshClaims } from '../../src/modules/auth/auth.types';
 
+function repoStub(): { findOne: jest.Mock; save: jest.Mock; create: jest.Mock } {
+  return {
+    findOne: jest.fn(),
+    save: jest.fn(async (x: unknown) => x),
+    create: jest.fn((x: unknown) => x),
+  };
+}
+
 class FakeClock {
   private current: Date = new Date('2026-01-01T00:00:00.000Z');
   now(): Date {
@@ -38,7 +46,7 @@ class FakeClock {
 describe('AuthService.refresh (rotation + reuse detection)', () => {
   let service: AuthService;
   let refreshRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock; update: jest.Mock };
-  let sessionRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock };
+  let sessionRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock; update: jest.Mock };
   let userRepo: { findOne: jest.Mock };
   let tokens: jest.Mocked<
     Pick<
@@ -71,14 +79,18 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       update: jest.fn(async () => undefined),
     };
     sessionRepo = {
+      // Matches clock.set below, so idle-timeout tests are the only ones that move it.
       findOne: jest.fn(async () => ({
         id: 'session-1',
         userId: 'user-1',
         activeTrainerProfileId: null,
         revokedAt: null,
+        expiresAt: null,
+        lastUsedAt: new Date('2026-06-08T00:00:00.000Z'),
       })),
       save: jest.fn(async (x) => ({ id: 'session-1', ...x })),
       create: jest.fn((x) => x),
+      update: jest.fn(async () => undefined),
     };
     userRepo = { findOne: jest.fn(async () => user) };
     clock = new FakeClock();
@@ -99,14 +111,6 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       familyId: 'fam-1',
       expiresAt: new Date('2026-06-15T00:00:00.000Z'),
     });
-
-    function repoStub(): { findOne: jest.Mock; save: jest.Mock; create: jest.Mock } {
-      return {
-        findOne: jest.fn(),
-        save: jest.fn(async (x: unknown) => x),
-        create: jest.fn((x: unknown) => x),
-      };
-    }
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -240,6 +244,102 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
 
     await expect(service.refresh('old.refresh.jwt', {})).rejects.toMatchObject({
       response: { errorCode: ErrorCode.REFRESH_TOKEN_INVALID },
+    });
+  });
+
+  describe('idle timeout', () => {
+    const freshRefreshRow = {
+      id: 'jti-1',
+      sessionId: 'session-1',
+      userId: 'user-1',
+      familyId: 'fam-1',
+      tokenHash: 'hash:old.refresh.jwt',
+      expiresAt: new Date('2026-06-15T00:00:00.000Z'),
+      revokedAt: null,
+      replacedById: null,
+    };
+
+    it('rejects and revokes the session once the default 24h idle window has passed', async () => {
+      refreshRepo.findOne.mockResolvedValue(freshRefreshRow);
+      // lastUsedAt is fixed at 2026-06-08T00:00:00Z; push the clock 24h + 1s past it.
+      clock.set(new Date('2026-06-09T00:00:01.000Z'));
+
+      await expect(service.refresh('old.refresh.jwt', {})).rejects.toMatchObject({
+        response: { errorCode: ErrorCode.REFRESH_TOKEN_INVALID },
+      });
+      expect(sessionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('allows a refresh one second inside the 24h window', async () => {
+      refreshRepo.findOne.mockResolvedValue(freshRefreshRow);
+      clock.set(new Date('2026-06-08T23:59:59.000Z'));
+
+      const result = await service.refresh('old.refresh.jwt', {});
+
+      expect(result.accessToken).toBe('new.access.jwt');
+    });
+
+    it('honours a configured SESSION_IDLE_TIMEOUT instead of the 24h default', async () => {
+      refreshRepo.findOne.mockResolvedValue(freshRefreshRow);
+      // 30 minutes past lastUsedAt: inside the default, outside a 15m override.
+      clock.set(new Date('2026-06-08T00:30:00.000Z'));
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AuthService,
+          { provide: getRepositoryToken(User), useValue: userRepo },
+          { provide: getRepositoryToken(AuthSession), useValue: sessionRepo },
+          { provide: getRepositoryToken(RefreshToken), useValue: refreshRepo },
+          { provide: getRepositoryToken(EmailVerificationToken), useValue: repoStub() },
+          { provide: getRepositoryToken(PasswordResetToken), useValue: repoStub() },
+          { provide: getRepositoryToken(AccountSetupToken), useValue: repoStub() },
+          { provide: TokenService, useValue: tokens },
+          { provide: PasswordService, useValue: { hash: jest.fn(), verify: jest.fn() } },
+          { provide: MailService, useValue: {} },
+          { provide: UsersService, useValue: { findById: jest.fn(async () => user) } },
+          {
+            provide: ImpersonationLogService,
+            useValue: {
+              closeForSession: jest.fn().mockResolvedValue(undefined),
+              closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+            },
+          },
+          { provide: PlayersService, useValue: { create: jest.fn() } },
+          {
+            provide: DataSource,
+            useValue: { transaction: (cb: (m: unknown) => unknown) => cb({}) },
+          },
+          {
+            provide: ConfigService,
+            useValue: {
+              get: (k: string): unknown => (k === 'SESSION_IDLE_TIMEOUT' ? '15m' : undefined),
+            },
+          },
+          { provide: ClockService, useValue: clock },
+        ],
+      }).compile();
+      const shortIdleService = module.get<AuthService>(AuthService);
+
+      await expect(shortIdleService.refresh('old.refresh.jwt', {})).rejects.toMatchObject({
+        response: { errorCode: ErrorCode.REFRESH_TOKEN_INVALID },
+      });
+    });
+
+    it('treats a null lastUsedAt as never idle (defensive branch)', async () => {
+      refreshRepo.findOne.mockResolvedValue(freshRefreshRow);
+      sessionRepo.findOne.mockResolvedValueOnce({
+        id: 'session-1',
+        userId: 'user-1',
+        activeTrainerProfileId: null,
+        revokedAt: null,
+        expiresAt: null,
+        lastUsedAt: null,
+      });
+      clock.set(new Date('2026-06-10T00:00:00.000Z'));
+
+      const result = await service.refresh('old.refresh.jwt', {});
+
+      expect(result.accessToken).toBe('new.access.jwt');
     });
   });
 });

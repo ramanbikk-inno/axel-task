@@ -1,4 +1,8 @@
-import { MIN_SELF_REGISTRATION_AGE_DEFAULT, validate } from './env.validation';
+import {
+  MIN_SELF_REGISTRATION_AGE_DEFAULT,
+  SESSION_IDLE_TIMEOUT_DEFAULT,
+  validate,
+} from './env.validation';
 
 describe('validate (env)', () => {
   const validEnv: Record<string, string> = {
@@ -55,6 +59,14 @@ describe('validate (env)', () => {
     expect(() => validate({ ...validEnv, MIN_SELF_REGISTRATION_AGE: 'eighteen' })).toThrow(
       /MIN_SELF_REGISTRATION_AGE/,
     );
+  });
+
+  it('defaults the session idle timeout to the exported constant', () => {
+    expect(validate(validEnv).SESSION_IDLE_TIMEOUT).toBe(SESSION_IDLE_TIMEOUT_DEFAULT);
+  });
+
+  it('takes an explicit session idle timeout over the default', () => {
+    expect(validate({ ...validEnv, SESSION_IDLE_TIMEOUT: '2h' }).SESSION_IDLE_TIMEOUT).toBe('2h');
   });
 
   it('coerces numeric env strings into numbers', () => {

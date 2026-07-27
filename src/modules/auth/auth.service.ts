@@ -11,7 +11,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
-import { MIN_SELF_REGISTRATION_AGE_DEFAULT } from '../../shared/config/env.validation';
+import {
+  MIN_SELF_REGISTRATION_AGE_DEFAULT,
+  SESSION_IDLE_TIMEOUT_DEFAULT,
+} from '../../shared/config/env.validation';
+import { durationToSeconds } from '../../shared/config/duration';
 import { displayNameFor } from '../../shared/format/display-name';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { PasswordService } from '../../shared/crypto/password.service';
@@ -405,6 +409,24 @@ export class AuthService {
         errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
         message: 'Session has expired.',
       });
+    }
+
+    // Ordinary use bumps lastUsedAt roughly every JWT_ACCESS_TTL; a wider gap means idle.
+    if (session.lastUsedAt !== null) {
+      const idleTimeoutMs =
+        durationToSeconds(
+          this.config.get<string>('SESSION_IDLE_TIMEOUT') ?? SESSION_IDLE_TIMEOUT_DEFAULT,
+        ) * 1000;
+      if (this.clock.now().getTime() - session.lastUsedAt.getTime() > idleTimeoutMs) {
+        await this.sessions.update(
+          { id: session.id },
+          { revokedAt: this.clock.now(), revokedReason: 'idle-timeout' },
+        );
+        throw new UnauthorizedException({
+          errorCode: ErrorCode.REFRESH_TOKEN_INVALID,
+          message: 'Session has been idle too long. Please log in again.',
+        });
+      }
     }
 
     const user = await this.usersService.findById(row.userId);
