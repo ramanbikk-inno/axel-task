@@ -81,6 +81,17 @@ export class PlayerProfile {
   @Column({ name: 'emergency_contact', type: 'jsonb', nullable: true })
   emergencyContact!: EmergencyContact | null;
 
+  /**
+   * Only meaningful for isChild rows — the account holder's own photo is
+   * users.photo_url, since account and player are the same identity for a self
+   * profile.
+   */
+  @Column({ name: 'photo_url', type: 'text', nullable: true })
+  photoUrl!: string | null;
+
+  @Column({ name: 'photo_public_id', type: 'text', nullable: true })
+  photoPublicId!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

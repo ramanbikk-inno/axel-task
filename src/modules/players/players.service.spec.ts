@@ -221,3 +221,40 @@ describe('PlayersService.setSkillLevel', () => {
     expect(update).toHaveBeenCalledWith({ id: 'profile-1' }, { skillLevel: null });
   });
 });
+
+describe('PlayersService.setPhoto', () => {
+  it('writes both the url and the storage id', async () => {
+    const { service, update } = build();
+
+    await service.setPhoto('profile-1', { url: 'https://cdn/x.png', publicId: 'avatars/x' });
+
+    expect(update).toHaveBeenCalledWith(
+      { id: 'profile-1' },
+      { photoUrl: 'https://cdn/x.png', photoPublicId: 'avatars/x' },
+    );
+  });
+
+  it('nulls both fields together on removal', async () => {
+    const { service, update } = build();
+
+    await service.setPhoto('profile-1', null);
+
+    expect(update).toHaveBeenCalledWith(
+      { id: 'profile-1' },
+      { photoUrl: null, photoPublicId: null },
+    );
+  });
+});
+
+describe('PlayersService anonymization', () => {
+  it('clears a profile photo alongside the rest of the PII sweep', async () => {
+    const { service, update } = build();
+
+    await service.anonymizeByOwner('user-1');
+
+    expect(update).toHaveBeenCalledWith(
+      { ownerUserId: 'user-1' },
+      expect.objectContaining({ photoUrl: null, photoPublicId: null }),
+    );
+  });
+});

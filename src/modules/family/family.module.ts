@@ -5,6 +5,7 @@ import { CryptoModule } from '../../shared/crypto/crypto.module';
 import { AuthModule } from '../auth/auth.module';
 import { EnrollmentModule } from '../enrollment/enrollment.module';
 import { PlayersModule } from '../players/players.module';
+import { StorageModule } from '../storage/storage.module';
 import { TrainersModule } from '../trainers/trainers.module';
 import { UsersModule } from '../users/users.module';
 import { FamilyController } from './family.controller';
@@ -19,6 +20,7 @@ import { FamilyService } from './family.service';
     UsersModule,
     CryptoModule,
     AuditModule,
+    StorageModule,
   ],
   controllers: [FamilyController],
   providers: [FamilyService],

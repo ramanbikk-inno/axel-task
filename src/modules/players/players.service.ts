@@ -48,6 +48,14 @@ export class PlayersService {
     return this.repo(manager).findOne({ where: { ownerUserId, isChild: false } });
   }
 
+  /** The profile a child login belongs to, owned by the parent, not the child. */
+  async findByChildUserId(
+    childUserId: string,
+    manager?: EntityManager,
+  ): Promise<PlayerProfile | null> {
+    return this.repo(manager).findOne({ where: { childUserId } });
+  }
+
   async findById(id: string, manager?: EntityManager): Promise<PlayerProfile | null> {
     return this.repo(manager).findOne({ where: { id } });
   }
@@ -150,6 +158,18 @@ export class PlayersService {
     return (await repository.findOne({ where: { id } })) as PlayerProfile;
   }
 
+  /** Only meaningful for a child profile — a self profile's photo is on `users`. */
+  async setPhoto(
+    id: string,
+    photo: { url: string; publicId: string } | null,
+  ): Promise<PlayerProfile> {
+    await this.profiles.update(
+      { id },
+      { photoUrl: photo?.url ?? null, photoPublicId: photo?.publicId ?? null },
+    );
+    return (await this.profiles.findOne({ where: { id } })) as PlayerProfile;
+  }
+
   /** The PII an erasure has to clear off a trainee profile. */
   private static readonly ANONYMIZED_PROFILE = {
     displayName: 'Deleted User',
@@ -161,6 +181,8 @@ export class PlayersService {
     // phone number, which has no business surviving this account.
     emergencyContact: null,
     skillLevel: null,
+    photoUrl: null,
+    photoPublicId: null,
   } as const;
 
   /** GDPR anonymization of every profile owned by a user. */

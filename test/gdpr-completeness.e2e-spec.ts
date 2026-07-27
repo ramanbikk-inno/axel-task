@@ -56,7 +56,10 @@ describe('GDPR deletion completeness (e2e)', () => {
     return { token, id: admin.id };
   };
 
-  /** A parent with a photo, a child with an emergency contact, and a child login. */
+  /**
+   * A parent with a photo, a child with an emergency contact and their own
+   * photo, and a child login.
+   */
   const seedFamily = async (): Promise<{
     parent: { email: string; password: string; userId: string };
     parentToken: string;
@@ -80,6 +83,16 @@ describe('GDPR deletion completeness (e2e)', () => {
       .send({ displayName: 'Alex', birthDate: '2014-08-01', gender: 'female' })
       .expect(201);
     const childProfileId = child.body.id as string;
+
+    ctx.storage.upload.mockResolvedValueOnce({
+      url: 'https://cdn/child-face.png',
+      publicId: 'avatars/child-face',
+    });
+    await request(app.getHttpServer())
+      .post(`/api/v1/players/children/${childProfileId}/photo`)
+      .set(auth(parentToken))
+      .send({ fileName: 'child-face.png', mimeType: 'image/png', dataBase64: PNG })
+      .expect(200);
 
     // Emergency contact is third-party PII, written directly since there is no
     // endpoint for it yet.
@@ -162,6 +175,23 @@ describe('GDPR deletion completeness (e2e)', () => {
       .findOne({ where: { id: fam.parent.userId }, withDeleted: true })) as User;
     expect(user.photoUrl).toBeNull();
     expect(user.photoPublicId).toBeNull();
+  });
+
+  it("deletes the child's own stored photo alongside the parent's", async () => {
+    const admin = await adminSession();
+    const fam = await seedFamily();
+
+    await deleteUser(admin.token, fam.parent.userId).expect(200);
+
+    // A second photo living on the child's profile row, not the parent's
+    // users row — the sweep has to find it by owner, not just by target id.
+    expect(ctx.storage.delete).toHaveBeenCalledWith('avatars/child-face');
+
+    const profile = (await ctx.dataSource
+      .getRepository(PlayerProfile)
+      .findOne({ where: { id: fam.childProfileId }, withDeleted: true })) as PlayerProfile;
+    expect(profile.photoUrl).toBeNull();
+    expect(profile.photoPublicId).toBeNull();
   });
 
   it('still completes when the storage provider is down', async () => {
