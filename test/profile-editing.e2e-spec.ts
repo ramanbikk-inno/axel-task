@@ -179,4 +179,133 @@ describe('Profile editing (e2e)', () => {
       .send({ firstName: 'Hacked' })
       .expect(403);
   });
+
+  it("Super Admin edits a trainer's organisation fields, audit-logged", async () => {
+    const token = await adminToken();
+    const trainer = await trainerToken('org-edit@example.com');
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/v1/users/${trainer.userId}/trainer-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ businessName: 'Renamed Academy', website: 'https://renamed.test' })
+      .expect(200);
+    expect(res.body.businessName).toBe('Renamed Academy');
+    expect(res.body.website).toBe('https://renamed.test');
+
+    const logs = await ctx.dataSource
+      .getRepository(AuditLog)
+      .find({ where: { action: 'profile.trainer-updated' } });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].targetUserId).toBe(trainer.userId);
+  });
+
+  it('refuses the trainer-profile route for a user who is not a Trainer', async () => {
+    const token = await adminToken();
+    const target = await ctx.registerVerifiedPlayer({ email: 'not-a-trainer@example.com' });
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/users/${target.userId}/trainer-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ businessName: 'Nope' })
+      .expect(400)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR));
+  });
+
+  it("Super Admin edits a coach's public profile fields, audit-logged", async () => {
+    const token = await adminToken();
+    const trainer = await trainerToken('coach-org@example.com');
+    const invite = await request(app.getHttpServer())
+      .post('/api/v1/coaches/invitations')
+      .set('Authorization', `Bearer ${trainer.token}`)
+      .send({ email: 'coach-edit@example.com' })
+      .expect(201);
+    const code = invite.body.code as string;
+    await request(app.getHttpServer())
+      .post(`/api/v1/coaches/invitations/${code}/accept`)
+      .send({ password: FACTORY_PASSWORD, firstName: 'Cody', lastName: 'Coach' })
+      .expect(201);
+    const coachUser = (await ctx.dataSource
+      .getRepository(User)
+      .findOne({ where: { email: 'coach-edit@example.com' } })) as User;
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/v1/users/${coachUser.id}/coach-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ bio: 'Admin-set bio', publicVisible: true })
+      .expect(200);
+    expect(res.body.bio).toBe('Admin-set bio');
+    expect(res.body.publicVisible).toBe(true);
+
+    const logs = await ctx.dataSource
+      .getRepository(AuditLog)
+      .find({ where: { action: 'coach.profile-updated' } });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].targetUserId).toBe(coachUser.id);
+  });
+
+  it('refuses the coach-profile route for a user who is not a Coach', async () => {
+    const token = await adminToken();
+    const target = await ctx.registerVerifiedPlayer({ email: 'not-a-coach@example.com' });
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/users/${target.userId}/coach-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ bio: 'Nope' })
+      .expect(400)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR));
+  });
+
+  it("Super Admin edits a player's own trainee profile fields, audit-logged", async () => {
+    const token = await adminToken();
+    const target = await ctx.registerVerifiedPlayer({ email: 'player-admin-edit@example.com' });
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/v1/users/${target.userId}/player-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ school: 'Admin School', jerseyNumber: '99' })
+      .expect(200);
+    expect(res.body.school).toBe('Admin School');
+    expect(res.body.jerseyNumber).toBe('99');
+
+    const logs = await ctx.dataSource
+      .getRepository(AuditLog)
+      .find({ where: { action: 'profile.player-updated' } });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].targetUserId).toBe(target.userId);
+  });
+
+  it('404s a child login on the player-profile route — it has no self profile', async () => {
+    const token = await adminToken();
+    const parent = await ctx.registerVerifiedPlayer({ email: 'child-admin-parent@example.com' });
+    const parentToken = await login(parent.email, parent.password);
+    const child = await request(app.getHttpServer())
+      .post('/api/v1/players/children')
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ displayName: 'Kid', birthDate: '2015-01-01', gender: 'male' })
+      .expect(201);
+    const childLogin = await request(app.getHttpServer())
+      .post(`/api/v1/players/children/${child.body.id}/login`)
+      .set('Authorization', `Bearer ${parentToken}`)
+      .send({ email: 'child-admin-login@example.com', password: 'K1dSafe!Passw0rd' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/users/${childLogin.body.childUserId}/player-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ school: 'Nope' })
+      .expect(404)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.PLAYER_PROFILE_NOT_FOUND));
+  });
+
+  it('a non-Super-Admin cannot use any of the role-profile routes', async () => {
+    const player = await ctx.registerVerifiedPlayer({ email: 'nonadmin-role@example.com' });
+    const target = await ctx.registerVerifiedPlayer({ email: 'victim-role@example.com' });
+    const token = await login(player.email, player.password);
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/users/${target.userId}/player-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ school: 'Hacked' })
+      .expect(403);
+  });
 });

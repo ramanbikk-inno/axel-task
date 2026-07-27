@@ -226,6 +226,33 @@ export class CoachesService {
       });
     }
 
+    return this.applyProfileUpdate(profile, dto, principal);
+  }
+
+  /** Super Admin override, targeted by user id rather than the caller's own session. */
+  async adminUpdateProfile(
+    targetUserId: string,
+    actor: Principal,
+    dto: UpdateCoachProfileDto,
+  ): Promise<CoachView> {
+    const profile = await this.coaches.findOne({
+      where: { userId: targetUserId, status: CoachStatus.Active },
+    });
+    if (!profile) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.COACH_PROFILE_NOT_FOUND,
+        message: 'No active coach profile for this user.',
+      });
+    }
+
+    return this.applyProfileUpdate(profile, dto, actor);
+  }
+
+  private async applyProfileUpdate(
+    profile: CoachProfile,
+    dto: UpdateCoachProfileDto,
+    actor: Principal,
+  ): Promise<CoachView> {
     if (dto.bio !== undefined) {
       profile.bio = dto.bio;
     }
@@ -242,7 +269,7 @@ export class CoachesService {
     const saved = await this.coaches.save(profile);
     await this.audit.record({
       action: AUDIT_COACH_PROFILE_UPDATED,
-      actor: principal,
+      actor,
       targetUserId: profile.userId,
       target: { type: 'CoachProfile', id: profile.id },
       metadata: {
