@@ -22,9 +22,12 @@ import { Roles } from '../ability/roles.decorator';
 import { RolesGuard } from '../ability/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Principal } from '../auth/principal';
+import { CoachView, UpdateCoachProfileDto } from '../coaches/dto/coach.dto';
+import { UpdatePlayerProfileDto, UpdateTrainerProfileDto } from '../profile/dto/profile.dto';
 import { Role } from '../users/entities/user.enums';
 import { AdminService } from './admin.service';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
+import { AdminPlayerProfileView, AdminTrainerProfileView } from './dto/admin-profile.view';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { DeleteUserDto, UserStatusChangeDto } from './dto/user-status-change.dto';
@@ -106,6 +109,54 @@ export class AdminController {
   ): Promise<UserSummaryDto> {
     const principal = req.user as Principal;
     return this.adminService.updateUser(id, principal, dto);
+  }
+
+  @Patch(':id/trainer-profile')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: AdminTrainerProfileView })
+  async updateTrainerProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateTrainerProfileDto,
+    @Req() req: Request,
+  ): Promise<AdminTrainerProfileView> {
+    const principal = req.user as Principal;
+    return this.adminService.updateTrainerProfile(id, principal, dto);
+  }
+
+  @Patch(':id/coach-profile')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: CoachView })
+  async updateCoachProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateCoachProfileDto,
+    @Req() req: Request,
+  ): Promise<CoachView> {
+    const principal = req.user as Principal;
+    return this.adminService.updateCoachProfile(id, principal, dto);
+  }
+
+  @Patch(':id/player-profile')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @Roles(Role.SuperAdmin)
+  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
+  @ApiBearerAuth()
+  @ApiOkResponse({ type: AdminPlayerProfileView })
+  async updatePlayerProfile(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePlayerProfileDto,
+    @Req() req: Request,
+  ): Promise<AdminPlayerProfileView> {
+    const principal = req.user as Principal;
+    return this.adminService.updatePlayerProfile(id, principal, dto);
   }
 
   @Delete(':id')

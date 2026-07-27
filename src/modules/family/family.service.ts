@@ -2,15 +2,19 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { AuditService } from '../audit/audit.service';
+import { changedFields } from '../audit/changed-fields';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { PasswordService } from '../../shared/crypto/password.service';
+import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
@@ -21,6 +25,9 @@ import { AssociationStatus } from '../enrollment/entities/trainer-player-associa
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
+import { UploadPhotoDto } from '../profile/dto/profile.dto';
+import { discardAsset } from '../storage/discard-asset';
+import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
@@ -32,6 +39,8 @@ import { PlayerProfileView, TrainerContextView } from './dto/player-profile.view
 
 export const AUDIT_CHILD_CREATED = 'family.child-created';
 export const AUDIT_CHILD_UPDATED = 'family.child-updated';
+export const AUDIT_CHILD_PHOTO_UPDATED = 'family.child-photo-updated';
+export const AUDIT_CHILD_PHOTO_REMOVED = 'family.child-photo-removed';
 export const AUDIT_CHILD_LOGIN_CREATED = 'family.child-login-created';
 export const AUDIT_CHILD_LOGIN_REVOKED = 'family.child-login-revoked';
 export const AUDIT_FAMILY_TRAINER_ADDED = 'family.trainer-added';
@@ -39,6 +48,8 @@ export const AUDIT_FAMILY_TRAINER_REMOVED = 'family.trainer-removed';
 
 @Injectable()
 export class FamilyService {
+  private readonly logger = new Logger(FamilyService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly playersService: PlayersService,
@@ -51,6 +62,7 @@ export class FamilyService {
     private readonly auth: AuthService,
     private readonly clock: ClockService,
     private readonly audit: AuditService,
+    @Inject(STORAGE) private readonly storage: StorageService,
   ) {}
 
   /**
@@ -201,11 +213,80 @@ export class FamilyService {
       action: AUDIT_CHILD_UPDATED,
       actor,
       target: { type: 'PlayerProfile', id: profile.id },
-      // Which fields moved, never their values: this row outlives the data and
-      // must not become a second copy of the PII the erasure path clears.
-      metadata: {
-        fields: Object.keys(dto).filter((k) => dto[k as keyof UpdateChildDto] !== undefined),
-      },
+      metadata: { fields: changedFields(dto) },
+    });
+
+    const [view] = await this.buildViews([updated]);
+    return view;
+  }
+
+  /** Only a child profile has its own photo; the account holder's own is on `users`. */
+  async uploadChildPhoto(
+    actor: Principal,
+    profileId: string,
+    dto: UploadPhotoDto,
+  ): Promise<PlayerProfileView> {
+    const profile = await this.requireOwnedProfile(actor.userId, profileId);
+    if (!profile.isChild) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.NOT_A_CHILD_PROFILE,
+        message: 'Use /profile/me/photo for your own photo.',
+      });
+    }
+
+    const { buffer } = decodeImageUpload({
+      dataBase64: dto.dataBase64,
+      declaredMimeType: dto.mimeType,
+      maxBytes: MAX_IMAGE_UPLOAD_BYTES,
+      label: 'Child photo',
+    });
+    const stored = await this.storage.upload({
+      buffer,
+      fileName: dto.fileName,
+      mimeType: dto.mimeType,
+      folder: 'avatars',
+    });
+    const updated = await this.playersService.setPhoto(profile.id, stored);
+
+    // Only after the row points at the new asset: deleting first would leave a
+    // profile referencing nothing if the upload then failed.
+    if (profile.photoPublicId !== null && profile.photoPublicId !== stored.publicId) {
+      await discardAsset(this.storage, profile.photoPublicId, this.logger);
+    }
+    await this.audit.record({
+      action: AUDIT_CHILD_PHOTO_UPDATED,
+      actor,
+      target: { type: 'PlayerProfile', id: profile.id },
+      metadata: { fileName: dto.fileName },
+    });
+
+    const [view] = await this.buildViews([updated]);
+    return view;
+  }
+
+  async removeChildPhoto(actor: Principal, profileId: string): Promise<PlayerProfileView> {
+    const profile = await this.requireOwnedProfile(actor.userId, profileId);
+    if (!profile.isChild) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.NOT_A_CHILD_PROFILE,
+        message: 'Use /profile/me/photo for your own photo.',
+      });
+    }
+    if (profile.photoPublicId === null && profile.photoUrl === null) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.NOT_FOUND,
+        message: 'There is no photo to remove.',
+      });
+    }
+
+    const updated = await this.playersService.setPhoto(profile.id, null);
+    if (profile.photoPublicId !== null) {
+      await discardAsset(this.storage, profile.photoPublicId, this.logger);
+    }
+    await this.audit.record({
+      action: AUDIT_CHILD_PHOTO_REMOVED,
+      actor,
+      target: { type: 'PlayerProfile', id: profile.id },
     });
 
     const [view] = await this.buildViews([updated]);

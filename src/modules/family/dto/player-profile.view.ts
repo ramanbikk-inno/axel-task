@@ -49,6 +49,10 @@ export class PlayerProfileView {
   @ApiProperty({ nullable: true })
   emergencyContact!: EmergencyContact | null;
 
+  /** Only ever set for a child profile; the account holder's own is users.photoUrl. */
+  @ApiProperty({ nullable: true })
+  photoUrl!: string | null;
+
   @ApiProperty({ type: [TrainerContextView] })
   trainers!: TrainerContextView[];
 
@@ -63,6 +67,7 @@ export class PlayerProfileView {
       jerseyNumber: profile.jerseyNumber,
       skillLevel: profile.skillLevel,
       emergencyContact: profile.emergencyContact,
+      photoUrl: profile.photoUrl,
       trainers,
     };
   }

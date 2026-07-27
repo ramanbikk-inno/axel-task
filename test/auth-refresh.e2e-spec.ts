@@ -65,4 +65,24 @@ describe('Auth refresh rotation + reuse detection (e2e)', () => {
       .send({ refreshToken: second })
       .expect(401);
   });
+
+  it('rejects a refresh once the session has been idle past the 24h default', async () => {
+    const first = await loginTokens();
+
+    ctx.clock.advance(24 * 60 * 60 * 1000 + 1000);
+    await request(ctx.app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: first.refreshToken })
+      .expect(401);
+  });
+
+  it('allows a refresh made just inside the 24h idle window', async () => {
+    const first = await loginTokens();
+
+    ctx.clock.advance(23 * 60 * 60 * 1000);
+    await request(ctx.app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: first.refreshToken })
+      .expect(200);
+  });
 });

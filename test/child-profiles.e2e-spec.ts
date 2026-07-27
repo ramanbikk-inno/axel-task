@@ -3,6 +3,7 @@ import request from 'supertest';
 
 import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
+import { oversizedPngBase64, PNG_1X1_BASE64 } from './helpers/image.fixtures';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
@@ -191,5 +192,126 @@ describe('Parent creates child profile (e2e)', () => {
       .set('Authorization', `Bearer ${login.body.accessToken as string}`)
       .send({ displayName: 'Nope', birthDate: '2015-01-01', gender: 'male' })
       .expect(403);
+  });
+
+  describe('child photo', () => {
+    const createChild = async (parentToken: string, displayName: string): Promise<string> => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/players/children')
+        .set('Authorization', `Bearer ${parentToken}`)
+        .send({ displayName, birthDate: '2015-01-01', gender: 'female' })
+        .expect(201);
+      return res.body.id as string;
+    };
+
+    it('uploads a child photo and stores the returned URL', async () => {
+      const parent = await ctx.registerVerifiedPlayer({ email: 'photo-parent@example.com' });
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: parent.email, password: parent.password })
+        .expect(200);
+      const token = login.body.accessToken as string;
+      const childId = await createChild(token, 'Photo Kid');
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/v1/players/children/${childId}/photo`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fileName: 'kid.png', mimeType: 'image/png', dataBase64: PNG_1X1_BASE64 })
+        .expect(200);
+      expect(res.body.photoUrl).toBe('https://storage.test/uploads/mock.png');
+
+      const family = await request(app.getHttpServer())
+        .get('/api/v1/players')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const child = family.body.find((p: { id: string }) => p.id === childId);
+      expect(child.photoUrl).toBe('https://storage.test/uploads/mock.png');
+    });
+
+    it('removes a child photo', async () => {
+      const parent = await ctx.registerVerifiedPlayer({ email: 'photo-remove@example.com' });
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: parent.email, password: parent.password })
+        .expect(200);
+      const token = login.body.accessToken as string;
+      const childId = await createChild(token, 'Remove Kid');
+      await request(app.getHttpServer())
+        .post(`/api/v1/players/children/${childId}/photo`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fileName: 'kid.png', mimeType: 'image/png', dataBase64: PNG_1X1_BASE64 })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .delete(`/api/v1/players/children/${childId}/photo`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(res.body.photoUrl).toBeNull();
+    });
+
+    it('404s removing a photo that was never set', async () => {
+      const parent = await ctx.registerVerifiedPlayer({ email: 'photo-none@example.com' });
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: parent.email, password: parent.password })
+        .expect(200);
+      const token = login.body.accessToken as string;
+      const childId = await createChild(token, 'No Photo Kid');
+
+      await request(app.getHttpServer())
+        .delete(`/api/v1/players/children/${childId}/photo`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(404)
+        .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.NOT_FOUND));
+    });
+
+    it('rejects an oversized or unsupported child photo', async () => {
+      const parent = await ctx.registerVerifiedPlayer({ email: 'photo-big@example.com' });
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: parent.email, password: parent.password })
+        .expect(200);
+      const token = login.body.accessToken as string;
+      const childId = await createChild(token, 'Big Photo Kid');
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/players/children/${childId}/photo`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          fileName: 'big.png',
+          mimeType: 'image/png',
+          dataBase64: oversizedPngBase64(2 * 1024 * 1024),
+        })
+        .expect(400)
+        .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.FILE_TOO_LARGE));
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/players/children/${childId}/photo`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fileName: 'x.gif', mimeType: 'image/gif', dataBase64: 'AAAA' })
+        .expect(422);
+    });
+
+    it('refuses to set a photo on the account holder`s own (non-child) profile', async () => {
+      const parent = await ctx.registerVerifiedPlayer({ email: 'photo-self@example.com' });
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: parent.email, password: parent.password })
+        .expect(200);
+      const token = login.body.accessToken as string;
+
+      const family = await request(app.getHttpServer())
+        .get('/api/v1/players')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      const selfProfileId = family.body.find((p: { isChild: boolean }) => !p.isChild).id as string;
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/players/children/${selfProfileId}/photo`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fileName: 'me.png', mimeType: 'image/png', dataBase64: PNG_1X1_BASE64 })
+        .expect(400)
+        .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.NOT_A_CHILD_PROFILE));
+    });
   });
 });

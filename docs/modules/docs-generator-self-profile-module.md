@@ -129,7 +129,9 @@ Routes carrying `NotAChildGuard`: all eight family-management endpoints, `POST /
 
 ## Age computation
 
-`AuthService.assertOldEnoughForOwnAccount(birthDate)` is the single gate. Every path onto an own-name account calls it: `POST /auth/register`, `POST /join/:code/register`, and `PATCH /profile/me/player`.
+`AuthService.assertOldEnoughForOwnAccount(birthDate)` is the single gate. Every path onto an own-name account calls it: `POST /auth/register`, `POST /join/:code/register`, `PATCH /profile/me/player`, and `PATCH /users/:id/player-profile`.
+
+The admin route is gated too, deliberately: the rule belongs to the account, not to whoever is editing it. An admin override would still leave a minor holding an own-name account, and the future-date rejection is a data-integrity check with no override case at all.
 
 - Parses with `parseCalendarDate`, which rejects anything that is not exactly `YYYY-MM-DD`. An ISO date-time used to pass validation, produce an `Invalid Date`, and compare `false` against every bound — so the gate let everything through. That is why the parse is strict and shared.
 - A **future** date is `422 VALIDATION_ERROR`, not `403`. A `403` would imply the date was understood and refused; it was not understood.

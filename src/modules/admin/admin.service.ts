@@ -12,16 +12,26 @@ import { DataSource, EntityManager } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
+import { changedFields } from '../audit/changed-fields';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
+import { CoachesService } from '../coaches/coaches.service';
+import { CoachView, UpdateCoachProfileDto } from '../coaches/dto/coach.dto';
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { MailService } from '../mail/mail.service';
+import {
+  AUDIT_PLAYER_PROFILE_UPDATED,
+  AUDIT_TRAINER_PROFILE_UPDATED,
+} from '../profile/profile.service';
+import { UpdatePlayerProfileDto, UpdateTrainerProfileDto } from '../profile/dto/profile.dto';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { PlayersService } from '../players/players.service';
+import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
+import { AdminPlayerProfileView, AdminTrainerProfileView } from './dto/admin-profile.view';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
@@ -48,6 +58,7 @@ export class AdminService {
     private readonly shareLinks: ShareLinksService,
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly clock: ClockService,
+    private readonly coachesService: CoachesService,
   ) {}
 
   async createTrainer(
@@ -209,11 +220,94 @@ export class AdminService {
       action: AUDIT_USER_UPDATED,
       actor,
       targetUserId,
-      metadata: {
-        fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
-      },
+      metadata: { fields: changedFields(input) },
     });
     return UserSummaryDto.fromEntity(updated);
+  }
+
+  /** Super Admin edits a trainer's organisation fields, same shape as self-service. */
+  async updateTrainerProfile(
+    targetUserId: string,
+    actor: Principal,
+    input: UpdateTrainerProfileDto,
+  ): Promise<AdminTrainerProfileView> {
+    const target = await this.requireUser(targetUserId);
+    if (target.role !== Role.Trainer) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ROLE_MISMATCH,
+        message: 'This user does not have a trainer profile.',
+      });
+    }
+
+    const updated = await this.trainersService.updateProfileByUserId(targetUserId, input);
+    if (!updated) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
+        message: 'Trainer profile not found.',
+      });
+    }
+
+    await this.audit.record({
+      action: AUDIT_TRAINER_PROFILE_UPDATED,
+      actor,
+      targetUserId,
+      target: { type: 'TrainerProfile', id: updated.id },
+      metadata: { fields: changedFields(input) },
+    });
+    return AdminTrainerProfileView.from(updated);
+  }
+
+  /** Super Admin edits a coach's public profile fields on their active engagement. */
+  async updateCoachProfile(
+    targetUserId: string,
+    actor: Principal,
+    input: UpdateCoachProfileDto,
+  ): Promise<CoachView> {
+    const target = await this.requireUser(targetUserId);
+    if (target.role !== Role.Coach) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ROLE_MISMATCH,
+        message: 'This user does not have a coach profile.',
+      });
+    }
+    return this.coachesService.adminUpdateProfile(targetUserId, actor, input);
+  }
+
+  /** Super Admin edits a player's own (non-child) trainee profile fields. */
+  async updatePlayerProfile(
+    targetUserId: string,
+    actor: Principal,
+    input: UpdatePlayerProfileDto,
+  ): Promise<AdminPlayerProfileView> {
+    const target = await this.requireUser(targetUserId);
+    if (target.role !== Role.PlayerParent) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ROLE_MISMATCH,
+        message: 'This user does not have a player profile.',
+      });
+    }
+    if (input.birthDate !== undefined) {
+      // Same floor as the self-service route: the age rule belongs to the
+      // account, not to whoever is editing it.
+      this.authService.assertOldEnoughForOwnAccount(input.birthDate);
+    }
+
+    const updated = await this.playersService.updateSelfProfile(targetUserId, input);
+    if (!updated) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.PLAYER_PROFILE_NOT_FOUND,
+        message: 'This account has no self player profile — it may be a child login.',
+      });
+    }
+
+    await this.audit.record({
+      action: AUDIT_PLAYER_PROFILE_UPDATED,
+      actor,
+      targetUserId,
+      target: { type: 'PlayerProfile', id: updated.id },
+      metadata: { fields: changedFields(input) },
+    });
+    return AdminPlayerProfileView.from(updated);
   }
 
   /**
@@ -255,6 +349,17 @@ export class AdminService {
       originalEmail,
       ...(await this.usersService.findByIds(childUserIds)).map((u) => u.email),
     ];
+
+    // Profile photos live outside `users` too — captured before anonymisation
+    // wipes the column, same reason as photoPublicId above. Covers deleting a
+    // parent (owned profiles) and deleting a child login directly (the profile
+    // is owned by the parent, so it is found by childUserId instead).
+    const ownedProfiles = await this.playersService.findByOwner(target.id);
+    const childLoginProfile = await this.playersService.findByChildUserId(target.id);
+    const profilePhotoPublicIds = [
+      ...ownedProfiles.map((p) => p.photoPublicId),
+      childLoginProfile?.photoPublicId ?? null,
+    ].filter((id): id is string => id !== null);
 
     await this.dataSource.transaction(async (manager: EntityManager) => {
       const deletionLogs = manager.getRepository(UserDeletionLog);
@@ -309,24 +414,14 @@ export class AdminService {
     // Outside the transaction: the storage provider is not transactional, and an
     // outage there must not roll back a recorded erasure.
     if (photoPublicId !== null) {
-      await this.discardAsset(photoPublicId);
+      await discardAsset(this.storage, photoPublicId, this.logger);
+    }
+    for (const publicId of profilePhotoPublicIds) {
+      await discardAsset(this.storage, publicId, this.logger);
     }
 
     const updated = await this.requireUser(target.id);
     return UserSummaryDto.fromEntity(updated);
-  }
-
-  /** Best-effort: the erasure is already committed, so an outage costs an orphan. */
-  private async discardAsset(publicId: string): Promise<void> {
-    try {
-      await this.storage.delete(publicId);
-    } catch (error) {
-      this.logger.warn(
-        `Orphaned stored asset ${publicId} after GDPR deletion: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 
   private async requireUser(id: string): Promise<User> {

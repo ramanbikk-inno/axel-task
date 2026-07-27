@@ -43,6 +43,9 @@ export enum ErrorCode {
   /** A family-management action only the parent account may take. */
   CHILD_ACTION_NOT_ALLOWED = 'CHILD_ACTION_NOT_ALLOWED',
   PROFILE_NOT_OWNED = 'PROFILE_NOT_OWNED',
+  PLAYER_PROFILE_NOT_FOUND = 'PLAYER_PROFILE_NOT_FOUND',
+  /** The request was fine; the target user is the wrong role for that profile. */
+  ROLE_MISMATCH = 'ROLE_MISMATCH',
   FILE_TOO_LARGE = 'FILE_TOO_LARGE',
   UNSUPPORTED_FILE_TYPE = 'UNSUPPORTED_FILE_TYPE',
   NOT_FOUND = 'NOT_FOUND',

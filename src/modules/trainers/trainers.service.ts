@@ -3,13 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
-import { decodeImageUpload } from '../../shared/files/image-content';
+import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
 import { AuditService } from '../audit/audit.service';
 import { Principal } from '../auth/principal';
+import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from './entities/trainer-profile.entity';
-
-const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 
 export const AUDIT_BRANDING_COLOR_SET = 'trainer.branding-color-set';
 export const AUDIT_BRANDING_LOGO_SET = 'trainer.branding-logo-set';
@@ -118,7 +117,7 @@ export class TrainersService {
     const { buffer } = decodeImageUpload({
       dataBase64: input.dataBase64,
       declaredMimeType: input.mimeType,
-      maxBytes: MAX_LOGO_BYTES,
+      maxBytes: MAX_IMAGE_UPLOAD_BYTES,
       label: 'Logo',
     });
 
@@ -136,7 +135,7 @@ export class TrainersService {
     // After the row points at the new asset, never before: deleting first
     // would leave the profile referencing nothing if the upload then failed.
     if (previousPublicId !== null && previousPublicId !== stored.publicId) {
-      await this.discardAsset(previousPublicId);
+      await discardAsset(this.storage, previousPublicId, this.logger);
     }
     await this.audit.record({
       action: AUDIT_BRANDING_LOGO_SET,
@@ -162,7 +161,7 @@ export class TrainersService {
     profile.logoPublicId = null;
     const saved = await this.trainersRepository.save(profile);
     if (previousPublicId !== null) {
-      await this.discardAsset(previousPublicId);
+      await discardAsset(this.storage, previousPublicId, this.logger);
     }
     await this.audit.record({
       action: AUDIT_BRANDING_LOGO_REMOVED,
@@ -170,19 +169,6 @@ export class TrainersService {
       target: { type: 'TrainerOrg', id: profile.id },
     });
     return saved;
-  }
-
-  /** Best-effort: the row is already consistent, so an outage costs an orphan. */
-  private async discardAsset(publicId: string): Promise<void> {
-    try {
-      await this.storage.delete(publicId);
-    } catch (error) {
-      this.logger.warn(
-        `Orphaned stored asset ${publicId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 
   private async requireOwnProfile(userId: string): Promise<TrainerProfile> {

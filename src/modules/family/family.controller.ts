@@ -22,6 +22,7 @@ import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { AddTrainerByCodeDto, AddTrainerDto } from './dto/add-trainer.dto';
 import { ChildLoginStatusView, ChildLoginView, CreateChildLoginDto } from './dto/child-login.dto';
+import { UploadPhotoDto } from '../profile/dto/profile.dto';
 import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
 import { FamilyContextView } from './dto/family-context.view';
@@ -73,6 +74,31 @@ export class FamilyController {
   ): Promise<PlayerProfileView> {
     const principal = req.user as Principal;
     return this.family.updateChild(principal, profileId, dto);
+  }
+
+  @Post('children/:profileId/photo')
+  @HttpCode(200)
+  @UseGuards(NotAChildGuard)
+  @ApiOkResponse({ type: PlayerProfileView })
+  async uploadChildPhoto(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @Body() dto: UploadPhotoDto,
+    @Req() req: Request,
+  ): Promise<PlayerProfileView> {
+    const principal = req.user as Principal;
+    return this.family.uploadChildPhoto(principal, profileId, dto);
+  }
+
+  @Delete('children/:profileId/photo')
+  @HttpCode(200)
+  @UseGuards(NotAChildGuard)
+  @ApiOkResponse({ type: PlayerProfileView })
+  async removeChildPhoto(
+    @Param('profileId', ParseUUIDPipe) profileId: string,
+    @Req() req: Request,
+  ): Promise<PlayerProfileView> {
+    const principal = req.user as Principal;
+    return this.family.removeChildPhoto(principal, profileId);
   }
 
   /**

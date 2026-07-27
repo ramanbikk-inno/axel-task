@@ -3,11 +3,13 @@ import { Inject } from '@nestjs/common';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
+import { changedFields } from '../audit/changed-fields';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
-import { decodeImageUpload } from '../../shared/files/image-content';
+import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
+import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { TrainersService } from '../trainers/trainers.service';
@@ -22,8 +24,6 @@ import {
   UploadPhotoDto,
 } from './dto/profile.dto';
 
-const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
-
 /**
  * Every action taken during an impersonation has to be
  * attributable to the admin behind it. Self-service profile edits were not
@@ -37,13 +37,6 @@ export const AUDIT_PROFILE_PHOTO_UPDATED = 'profile.photo-updated';
 export const AUDIT_PROFILE_PHOTO_REMOVED = 'profile.photo-removed';
 export const AUDIT_TRAINER_PROFILE_UPDATED = 'profile.trainer-updated';
 export const AUDIT_PLAYER_PROFILE_UPDATED = 'profile.player-updated';
-
-/** The field names that were actually supplied, for the audit metadata. */
-function changedFields(dto: object): string[] {
-  return Object.entries(dto)
-    .filter(([, value]) => value !== undefined)
-    .map(([key]) => key);
-}
 
 @Injectable()
 export class ProfileService {
@@ -88,7 +81,7 @@ export class ProfileService {
     const { buffer } = decodeImageUpload({
       dataBase64: dto.dataBase64,
       declaredMimeType: dto.mimeType,
-      maxBytes: MAX_PHOTO_BYTES,
+      maxBytes: MAX_IMAGE_UPLOAD_BYTES,
       label: 'Profile photo',
     });
 
@@ -104,7 +97,7 @@ export class ProfileService {
     // Only after the row points at the new asset: deleting first would leave a
     // profile referencing nothing if the upload then failed.
     if (previous.photoPublicId !== null && previous.photoPublicId !== stored.publicId) {
-      await this.discardAsset(previous.photoPublicId);
+      await discardAsset(this.storage, previous.photoPublicId, this.logger);
     }
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_UPDATED,
@@ -127,7 +120,7 @@ export class ProfileService {
 
     const user = await this.usersService.setPhoto(actor.userId, null);
     if (existing.photoPublicId !== null) {
-      await this.discardAsset(existing.photoPublicId);
+      await discardAsset(this.storage, existing.photoPublicId, this.logger);
     }
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_REMOVED,
@@ -206,25 +199,6 @@ export class ProfileService {
       metadata: { fields: changedFields(dto) },
     });
     return this.getMe(userId);
-  }
-
-  /**
-   * Cleanup is best-effort by construction. The row is already consistent by
-   * the time this runs, so a storage outage should cost an orphaned file, not
-   * the user's request. Kept here rather than relying on the storage
-   * implementation to swallow its own errors — that is a property of one
-   * implementation, not of the contract.
-   */
-  private async discardAsset(publicId: string): Promise<void> {
-    try {
-      await this.storage.delete(publicId);
-    } catch (error) {
-      this.logger.warn(
-        `Orphaned stored asset ${publicId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 
   private async buildView(user: User): Promise<MyProfileView> {

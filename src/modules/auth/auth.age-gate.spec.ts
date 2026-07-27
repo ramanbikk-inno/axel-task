@@ -14,9 +14,14 @@ class FixedClock extends ClockService {
 }
 
 /** Only the clock and config are read, so every other dependency stays unset. */
-function build(minimumAge?: number): AuthService {
+function build(minimumAge?: number, idleTimeout?: string): AuthService {
   const config = {
-    get: jest.fn().mockReturnValue(minimumAge),
+    get: jest.fn((key: string): unknown => {
+      if (key === 'MIN_SELF_REGISTRATION_AGE') {
+        return minimumAge;
+      }
+      return key === 'SESSION_IDLE_TIMEOUT' ? idleTimeout : undefined;
+    }),
   } as unknown as ConfigService;
   const unused = null as never;
   return new AuthService(

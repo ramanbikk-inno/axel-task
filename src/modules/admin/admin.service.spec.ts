@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { StorageService } from '../storage/storage.service';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
+import { CoachesService } from '../coaches/coaches.service';
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { MailService } from '../mail/mail.service';
 import { PlayersService } from '../players/players.service';
@@ -56,6 +57,7 @@ describe('AdminService.createTrainer', () => {
       delete: jest.fn().mockResolvedValue(undefined),
     } as unknown as StorageService;
     const clock = { now: (): Date => new Date('2026-05-01T00:00:00.000Z') } as ClockService;
+    const coachesService = {} as unknown as CoachesService;
 
     const service = new AdminService(
       dataSource,
@@ -68,6 +70,7 @@ describe('AdminService.createTrainer', () => {
       shareLinks,
       storage,
       clock,
+      coachesService,
     );
 
     return {
@@ -178,5 +181,211 @@ describe('AdminService.createTrainer', () => {
       expect.anything(),
     );
     expect(result).toEqual({ id: 'user-1', email: dto.email, role: Role.Trainer });
+  });
+});
+
+describe('AdminService role-profile editing', () => {
+  const admin: Principal = {
+    userId: 'admin-1',
+    role: Role.SuperAdmin,
+    sessionId: 'session-1',
+    activeTrainerProfileId: null,
+    activePlayerProfileId: null,
+    trainerOrgId: null,
+    coachProfileId: null,
+    isChild: false,
+    childPlayerProfileId: null,
+    parentUserId: null,
+    tokenVersion: 0,
+    scope: 'platform',
+    impersonating: false,
+  };
+
+  const makeService = (
+    targetRole: Role,
+  ): {
+    service: AdminService;
+    findById: jest.Mock;
+    updateProfileByUserId: jest.Mock;
+    updateSelfProfile: jest.Mock;
+    adminUpdateProfile: jest.Mock;
+    auditRecord: jest.Mock;
+    assertOldEnough: jest.Mock;
+  } => {
+    const findById = jest.fn().mockResolvedValue({ id: 'target-1', role: targetRole } as User);
+    const updateProfileByUserId = jest.fn();
+    const updateSelfProfile = jest.fn();
+    const adminUpdateProfile = jest.fn();
+    const auditRecord = jest.fn().mockResolvedValue(undefined);
+    const assertOldEnough = jest.fn();
+
+    const service = new AdminService(
+      {} as DataSource,
+      { findById } as unknown as UsersService,
+      { updateProfileByUserId } as unknown as TrainersService,
+      { assertOldEnoughForOwnAccount: assertOldEnough } as unknown as AuthService,
+      {} as MailService,
+      { record: auditRecord } as unknown as AuditService,
+      { updateSelfProfile } as unknown as PlayersService,
+      {} as ShareLinksService,
+      {} as StorageService,
+      {} as ClockService,
+      { adminUpdateProfile } as unknown as CoachesService,
+    );
+
+    return {
+      service,
+      findById,
+      updateProfileByUserId,
+      updateSelfProfile,
+      adminUpdateProfile,
+      auditRecord,
+      assertOldEnough,
+    };
+  };
+
+  describe('updateTrainerProfile', () => {
+    it('refuses a target that is not a Trainer', async () => {
+      const { service } = makeService(Role.Coach);
+
+      await expect(
+        service.updateTrainerProfile('target-1', admin, { businessName: 'Nope' }),
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.ROLE_MISMATCH } });
+    });
+
+    it('404s when the role check passes but no profile row exists', async () => {
+      const { service, updateProfileByUserId } = makeService(Role.Trainer);
+      updateProfileByUserId.mockResolvedValue(null);
+
+      await expect(
+        service.updateTrainerProfile('target-1', admin, { businessName: 'Nope' }),
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND } });
+    });
+
+    it('updates the profile and audits it under the admin as actor', async () => {
+      const { service, updateProfileByUserId, auditRecord } = makeService(Role.Trainer);
+      updateProfileByUserId.mockResolvedValue({
+        id: 'tp-1',
+        userId: 'target-1',
+        businessName: 'Elite Hoops',
+        website: null,
+        address: null,
+        description: null,
+      });
+
+      const result = await service.updateTrainerProfile('target-1', admin, {
+        businessName: 'Elite Hoops',
+      });
+
+      expect(result.businessName).toBe('Elite Hoops');
+      expect(updateProfileByUserId).toHaveBeenCalledWith('target-1', {
+        businessName: 'Elite Hoops',
+      });
+      expect(auditRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'profile.trainer-updated',
+          actor: expect.objectContaining({ userId: 'admin-1' }),
+          targetUserId: 'target-1',
+        }),
+      );
+    });
+  });
+
+  describe('updateCoachProfile', () => {
+    it('refuses a target that is not a Coach', async () => {
+      const { service } = makeService(Role.Trainer);
+
+      await expect(
+        service.updateCoachProfile('target-1', admin, { bio: 'Nope' }),
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.ROLE_MISMATCH } });
+    });
+
+    it('delegates to CoachesService.adminUpdateProfile, which owns the lookup and audit', async () => {
+      const { service, adminUpdateProfile } = makeService(Role.Coach);
+      adminUpdateProfile.mockResolvedValue({ id: 'coach-1', bio: 'New bio' });
+
+      const result = await service.updateCoachProfile('target-1', admin, { bio: 'New bio' });
+
+      expect(adminUpdateProfile).toHaveBeenCalledWith('target-1', admin, { bio: 'New bio' });
+      expect(result).toEqual({ id: 'coach-1', bio: 'New bio' });
+    });
+  });
+
+  describe('updatePlayerProfile', () => {
+    it('refuses a target that is not a PlayerParent', async () => {
+      const { service } = makeService(Role.Trainer);
+
+      await expect(
+        service.updatePlayerProfile('target-1', admin, { school: 'Nope' }),
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.ROLE_MISMATCH } });
+    });
+
+    it('404s a child login, which has no self profile of its own', async () => {
+      const { service, updateSelfProfile } = makeService(Role.PlayerParent);
+      updateSelfProfile.mockResolvedValue(null);
+
+      await expect(
+        service.updatePlayerProfile('target-1', admin, { school: 'Nope' }),
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.PLAYER_PROFILE_NOT_FOUND } });
+    });
+
+    it('updates the profile and audits it under the admin as actor', async () => {
+      const { service, updateSelfProfile, auditRecord } = makeService(Role.PlayerParent);
+      updateSelfProfile.mockResolvedValue({
+        id: 'pp-1',
+        ownerUserId: 'target-1',
+        displayName: 'Sam',
+        isChild: false,
+        birthDate: '1994-03-22',
+        gender: null,
+        school: 'Riverside High',
+        jerseyNumber: null,
+        skillLevel: null,
+      });
+
+      const result = await service.updatePlayerProfile('target-1', admin, {
+        school: 'Riverside High',
+      });
+
+      expect(result.school).toBe('Riverside High');
+      expect(updateSelfProfile).toHaveBeenCalledWith('target-1', { school: 'Riverside High' });
+      expect(auditRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'profile.player-updated',
+          actor: expect.objectContaining({ userId: 'admin-1' }),
+          targetUserId: 'target-1',
+        }),
+      );
+    });
+
+    it('puts a supplied birthDate through the same age floor as self-service', async () => {
+      const { service, updateSelfProfile, assertOldEnough } = makeService(Role.PlayerParent);
+      updateSelfProfile.mockResolvedValue({ id: 'pp-1', ownerUserId: 'target-1' });
+
+      await service.updatePlayerProfile('target-1', admin, { birthDate: '1994-03-22' });
+
+      expect(assertOldEnough).toHaveBeenCalledWith('1994-03-22');
+    });
+
+    it('does not write a birthDate the floor rejects', async () => {
+      const { service, updateSelfProfile, assertOldEnough } = makeService(Role.PlayerParent);
+      assertOldEnough.mockImplementation(() => {
+        throw new ForbiddenException({ errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION });
+      });
+
+      await expect(
+        service.updatePlayerProfile('target-1', admin, { birthDate: '2020-01-01' }),
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION } });
+      expect(updateSelfProfile).not.toHaveBeenCalled();
+    });
+
+    it('leaves the floor alone when birthDate is not part of the patch', async () => {
+      const { service, updateSelfProfile, assertOldEnough } = makeService(Role.PlayerParent);
+      updateSelfProfile.mockResolvedValue({ id: 'pp-1', ownerUserId: 'target-1' });
+
+      await service.updatePlayerProfile('target-1', admin, { school: 'Riverside High' });
+
+      expect(assertOldEnough).not.toHaveBeenCalled();
+    });
   });
 });
