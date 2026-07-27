@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Let a child login manage its own Best Times, amend its own basic profile fields
+  (`PATCH /profile/me/child`), and set its own photo — `AbilityFactory` granted all three
+  from the start, but no route honoured them
+- Record an emergency contact on an adult trainee profile, not just a child's
+- `GET /users/:id` — the Super Admin read that pairs with the four role-profile PATCH routes
+
+### Fixed
+
+- Show a child their own trainee profile on `GET /profile/me` instead of `player: null`
+- Write a child's photo to the profile row the family view and roster read, rather than to
+  their account row where nothing displayed it
+
 ## [0.2.0] - 2026-07-27
 
 ### Added

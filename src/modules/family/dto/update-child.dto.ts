@@ -10,34 +10,10 @@ import {
 } from 'class-validator';
 
 import { IsCalendarDate } from '../../../shared/validation/calendar-date';
-import { IsPhoneNumberLoose } from '../../../shared/validation/phone';
 import { IsOptionalNotNull } from '../../../shared/validation/presence';
+import { EmergencyContactDto } from '../../players/dto/emergency-contact.dto';
 
-/**
- * Stored as jsonb because the shape is open-ended and nothing queries into it.
- * Validated all the same: it is third-party PII shown to a trainer in an
- * emergency, so an unbounded blob will not do.
- */
-export class EmergencyContactDto {
-  @ApiPropertyOptional({ example: 'Jane Smith' })
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(120)
-  name?: string;
-
-  @ApiPropertyOptional({ example: '+1 555 123 4567' })
-  @IsOptional()
-  @IsPhoneNumberLoose()
-  phone?: string;
-
-  @ApiPropertyOptional({ example: 'Grandmother' })
-  @IsOptional()
-  @IsString()
-  @MinLength(1)
-  @MaxLength(60)
-  relationship?: string;
-}
+export { EmergencyContactDto };
 
 /**
  * Only the fields present are written, so sending one key cannot blank the rest.

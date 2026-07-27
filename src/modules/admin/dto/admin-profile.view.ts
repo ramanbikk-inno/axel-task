@@ -1,7 +1,9 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-import { PlayerProfile } from '../../players/entities/player-profile.entity';
+import { CoachView } from '../../coaches/dto/coach.dto';
+import { EmergencyContact, PlayerProfile } from '../../players/entities/player-profile.entity';
 import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
+import { UserSummaryDto } from './user-summary.dto';
 
 export class AdminTrainerProfileView {
   @ApiProperty() id!: string;
@@ -37,6 +39,7 @@ export class AdminPlayerProfileView {
   @ApiProperty({ nullable: true }) school!: string | null;
   @ApiProperty({ nullable: true }) jerseyNumber!: string | null;
   @ApiProperty({ nullable: true }) skillLevel!: string | null;
+  @ApiProperty({ nullable: true }) emergencyContact!: EmergencyContact | null;
 
   static from(profile: PlayerProfile): AdminPlayerProfileView {
     return {
@@ -49,6 +52,21 @@ export class AdminPlayerProfileView {
       school: profile.school,
       jerseyNumber: profile.jerseyNumber,
       skillLevel: profile.skillLevel,
+      emergencyContact: profile.emergencyContact,
     };
   }
+}
+
+/** One user as the Users tool shows them, plus their role-specific profile. */
+export class AdminUserDetailView {
+  @ApiProperty({ type: UserSummaryDto }) user!: UserSummaryDto;
+
+  @ApiPropertyOptional({ type: AdminTrainerProfileView, nullable: true })
+  trainer!: AdminTrainerProfileView | null;
+
+  @ApiPropertyOptional({ type: AdminPlayerProfileView, nullable: true })
+  player!: AdminPlayerProfileView | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  coach!: CoachView | null;
 }

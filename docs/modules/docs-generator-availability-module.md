@@ -14,6 +14,8 @@ The Availability module provides endpoints for managing player weekly recurring 
 
 Base path: `/api/v1/players`
 
+A child login carries the same `PlayerParent` role and may use both endpoints below for its own profile — see `requireAccessibleProfile` under Implementation Details.
+
 #### GET `/players/:profileId/availability`
 
 Retrieve availability windows for a specific player profile.
@@ -54,7 +56,7 @@ AvailabilitySlotView[] {
 
 | Status | ErrorCode | Message | Cause |
 |--------|-----------|---------|-------|
-| 403 | `PROFILE_NOT_OWNED` | You do not own this player profile. | Authenticated user does not own the profile |
+| 403 | `PROFILE_NOT_OWNED` | You do not own this player profile. | Caller neither owns the profile nor is the child login it belongs to |
 | 404 | `NOT_FOUND` | Player profile not found. | Profile ID doesn't exist |
 | 401 | (JWT error) | Unauthorized | No valid bearer token provided |
 
@@ -132,7 +134,7 @@ Returns the full updated availability set (same as GET response).
 | 400 | `VALIDATION_ERROR` | endTime must be after startTime (day N). | `endTime ≤ startTime` |
 | 400 | `VALIDATION_ERROR` | Availability windows overlap on day N. | Multiple windows on same day with overlap |
 | 400 | (schema validation) | (field-specific error) | Invalid format, out-of-range value, or constraint violation |
-| 403 | `PROFILE_NOT_OWNED` | You do not own this player profile. | Authenticated user does not own the profile |
+| 403 | `PROFILE_NOT_OWNED` | You do not own this player profile. | Caller neither owns the profile nor is the child login it belongs to |
 | 404 | `NOT_FOUND` | Player profile not found. | Profile ID doesn't exist |
 | 401 | (JWT error) | Unauthorized | No valid bearer token |
 
@@ -272,7 +274,7 @@ AvailabilitySlotView {
    - Validation: For sorted windows on a day, each `window[i].startTime >= window[i-1].endTime`
    - Raises `BadRequestException { errorCode: VALIDATION_ERROR, message: "Availability windows overlap on day N." }`
 
-3. **Ownership check** (for PUT/GET): User must own the profile
+3. **Access check** (for PUT/GET): the caller must reach the profile — an account holder through `ownerUserId`, a child login through `principal.childPlayerProfileId`, which is their own profile and no sibling's
    - Raises `ForbiddenException { errorCode: PROFILE_NOT_OWNED }`
 
 4. **Profile existence** (for PUT/GET): Profile must exist
@@ -365,8 +367,9 @@ curl -X GET "http://localhost:3000/api/v1/trainers/me/players/availability?dayOf
 
 **Key Methods:**
 
-- `setForProfile(ownerUserId, profileId, slots)` — Validates ownership, validates slots, deletes old slots, inserts new ones (transaction).
-- `getForProfile(ownerUserId, profileId)` — Validates ownership, returns current slots.
+- `setForProfile(principal, profileId, slots)` — Validates access, validates slots, deletes old slots, inserts new ones (transaction).
+- `getForProfile(principal, profileId)` — Validates access, returns current slots.
+- `requireAccessibleProfile(principal, profileId)` — The access rule for both. A parent reaches every profile they own; a child reaches exactly the one `principal.childPlayerProfileId` names. Takes the whole principal rather than a user id because a child's profile is owned by their *parent*, so an `ownerUserId` comparison alone locked a child out of their own Best Times.
 - `trainerView(trainerUserId, query)` — Validates trainer profile, fetches associated players, applies day/time filter, returns sorted by displayName then id.
 - `assertValidSlots(input)` — Validates no same-day overlap, no midnight-crossing.
 

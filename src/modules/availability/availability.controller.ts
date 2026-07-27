@@ -50,7 +50,7 @@ export class PlayerAvailabilityController {
     @Param('profileId', ParseUUIDPipe) profileId: string,
     @Req() req: Request,
   ): Promise<AvailabilitySlotView[]> {
-    return this.availability.getForProfile((req.user as Principal).userId, profileId);
+    return this.availability.getForProfile(req.user as Principal, profileId);
   }
 
   @Put(':profileId/availability')

@@ -31,7 +31,11 @@ import { PlayersService } from '../players/players.service';
 import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
-import { AdminPlayerProfileView, AdminTrainerProfileView } from './dto/admin-profile.view';
+import {
+  AdminPlayerProfileView,
+  AdminTrainerProfileView,
+  AdminUserDetailView,
+} from './dto/admin-profile.view';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
@@ -422,6 +426,32 @@ export class AdminService {
 
     const updated = await this.requireUser(target.id);
     return UserSummaryDto.fromEntity(updated);
+  }
+
+  async getUser(targetUserId: string): Promise<AdminUserDetailView> {
+    const user = await this.requireUser(targetUserId);
+
+    return {
+      user: UserSummaryDto.fromEntity(user),
+      trainer: user.role === Role.Trainer ? await this.trainerViewFor(targetUserId) : null,
+      coach:
+        user.role === Role.Coach
+          ? await this.coachesService.findActiveByUserId(targetUserId)
+          : null,
+      player: user.role === Role.PlayerParent ? await this.playerViewFor(targetUserId) : null,
+    };
+  }
+
+  private async trainerViewFor(userId: string): Promise<AdminTrainerProfileView | null> {
+    const profile = await this.trainersService.findByUserId(userId);
+    return profile === null ? null : AdminTrainerProfileView.from(profile);
+  }
+
+  private async playerViewFor(userId: string): Promise<AdminPlayerProfileView | null> {
+    const profile =
+      (await this.playersService.findSelfProfile(userId)) ??
+      (await this.playersService.findByChildUserId(userId));
+    return profile === null ? null : AdminPlayerProfileView.from(profile);
   }
 
   private async requireUser(id: string): Promise<User> {

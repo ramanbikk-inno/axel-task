@@ -154,6 +154,14 @@ describe('Child login against the self-profile routes (e2e)', () => {
   });
 
   describe('what a child may still do', () => {
+    // The invariant worth holding: reading must not conjure a second, non-child profile.
+    const expectNoSelfProfileConjured = async (childUserId: string): Promise<void> => {
+      const selfRows = await ctx.dataSource
+        .getRepository(PlayerProfile)
+        .findBy({ ownerUserId: childUserId, isChild: false });
+      expect(selfRows).toHaveLength(0);
+    };
+
     it('reads its own account through GET /profile/me', async () => {
       const fam = await seedFamily();
 
@@ -162,8 +170,8 @@ describe('Child login against the self-profile routes (e2e)', () => {
         .set(auth(fam.childToken))
         .expect(200);
       expect(res.body.email).toBe(CHILD_EMAIL);
-      // No self profile, and none conjured by reading.
-      expect(res.body.player).toBeNull();
+      expect(res.body.player).toMatchObject({ id: fam.childProfileId, isChild: true });
+      await expectNoSelfProfileConjured(res.body.id as string);
     });
 
     it('edits its own name and phone', async () => {
@@ -177,7 +185,9 @@ describe('Child login against the self-profile routes (e2e)', () => {
         .send({ firstName: 'Maya', lastName: 'Smith' })
         .expect(200);
       expect(res.body).toMatchObject({ firstName: 'Maya', lastName: 'Smith' });
-      expect(res.body.player).toBeNull();
+      // The account fields moved; the trainee profile is still the parent's row.
+      expect(res.body.player).toMatchObject({ id: fam.childProfileId, isChild: true });
+      await expectNoSelfProfileConjured(res.body.id as string);
     });
 
     it('sees its own trainer contexts and nothing of the parent’s', async () => {

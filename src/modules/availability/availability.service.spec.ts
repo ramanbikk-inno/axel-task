@@ -374,7 +374,9 @@ describe('AvailabilityService', () => {
       const { service, findById } = makeService();
       findById.mockResolvedValue(profile('p1', 'Kid', 'someone-else'));
 
-      await expect(service.getForProfile('owner', 'p1')).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.getForProfile(principal('owner'), 'p1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
     });
 
     it('maps rows to the HH:MM view', async () => {
@@ -382,11 +384,54 @@ describe('AvailabilityService', () => {
       findById.mockResolvedValue(profile('p1', 'Kid'));
       slotsFind.mockResolvedValue([slotRow('p1', 3, 1080, 1260)]);
 
-      const result = await service.getForProfile('owner', 'p1');
+      const result = await service.getForProfile(principal('owner'), 'p1');
 
       expect(result).toEqual([
         { dayOfWeek: 3, startTime: '18:00', endTime: '21:00', isAvailable: true },
       ]);
+    });
+  });
+
+  // A child's profile is owned by their parent, so this keys on childPlayerProfileId instead.
+  describe('a child login', () => {
+    const childPrincipal = (childPlayerProfileId: string | null): Principal =>
+      ({
+        userId: 'child-user',
+        role: Role.PlayerParent,
+        sessionId: 'session-1',
+        impersonating: false,
+        isChild: true,
+        childPlayerProfileId,
+      }) as Principal;
+
+    it('reaches its own profile even though the parent owns it', async () => {
+      const { service, findById, slotsFind } = makeService();
+      findById.mockResolvedValue(profile('p1', 'Kid', 'the-parent'));
+      slotsFind.mockResolvedValue([slotRow('p1', 3, 1080, 1260)]);
+
+      const result = await service.getForProfile(childPrincipal('p1'), 'p1');
+
+      expect(result).toEqual([
+        { dayOfWeek: 3, startTime: '18:00', endTime: '21:00', isAvailable: true },
+      ]);
+    });
+
+    it("cannot reach a sibling's, even sharing the same owner", async () => {
+      const { service, findById } = makeService();
+      findById.mockResolvedValue(profile('p2', 'Sibling', 'the-parent'));
+
+      await expect(service.getForProfile(childPrincipal('p1'), 'p2')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('reaches nothing at all when the login is no longer linked to a profile', async () => {
+      const { service, findById } = makeService();
+      findById.mockResolvedValue(profile('p1', 'Kid', 'the-parent'));
+
+      await expect(service.getForProfile(childPrincipal(null), 'p1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
     });
   });
 

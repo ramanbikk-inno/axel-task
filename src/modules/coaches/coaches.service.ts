@@ -230,6 +230,18 @@ export class CoachesService {
     return this.applyProfileUpdate(profile, dto, principal);
   }
 
+  /** Null when the coach has no active engagement — e.g. off-boarded. */
+  async findActiveByUserId(userId: string): Promise<CoachView | null> {
+    const profile = await this.coaches.findOne({
+      where: { userId, status: CoachStatus.Active },
+    });
+    if (!profile) {
+      return null;
+    }
+    const [view] = await this.buildCoachViews([profile]);
+    return view;
+  }
+
   /** Super Admin override, targeted by user id rather than the caller's own session. */
   async adminUpdateProfile(
     targetUserId: string,

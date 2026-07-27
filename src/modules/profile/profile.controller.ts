@@ -20,6 +20,7 @@ import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { MyProfileView } from './dto/my-profile.view';
 import {
+  UpdateOwnChildProfileDto,
   UpdatePlayerProfileDto,
   UpdateProfileDto,
   UpdateTrainerProfileDto,
@@ -88,5 +89,18 @@ export class ProfileController {
     @Req() req: Request,
   ): Promise<MyProfileView> {
     return this.profile.updatePlayer(req.user as Principal, dto);
+  }
+
+  // Separate from me/player, which can create a profile and move a birth date.
+  @Patch('me/child')
+  @HttpCode(200)
+  @UseGuards(RolesGuard)
+  @Roles(Role.PlayerParent)
+  @ApiOkResponse({ type: MyProfileView })
+  async updateOwnChildProfile(
+    @Body() dto: UpdateOwnChildProfileDto,
+    @Req() req: Request,
+  ): Promise<MyProfileView> {
+    return this.profile.updateOwnChildProfile(req.user as Principal, dto);
   }
 }

@@ -333,4 +333,97 @@ describe('Profile editing (e2e)', () => {
       .send({ school: 'Hacked' })
       .expect(403);
   });
+
+  describe('emergency contact on an adult trainee profile', () => {
+    const CONTACT = { name: 'Jane Smith', phone: '+1 555 123 4567', relationship: 'Sister' };
+
+    it('an adult sets and reads back their own', async () => {
+      const player = await ctx.registerVerifiedPlayer({ email: 'ec-self@example.com' });
+      const token = await login(player.email, player.password);
+
+      const res = await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ emergencyContact: CONTACT })
+        .expect(200);
+      expect(res.body.player.emergencyContact).toEqual(CONTACT);
+
+      const me = await request(app.getHttpServer())
+        .get('/api/v1/profile/me')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(me.body.player.emergencyContact).toEqual(CONTACT);
+    });
+
+    it('clears it on an explicit null, and leaves it alone when omitted', async () => {
+      const player = await ctx.registerVerifiedPlayer({ email: 'ec-clear@example.com' });
+      const token = await login(player.email, player.password);
+
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ emergencyContact: CONTACT })
+        .expect(200);
+
+      const untouched = await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ school: 'Somewhere' })
+        .expect(200);
+      expect(untouched.body.player.emergencyContact).toEqual(CONTACT);
+
+      const cleared = await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ emergencyContact: null })
+        .expect(200);
+      expect(cleared.body.player.emergencyContact).toBeNull();
+    });
+
+    it('rejects a malformed contact rather than storing the blob', async () => {
+      const player = await ctx.registerVerifiedPlayer({ email: 'ec-bad@example.com' });
+      const token = await login(player.email, player.password);
+
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ emergencyContact: { name: '', phone: 'not-a-phone', nonsense: 1 } })
+        .expect(422);
+    });
+
+    it('a Super Admin can set one through the admin route too', async () => {
+      const target = await ctx.registerVerifiedPlayer({ email: 'ec-admin@example.com' });
+      const token = await adminToken();
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/v1/users/${target.userId}/player-profile`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ emergencyContact: CONTACT })
+        .expect(200);
+      expect(res.body.emergencyContact).toEqual(CONTACT);
+    });
+
+    it('erasure clears it, since it is somebody else’s PII', async () => {
+      const target = await ctx.registerVerifiedPlayer({ email: 'ec-erase@example.com' });
+      const token = await adminToken();
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/users/${target.userId}/player-profile`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ emergencyContact: CONTACT })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .delete(`/api/v1/users/${target.userId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ reason: 'GDPR request' })
+        .expect(200);
+
+      const rows = await ctx.dataSource.query(
+        `SELECT emergency_contact FROM player_profiles WHERE owner_user_id = $1`,
+        [target.userId],
+      );
+      expect(rows[0].emergency_contact).toBeNull();
+    });
+  });
 });

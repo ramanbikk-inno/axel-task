@@ -13,6 +13,7 @@ export interface CreatePlayerProfileInput {
   gender?: string | null;
   school?: string | null;
   jerseyNumber?: string | null;
+  emergencyContact?: EmergencyContact | null;
 }
 
 @Injectable()
@@ -36,6 +37,7 @@ export class PlayersService {
       gender: input.gender ?? null,
       school: input.school ?? null,
       jerseyNumber: input.jerseyNumber ?? null,
+      emergencyContact: input.emergencyContact ?? null,
     });
     return repository.save(profile);
   }
@@ -76,6 +78,7 @@ export class PlayersService {
       jerseyNumber?: string | null;
       gender?: string | null;
       birthDate?: string;
+      emergencyContact?: EmergencyContact | null;
     },
   ): Promise<PlayerProfile | null> {
     const profile = await this.findSelfProfile(ownerUserId);
@@ -97,7 +100,28 @@ export class PlayersService {
     if (input.birthDate !== undefined) {
       profile.birthDate = input.birthDate;
     }
+    if (input.emergencyContact !== undefined) {
+      profile.emergencyContact = input.emergencyContact;
+    }
     return this.profiles.save(profile);
+  }
+
+  /** Targeted by profile id, not owner: a child's profile is owned by their parent. */
+  async updateOwnChildProfile(
+    id: string,
+    input: { school?: string | null; jerseyNumber?: string | null },
+  ): Promise<PlayerProfile> {
+    const patch: QueryDeepPartialEntity<PlayerProfile> = {};
+    if (input.school !== undefined) {
+      patch.school = input.school;
+    }
+    if (input.jerseyNumber !== undefined) {
+      patch.jerseyNumber = input.jerseyNumber;
+    }
+    if (Object.keys(patch).length > 0) {
+      await this.profiles.update({ id }, patch);
+    }
+    return (await this.profiles.findOne({ where: { id } })) as PlayerProfile;
   }
 
   /**
