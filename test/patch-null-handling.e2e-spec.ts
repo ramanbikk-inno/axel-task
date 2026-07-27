@@ -228,6 +228,98 @@ describe('Explicit null on every PATCH (e2e)', () => {
         .expect(200);
       expect(res.body.player).toMatchObject({ school: null, jerseyNumber: null, gender: null });
     });
+
+    it('accepts a null emergencyContact, clearing third-party PII on request', async () => {
+      const token = await makeParent();
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set(auth(token))
+        .send({ emergencyContact: { name: 'Jane Smith', phone: '+1 555 123 4567' } })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set(auth(token))
+        .send({ emergencyContact: null })
+        .expect(200);
+      expect(res.body.player.emergencyContact).toBeNull();
+    });
+
+    it('rejects a null birthDate — the age gate has nothing to check against', async () => {
+      const token = await makeParent();
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/player')
+        .set(auth(token))
+        .send({ birthDate: null })
+        .expect(422);
+    });
+  });
+
+  describe('PATCH /profile/me/child', () => {
+    /** A child login for the parent's child profile, which is what this route edits. */
+    const makeChildLogin = async (parentToken: string, childProfileId: string): Promise<string> => {
+      await request(app.getHttpServer())
+        .post(`/api/v1/players/children/${childProfileId}/login`)
+        .set(auth(parentToken))
+        .send({ email: 'kid-null@example.com', password: 'K1dSafe!Passw0rd' })
+        .expect(201);
+      return login('kid-null@example.com', 'K1dSafe!Passw0rd');
+    };
+
+    it('accepts a null school and jerseyNumber, which is how a child clears them', async () => {
+      const parentToken = await makeParent();
+      const childId = await makeChild(parentToken);
+      const childToken = await makeChildLogin(parentToken, childId);
+
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/child')
+        .set(auth(childToken))
+        .send({ school: 'Riverside High', jerseyNumber: '23' })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/child')
+        .set(auth(childToken))
+        .send({ school: null, jerseyNumber: null })
+        .expect(200);
+      expect(res.body.player).toMatchObject({ school: null, jerseyNumber: null });
+    });
+
+    it('treats an empty body as "change nothing" rather than blanking the profile', async () => {
+      const parentToken = await makeParent();
+      const childId = await makeChild(parentToken);
+      const childToken = await makeChildLogin(parentToken, childId);
+
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/child')
+        .set(auth(childToken))
+        .send({ school: 'Riverside High', jerseyNumber: '23' })
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/child')
+        .set(auth(childToken))
+        .send({})
+        .expect(200);
+      expect(res.body.player).toMatchObject({
+        school: 'Riverside High',
+        jerseyNumber: '23',
+        displayName: 'Maya',
+        birthDate: '2014-08-01',
+      });
+    });
+
+    it('rejects a field the child does not own rather than ignoring it', async () => {
+      const parentToken = await makeParent();
+      const childId = await makeChild(parentToken);
+      const childToken = await makeChildLogin(parentToken, childId);
+
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me/child')
+        .set(auth(childToken))
+        .send({ school: 'Riverside High', gender: null })
+        .expect(422);
+    });
   });
 
   describe('PATCH /profile/me/trainer', () => {

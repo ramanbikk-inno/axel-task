@@ -36,10 +36,8 @@ import { identityTracker, ipTracker } from './modules/auth/guards/throttle-track
     StorageModule,
     AuthModule,
     AbilityModule,
-    // Must precede AdminModule: both mount on `users`, and AdminModule's
-    // `GET users/:id` would otherwise swallow `users/impersonation/history`.
-    ImpersonationModule,
     AdminModule,
+    ImpersonationModule,
     PlayersModule,
     EnrollmentModule,
     FamilyModule,
