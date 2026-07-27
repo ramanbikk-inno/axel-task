@@ -207,8 +207,8 @@ describe('Profile editing (e2e)', () => {
       .patch(`/api/v1/users/${target.userId}/trainer-profile`)
       .set('Authorization', `Bearer ${token}`)
       .send({ businessName: 'Nope' })
-      .expect(400)
-      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR));
+      .expect(409)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.ROLE_MISMATCH));
   });
 
   it("Super Admin edits a coach's public profile fields, audit-logged", async () => {
@@ -251,8 +251,8 @@ describe('Profile editing (e2e)', () => {
       .patch(`/api/v1/users/${target.userId}/coach-profile`)
       .set('Authorization', `Bearer ${token}`)
       .send({ bio: 'Nope' })
-      .expect(400)
-      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR));
+      .expect(409)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.ROLE_MISMATCH));
   });
 
   it("Super Admin edits a player's own trainee profile fields, audit-logged", async () => {
@@ -295,6 +295,31 @@ describe('Profile editing (e2e)', () => {
       .send({ school: 'Nope' })
       .expect(404)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.PLAYER_PROFILE_NOT_FOUND));
+  });
+
+  it('holds the minimum-age floor on the admin route, same as self-service', async () => {
+    const token = await adminToken();
+    const target = await ctx.registerVerifiedPlayer({ email: 'admin-agegate@example.com' });
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/users/${target.userId}/player-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ birthDate: '2020-01-01' })
+      .expect(403)
+      .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.UNDERAGE_SELF_REGISTRATION));
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/users/${target.userId}/player-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ birthDate: '2035-01-01' })
+      .expect(400);
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/v1/users/${target.userId}/player-profile`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ birthDate: '1990-05-04' })
+      .expect(200);
+    expect(res.body.birthDate).toBe('1990-05-04');
   });
 
   it('a non-Super-Admin cannot use any of the role-profile routes', async () => {

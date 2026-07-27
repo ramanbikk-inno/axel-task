@@ -71,6 +71,57 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
     familyId: 'fam-1',
   };
 
+  async function buildService(idleTimeout?: string): Promise<AuthService> {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: getRepositoryToken(User), useValue: userRepo },
+        { provide: getRepositoryToken(AuthSession), useValue: sessionRepo },
+        { provide: getRepositoryToken(RefreshToken), useValue: refreshRepo },
+        { provide: getRepositoryToken(EmailVerificationToken), useValue: repoStub() },
+        { provide: getRepositoryToken(PasswordResetToken), useValue: repoStub() },
+        { provide: getRepositoryToken(AccountSetupToken), useValue: repoStub() },
+        { provide: TokenService, useValue: tokens },
+        { provide: PasswordService, useValue: { hash: jest.fn(), verify: jest.fn() } },
+        { provide: MailService, useValue: {} },
+        { provide: UsersService, useValue: { findById: jest.fn(async () => user) } },
+        {
+          provide: ImpersonationLogService,
+          useValue: {
+            closeForSession: jest.fn().mockResolvedValue(undefined),
+            closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: PlayersService,
+          useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
+        },
+        {
+          // register() runs inside a transaction; the callback gets the same
+          // repository stubs the rest of these providers use.
+          provide: DataSource,
+          useValue: {
+            transaction: (cb: (m: unknown) => unknown) => cb({ getRepository: () => repoStub() }),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: (k: string): unknown => {
+              if (k === 'MIN_SELF_REGISTRATION_AGE') {
+                return 18;
+              }
+              return k === 'SESSION_IDLE_TIMEOUT' ? idleTimeout : undefined;
+            },
+          },
+        },
+        { provide: ClockService, useValue: clock },
+      ],
+    }).compile();
+
+    return module.get<AuthService>(AuthService);
+  }
+
   beforeEach(async () => {
     refreshRepo = {
       findOne: jest.fn(),
@@ -112,49 +163,7 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       expiresAt: new Date('2026-06-15T00:00:00.000Z'),
     });
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AuthService,
-        { provide: getRepositoryToken(User), useValue: userRepo },
-        { provide: getRepositoryToken(AuthSession), useValue: sessionRepo },
-        { provide: getRepositoryToken(RefreshToken), useValue: refreshRepo },
-        { provide: getRepositoryToken(EmailVerificationToken), useValue: repoStub() },
-        { provide: getRepositoryToken(PasswordResetToken), useValue: repoStub() },
-        { provide: getRepositoryToken(AccountSetupToken), useValue: repoStub() },
-        { provide: TokenService, useValue: tokens },
-        { provide: PasswordService, useValue: { hash: jest.fn(), verify: jest.fn() } },
-        { provide: MailService, useValue: {} },
-        { provide: UsersService, useValue: { findById: jest.fn(async () => user) } },
-        {
-          provide: ImpersonationLogService,
-          useValue: {
-            closeForSession: jest.fn().mockResolvedValue(undefined),
-            closeForTargetUser: jest.fn().mockResolvedValue(undefined),
-          },
-        },
-        {
-          provide: PlayersService,
-          useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
-        },
-        {
-          // register() runs inside a transaction; the callback gets the same
-          // repository stubs the rest of these providers use.
-          provide: DataSource,
-          useValue: {
-            transaction: (cb: (m: unknown) => unknown) => cb({ getRepository: () => repoStub() }),
-          },
-        },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: (k: string): unknown => (k === 'MIN_SELF_REGISTRATION_AGE' ? 18 : undefined),
-          },
-        },
-        { provide: ClockService, useValue: clock },
-      ],
-    }).compile();
-
-    service = module.get<AuthService>(AuthService);
+    service = await buildService();
   });
 
   it('rotates: revokes the presented token (sets replacedById) and issues a new pair', async () => {
@@ -284,45 +293,16 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       // 30 minutes past lastUsedAt: inside the default, outside a 15m override.
       clock.set(new Date('2026-06-08T00:30:00.000Z'));
 
-      const module: TestingModule = await Test.createTestingModule({
-        providers: [
-          AuthService,
-          { provide: getRepositoryToken(User), useValue: userRepo },
-          { provide: getRepositoryToken(AuthSession), useValue: sessionRepo },
-          { provide: getRepositoryToken(RefreshToken), useValue: refreshRepo },
-          { provide: getRepositoryToken(EmailVerificationToken), useValue: repoStub() },
-          { provide: getRepositoryToken(PasswordResetToken), useValue: repoStub() },
-          { provide: getRepositoryToken(AccountSetupToken), useValue: repoStub() },
-          { provide: TokenService, useValue: tokens },
-          { provide: PasswordService, useValue: { hash: jest.fn(), verify: jest.fn() } },
-          { provide: MailService, useValue: {} },
-          { provide: UsersService, useValue: { findById: jest.fn(async () => user) } },
-          {
-            provide: ImpersonationLogService,
-            useValue: {
-              closeForSession: jest.fn().mockResolvedValue(undefined),
-              closeForTargetUser: jest.fn().mockResolvedValue(undefined),
-            },
-          },
-          { provide: PlayersService, useValue: { create: jest.fn() } },
-          {
-            provide: DataSource,
-            useValue: { transaction: (cb: (m: unknown) => unknown) => cb({}) },
-          },
-          {
-            provide: ConfigService,
-            useValue: {
-              get: (k: string): unknown => (k === 'SESSION_IDLE_TIMEOUT' ? '15m' : undefined),
-            },
-          },
-          { provide: ClockService, useValue: clock },
-        ],
-      }).compile();
-      const shortIdleService = module.get<AuthService>(AuthService);
+      const shortIdleService = await buildService('15m');
 
       await expect(shortIdleService.refresh('old.refresh.jwt', {})).rejects.toMatchObject({
         response: { errorCode: ErrorCode.REFRESH_TOKEN_INVALID },
       });
+    });
+
+    it('refuses to construct on a malformed SESSION_IDLE_TIMEOUT', async () => {
+      // Boot-time failure, not a 500 on every refresh once the app is live.
+      await expect(buildService('24hr')).rejects.toThrow(/Invalid duration/);
     });
 
     it('treats a null lastUsedAt as never idle (defensive branch)', async () => {

@@ -48,6 +48,9 @@ export interface DecodedUpload {
   detectedType: ImageMimeType;
 }
 
+/** Ceiling for every user-supplied image: avatars and trainer logos alike. */
+export const MAX_IMAGE_UPLOAD_BYTES = 2 * 1024 * 1024;
+
 /**
  * Decode a base64 upload and verify it is an image of the declared type,
  * within the size limit.

@@ -11,6 +11,7 @@ import { ClockService } from '../../shared/clock/clock.service';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
+import { changedFields } from '../audit/changed-fields';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { AssociationsService } from '../enrollment/associations.service';
@@ -272,11 +273,7 @@ export class CoachesService {
       actor,
       targetUserId: profile.userId,
       target: { type: 'CoachProfile', id: profile.id },
-      metadata: {
-        fields: Object.entries(dto)
-          .filter(([, v]) => v !== undefined)
-          .map(([k]) => k),
-      },
+      metadata: { fields: changedFields(dto) },
     });
 
     const [view] = await this.buildCoachViews([saved]);

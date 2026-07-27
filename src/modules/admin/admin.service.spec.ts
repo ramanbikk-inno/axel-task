@@ -210,18 +210,20 @@ describe('AdminService role-profile editing', () => {
     updateSelfProfile: jest.Mock;
     adminUpdateProfile: jest.Mock;
     auditRecord: jest.Mock;
+    assertOldEnough: jest.Mock;
   } => {
     const findById = jest.fn().mockResolvedValue({ id: 'target-1', role: targetRole } as User);
     const updateProfileByUserId = jest.fn();
     const updateSelfProfile = jest.fn();
     const adminUpdateProfile = jest.fn();
     const auditRecord = jest.fn().mockResolvedValue(undefined);
+    const assertOldEnough = jest.fn();
 
     const service = new AdminService(
       {} as DataSource,
       { findById } as unknown as UsersService,
       { updateProfileByUserId } as unknown as TrainersService,
-      {} as AuthService,
+      { assertOldEnoughForOwnAccount: assertOldEnough } as unknown as AuthService,
       {} as MailService,
       { record: auditRecord } as unknown as AuditService,
       { updateSelfProfile } as unknown as PlayersService,
@@ -238,6 +240,7 @@ describe('AdminService role-profile editing', () => {
       updateSelfProfile,
       adminUpdateProfile,
       auditRecord,
+      assertOldEnough,
     };
   };
 
@@ -247,7 +250,7 @@ describe('AdminService role-profile editing', () => {
 
       await expect(
         service.updateTrainerProfile('target-1', admin, { businessName: 'Nope' }),
-      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.VALIDATION_ERROR } });
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.ROLE_MISMATCH } });
     });
 
     it('404s when the role check passes but no profile row exists', async () => {
@@ -294,7 +297,7 @@ describe('AdminService role-profile editing', () => {
 
       await expect(
         service.updateCoachProfile('target-1', admin, { bio: 'Nope' }),
-      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.VALIDATION_ERROR } });
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.ROLE_MISMATCH } });
     });
 
     it('delegates to CoachesService.adminUpdateProfile, which owns the lookup and audit', async () => {
@@ -314,7 +317,7 @@ describe('AdminService role-profile editing', () => {
 
       await expect(
         service.updatePlayerProfile('target-1', admin, { school: 'Nope' }),
-      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.VALIDATION_ERROR } });
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.ROLE_MISMATCH } });
     });
 
     it('404s a child login, which has no self profile of its own', async () => {
@@ -353,6 +356,36 @@ describe('AdminService role-profile editing', () => {
           targetUserId: 'target-1',
         }),
       );
+    });
+
+    it('puts a supplied birthDate through the same age floor as self-service', async () => {
+      const { service, updateSelfProfile, assertOldEnough } = makeService(Role.PlayerParent);
+      updateSelfProfile.mockResolvedValue({ id: 'pp-1', ownerUserId: 'target-1' });
+
+      await service.updatePlayerProfile('target-1', admin, { birthDate: '1994-03-22' });
+
+      expect(assertOldEnough).toHaveBeenCalledWith('1994-03-22');
+    });
+
+    it('does not write a birthDate the floor rejects', async () => {
+      const { service, updateSelfProfile, assertOldEnough } = makeService(Role.PlayerParent);
+      assertOldEnough.mockImplementation(() => {
+        throw new ForbiddenException({ errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION });
+      });
+
+      await expect(
+        service.updatePlayerProfile('target-1', admin, { birthDate: '2020-01-01' }),
+      ).rejects.toMatchObject({ response: { errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION } });
+      expect(updateSelfProfile).not.toHaveBeenCalled();
+    });
+
+    it('leaves the floor alone when birthDate is not part of the patch', async () => {
+      const { service, updateSelfProfile, assertOldEnough } = makeService(Role.PlayerParent);
+      updateSelfProfile.mockResolvedValue({ id: 'pp-1', ownerUserId: 'target-1' });
+
+      await service.updatePlayerProfile('target-1', admin, { school: 'Riverside High' });
+
+      expect(assertOldEnough).not.toHaveBeenCalled();
     });
   });
 });

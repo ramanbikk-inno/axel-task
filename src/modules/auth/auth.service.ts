@@ -47,6 +47,9 @@ const USERS_EMAIL_INDEX = 'uq_users_email';
 export class AuthService {
   private dummyHash: string | null = null;
 
+  /** Parsed once, like the JWT TTLs: a malformed value must fail the boot, not every refresh. */
+  private readonly idleTimeoutMs: number;
+
   constructor(
     @InjectRepository(AuthSession) private readonly sessions: Repository<AuthSession>,
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
@@ -65,7 +68,12 @@ export class AuthService {
     private readonly playersService: PlayersService,
     private readonly config: ConfigService,
     private readonly dataSource: DataSource,
-  ) {}
+  ) {
+    this.idleTimeoutMs =
+      durationToSeconds(
+        this.config.get<string>('SESSION_IDLE_TIMEOUT') ?? SESSION_IDLE_TIMEOUT_DEFAULT,
+      ) * 1000;
+  }
 
   /**
    * Minors belong to a parent's account as a child profile, not their own. Every
@@ -413,11 +421,7 @@ export class AuthService {
 
     // Ordinary use bumps lastUsedAt roughly every JWT_ACCESS_TTL; a wider gap means idle.
     if (session.lastUsedAt !== null) {
-      const idleTimeoutMs =
-        durationToSeconds(
-          this.config.get<string>('SESSION_IDLE_TIMEOUT') ?? SESSION_IDLE_TIMEOUT_DEFAULT,
-        ) * 1000;
-      if (this.clock.now().getTime() - session.lastUsedAt.getTime() > idleTimeoutMs) {
+      if (this.clock.now().getTime() - session.lastUsedAt.getTime() > this.idleTimeoutMs) {
         await this.sessions.update(
           { id: session.id },
           { revokedAt: this.clock.now(), revokedReason: 'idle-timeout' },

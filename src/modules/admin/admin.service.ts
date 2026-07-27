@@ -12,6 +12,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
+import { changedFields } from '../audit/changed-fields';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
 import { CoachesService } from '../coaches/coaches.service';
@@ -27,6 +28,7 @@ import { Role, UserStatus } from '../users/entities/user.enums';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { PlayersService } from '../players/players.service';
+import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { AdminPlayerProfileView, AdminTrainerProfileView } from './dto/admin-profile.view';
@@ -218,9 +220,7 @@ export class AdminService {
       action: AUDIT_USER_UPDATED,
       actor,
       targetUserId,
-      metadata: {
-        fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
-      },
+      metadata: { fields: changedFields(input) },
     });
     return UserSummaryDto.fromEntity(updated);
   }
@@ -233,8 +233,8 @@ export class AdminService {
   ): Promise<AdminTrainerProfileView> {
     const target = await this.requireUser(targetUserId);
     if (target.role !== Role.Trainer) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
+      throw new ConflictException({
+        errorCode: ErrorCode.ROLE_MISMATCH,
         message: 'This user does not have a trainer profile.',
       });
     }
@@ -252,9 +252,7 @@ export class AdminService {
       actor,
       targetUserId,
       target: { type: 'TrainerProfile', id: updated.id },
-      metadata: {
-        fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
-      },
+      metadata: { fields: changedFields(input) },
     });
     return AdminTrainerProfileView.from(updated);
   }
@@ -267,8 +265,8 @@ export class AdminService {
   ): Promise<CoachView> {
     const target = await this.requireUser(targetUserId);
     if (target.role !== Role.Coach) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
+      throw new ConflictException({
+        errorCode: ErrorCode.ROLE_MISMATCH,
         message: 'This user does not have a coach profile.',
       });
     }
@@ -283,10 +281,15 @@ export class AdminService {
   ): Promise<AdminPlayerProfileView> {
     const target = await this.requireUser(targetUserId);
     if (target.role !== Role.PlayerParent) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
+      throw new ConflictException({
+        errorCode: ErrorCode.ROLE_MISMATCH,
         message: 'This user does not have a player profile.',
       });
+    }
+    if (input.birthDate !== undefined) {
+      // Same floor as the self-service route: the age rule belongs to the
+      // account, not to whoever is editing it.
+      this.authService.assertOldEnoughForOwnAccount(input.birthDate);
     }
 
     const updated = await this.playersService.updateSelfProfile(targetUserId, input);
@@ -302,9 +305,7 @@ export class AdminService {
       actor,
       targetUserId,
       target: { type: 'PlayerProfile', id: updated.id },
-      metadata: {
-        fields: Object.keys(input).filter((k) => input[k as keyof typeof input] !== undefined),
-      },
+      metadata: { fields: changedFields(input) },
     });
     return AdminPlayerProfileView.from(updated);
   }
@@ -413,27 +414,14 @@ export class AdminService {
     // Outside the transaction: the storage provider is not transactional, and an
     // outage there must not roll back a recorded erasure.
     if (photoPublicId !== null) {
-      await this.discardAsset(photoPublicId);
+      await discardAsset(this.storage, photoPublicId, this.logger);
     }
     for (const publicId of profilePhotoPublicIds) {
-      await this.discardAsset(publicId);
+      await discardAsset(this.storage, publicId, this.logger);
     }
 
     const updated = await this.requireUser(target.id);
     return UserSummaryDto.fromEntity(updated);
-  }
-
-  /** Best-effort: the erasure is already committed, so an outage costs an orphan. */
-  private async discardAsset(publicId: string): Promise<void> {
-    try {
-      await this.storage.delete(publicId);
-    } catch (error) {
-      this.logger.warn(
-        `Orphaned stored asset ${publicId} after GDPR deletion: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 
   private async requireUser(id: string): Promise<User> {

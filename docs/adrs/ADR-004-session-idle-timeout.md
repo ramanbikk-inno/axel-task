@@ -24,6 +24,8 @@ So an abandoned session — a browser tab left open, a stolen refresh token — 
 
 3. `SESSION_IDLE_TIMEOUT` is a duration string (`'24h'`, `'2h'`, `'30m'`), parsed by the same `durationToSeconds` helper already used for `JWT_ACCESS_TTL` and `JWT_REFRESH_TTL`, rather than a bare number of hours — matching the existing convention instead of introducing a second one.
 
+   It is parsed **once, in the `AuthService` constructor**, as `TokenService` already does for both TTLs. The zod schema only checks the value is a non-empty string, so the constructor parse is what actually rejects `24hr` or `1 day` — and it does so at boot. Parsing per request would let a typo start cleanly and then return a 500 on every refresh in the deployment.
+
 4. Default is 24 hours. Q-01.07 leaves the exact figure to the client; 24h was chosen as a middle ground — tight enough to bound a stolen or abandoned session meaningfully, loose enough that a user checking in once a day is never logged out for reasons they'd experience as arbitrary. It is a config value specifically so the client can revisit it without a code change.
 
 ## Consequences
@@ -43,7 +45,7 @@ So an abandoned session — a browser tab left open, a stolen refresh token — 
 
 ## Verification
 
-Unit tests in `test/integration/auth.refresh.spec.ts` pin the boundary (one second inside vs. past the window), a configured override, and the defensive `lastUsedAt: null` branch. An e2e test in `test/auth-refresh.e2e-spec.ts` exercises the same boundary through the real HTTP surface using the test clock. Mutation-checked: removing the check fails both the "past the window" unit test and its e2e equivalent.
+Unit tests in `test/integration/auth.refresh.spec.ts` pin the boundary (one second inside vs. past the window), a configured override, a malformed value failing construction, and the defensive `lastUsedAt: null` branch. An e2e test in `test/auth-refresh.e2e-spec.ts` exercises the same boundary through the real HTTP surface using the test clock. Mutation-checked: removing the check fails both the "past the window" unit test and its e2e equivalent.
 
 ## References
 - [AuthService.refresh](../../src/modules/auth/auth.service.ts)

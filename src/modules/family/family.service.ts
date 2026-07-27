@@ -11,9 +11,10 @@ import { DataSource, EntityManager } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
 import { AuditService } from '../audit/audit.service';
+import { changedFields } from '../audit/changed-fields';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { PasswordService } from '../../shared/crypto/password.service';
-import { decodeImageUpload } from '../../shared/files/image-content';
+import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
@@ -25,6 +26,7 @@ import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
 import { UploadPhotoDto } from '../profile/dto/profile.dto';
+import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { Role, UserStatus } from '../users/entities/user.enums';
@@ -43,8 +45,6 @@ export const AUDIT_CHILD_LOGIN_CREATED = 'family.child-login-created';
 export const AUDIT_CHILD_LOGIN_REVOKED = 'family.child-login-revoked';
 export const AUDIT_FAMILY_TRAINER_ADDED = 'family.trainer-added';
 export const AUDIT_FAMILY_TRAINER_REMOVED = 'family.trainer-removed';
-
-const MAX_CHILD_PHOTO_BYTES = 2 * 1024 * 1024;
 
 @Injectable()
 export class FamilyService {
@@ -213,11 +213,7 @@ export class FamilyService {
       action: AUDIT_CHILD_UPDATED,
       actor,
       target: { type: 'PlayerProfile', id: profile.id },
-      // Which fields moved, never their values: this row outlives the data and
-      // must not become a second copy of the PII the erasure path clears.
-      metadata: {
-        fields: Object.keys(dto).filter((k) => dto[k as keyof UpdateChildDto] !== undefined),
-      },
+      metadata: { fields: changedFields(dto) },
     });
 
     const [view] = await this.buildViews([updated]);
@@ -241,7 +237,7 @@ export class FamilyService {
     const { buffer } = decodeImageUpload({
       dataBase64: dto.dataBase64,
       declaredMimeType: dto.mimeType,
-      maxBytes: MAX_CHILD_PHOTO_BYTES,
+      maxBytes: MAX_IMAGE_UPLOAD_BYTES,
       label: 'Child photo',
     });
     const stored = await this.storage.upload({
@@ -255,7 +251,7 @@ export class FamilyService {
     // Only after the row points at the new asset: deleting first would leave a
     // profile referencing nothing if the upload then failed.
     if (profile.photoPublicId !== null && profile.photoPublicId !== stored.publicId) {
-      await this.discardAsset(profile.photoPublicId);
+      await discardAsset(this.storage, profile.photoPublicId, this.logger);
     }
     await this.audit.record({
       action: AUDIT_CHILD_PHOTO_UPDATED,
@@ -285,7 +281,7 @@ export class FamilyService {
 
     const updated = await this.playersService.setPhoto(profile.id, null);
     if (profile.photoPublicId !== null) {
-      await this.discardAsset(profile.photoPublicId);
+      await discardAsset(this.storage, profile.photoPublicId, this.logger);
     }
     await this.audit.record({
       action: AUDIT_CHILD_PHOTO_REMOVED,
@@ -295,19 +291,6 @@ export class FamilyService {
 
     const [view] = await this.buildViews([updated]);
     return view;
-  }
-
-  /** Cleanup is best-effort: the row is already consistent by the time this runs. */
-  private async discardAsset(publicId: string): Promise<void> {
-    try {
-      await this.storage.delete(publicId);
-    } catch (error) {
-      this.logger.warn(
-        `Orphaned stored asset ${publicId} after child photo change: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 
   /**
