@@ -185,7 +185,7 @@ describe('Users directory + creation audit log (e2e)', () => {
         .expect(403);
     });
 
-    // Locks the AppModule import order that keeps users/:id from swallowing this route.
+    // `:id` is one segment, so it cannot match these two-segment paths. Pinned anyway.
     it('does not swallow the sibling impersonation routes', async () => {
       const token = await adminLogin();
 

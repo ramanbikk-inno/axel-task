@@ -67,6 +67,6 @@ export class AdminUserDetailView {
   @ApiPropertyOptional({ type: AdminPlayerProfileView, nullable: true })
   player!: AdminPlayerProfileView | null;
 
-  @ApiPropertyOptional({ nullable: true })
+  @ApiPropertyOptional({ type: CoachView, nullable: true })
   coach!: CoachView | null;
 }
