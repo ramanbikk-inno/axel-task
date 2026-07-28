@@ -323,6 +323,24 @@ export class CoachesService {
   }
 
   /**
+   * GDPR erasure of every coach_profiles row a user has ever held. Clears the
+   * free-text PII on every engagement (not only the active one — an ended
+   * engagement's bio survives otherwise) and off-boards any still-Active row
+   * so an erased coach stops appearing in org rosters and public listings.
+   */
+  async anonymizeByUserId(userId: string, manager?: EntityManager): Promise<void> {
+    const repo = manager !== undefined ? manager.getRepository(CoachProfile) : this.coaches;
+    await repo.update(
+      { userId },
+      { bio: null, credentials: null, certifications: null, publicVisible: false },
+    );
+    await repo.update(
+      { userId, status: CoachStatus.Active },
+      { status: CoachStatus.Inactive, endedAt: this.clock.now() },
+    );
+  }
+
+  /**
    * Is this principal inside the named organisation? `trainerOrgId` is already
    * resolved per request — own org for a Trainer, employer's for a Coach, null
    * once an engagement ends — so compare against it rather than re-deriving it.

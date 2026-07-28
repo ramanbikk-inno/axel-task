@@ -141,6 +141,7 @@ export class PlayersService {
       school?: string | null;
       jerseyNumber?: string | null;
       emergencyContact?: EmergencyContact | null;
+      allowChildTokenSpendNoApproval?: boolean;
     },
     manager?: EntityManager,
   ): Promise<PlayerProfile> {
@@ -163,6 +164,9 @@ export class PlayersService {
     }
     if (input.emergencyContact !== undefined) {
       patch.emergencyContact = input.emergencyContact;
+    }
+    if (input.allowChildTokenSpendNoApproval !== undefined) {
+      patch.allowChildTokenSpendNoApproval = input.allowChildTokenSpendNoApproval;
     }
 
     if (Object.keys(patch).length > 0) {

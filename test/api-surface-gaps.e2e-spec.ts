@@ -178,6 +178,31 @@ describe('API surface gaps (e2e)', () => {
         .expect(404);
     });
 
+    it('lets a parent set the per-child token-spend-without-approval flag, default OFF', async () => {
+      const fam = await makeParentWithChild('patch-token-spend@example.com');
+
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/players')
+        .set(auth(fam.token))
+        .expect(200);
+      const child = list.body.find((p: { id: string }) => p.id === fam.childProfileId);
+      expect(child.allowChildTokenSpendNoApproval).toBe(false);
+
+      const res = await request(app.getHttpServer())
+        .patch(`/api/v1/players/children/${fam.childProfileId}`)
+        .set(auth(fam.token))
+        .send({ allowChildTokenSpendNoApproval: true })
+        .expect(200);
+      expect(res.body.allowChildTokenSpendNoApproval).toBe(true);
+
+      const off = await request(app.getHttpServer())
+        .patch(`/api/v1/players/children/${fam.childProfileId}`)
+        .set(auth(fam.token))
+        .send({ allowChildTokenSpendNoApproval: false })
+        .expect(200);
+      expect(off.body.allowChildTokenSpendNoApproval).toBe(false);
+    });
+
     it('routes the account holder’s own profile to /profile/me instead', async () => {
       const trainer = await makeTrainer('patch-self-trainer@example.com');
       const parent = await ctx.registerVerifiedPlayer({ email: 'patch-self@example.com' });

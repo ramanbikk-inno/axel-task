@@ -207,6 +207,7 @@ export class FamilyService {
       school: dto.school,
       jerseyNumber: dto.jerseyNumber,
       emergencyContact: dto.emergencyContact,
+      allowChildTokenSpendNoApproval: dto.allowChildTokenSpendNoApproval,
     });
 
     await this.audit.record({

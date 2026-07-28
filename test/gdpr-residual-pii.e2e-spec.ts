@@ -4,6 +4,7 @@ import request from 'supertest';
 import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
 import { AuditLog } from '../src/modules/audit/entities/audit-log.entity';
+import { CoachProfile, CoachStatus } from '../src/modules/coaches/entities/coach-profile.entity';
 import { ShareLink } from '../src/modules/enrollment/entities/share-link.entity';
 import { PlayerProfile } from '../src/modules/players/entities/player-profile.entity';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
@@ -231,6 +232,86 @@ describe('GDPR residual PII (e2e)', () => {
       const stillInvited = after.filter((r) => r.action === 'coach.invited');
       expect(stillInvited.length).toBe(invited.length);
       expect(stillInvited.every((r) => r.metadata?.email === '[redacted]')).toBe(true);
+    });
+  });
+
+  describe("a coach's own profile PII", () => {
+    it('clears bio, credentials and certifications, and drops the coach from the public roster', async () => {
+      const admin = await adminToken();
+      const coachEmail = 'coach-erasure-profile@example.com';
+      const trainerEmail = `trainer-${coachEmail}`;
+
+      const trainerUser = await createUser(ctx.dataSource, {
+        role: Role.Trainer,
+        email: trainerEmail,
+      });
+      const trainers = ctx.dataSource.getRepository(TrainerProfile);
+      const trainer = await trainers.save(
+        trainers.create({ userId: trainerUser.id, businessName: 'Pro Tennis' }),
+      );
+      const trainerToken = await login(trainerEmail, FACTORY_PASSWORD);
+
+      const invitation = await request(app.getHttpServer())
+        .post('/api/v1/coaches/invitations')
+        .set(auth(trainerToken))
+        .send({ email: coachEmail })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/v1/coaches/invitations/${invitation.body.code as string}/accept`)
+        .send({ password: 'C0ach!Passw0rd', firstName: 'Cody' })
+        .expect(201);
+
+      const verifyUrl = (
+        ctx.mailer.sendVerification.mock.calls[
+          ctx.mailer.sendVerification.mock.calls.length - 1
+        ][0] as { verifyUrl: string }
+      ).verifyUrl;
+      const verifyToken = new URL(verifyUrl).searchParams.get('token') as string;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/verify-email')
+        .send({ token: verifyToken })
+        .expect(200);
+
+      const coachToken = await login(coachEmail, 'C0ach!Passw0rd');
+      await request(app.getHttpServer())
+        .patch('/api/v1/coaches/me')
+        .set(auth(coachToken))
+        .send({
+          bio: 'Ten years coaching juniors.',
+          credentials: 'USPTA certified',
+          certifications: 'Level 3',
+          publicVisible: true,
+        })
+        .expect(200);
+
+      // Precondition: the coach really is on the public roster before erasure.
+      const before = await request(app.getHttpServer())
+        .get(`/api/v1/coaches/public/${trainer.id}`)
+        .set(auth(trainerToken))
+        .expect(200);
+      expect(
+        before.body.some((c: { bio: string | null }) => c.bio === 'Ten years coaching juniors.'),
+      ).toBe(true);
+
+      const coachUser = (await ctx.dataSource
+        .getRepository(User)
+        .findOne({ where: { email: coachEmail } })) as User;
+      await deleteUser(admin, coachUser.id).expect(200);
+
+      const profile = (await ctx.dataSource
+        .getRepository(CoachProfile)
+        .findOne({ where: { userId: coachUser.id } })) as CoachProfile;
+      expect(profile.bio).toBeNull();
+      expect(profile.credentials).toBeNull();
+      expect(profile.certifications).toBeNull();
+      expect(profile.publicVisible).toBe(false);
+      expect(profile.status).toBe(CoachStatus.Inactive);
+
+      const after = await request(app.getHttpServer())
+        .get(`/api/v1/coaches/public/${trainer.id}`)
+        .set(auth(trainerToken))
+        .expect(200);
+      expect(after.body).toHaveLength(0);
     });
   });
 });

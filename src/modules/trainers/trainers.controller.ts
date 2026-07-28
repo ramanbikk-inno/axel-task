@@ -89,20 +89,19 @@ export class TrainersController {
     return toBranding(profile);
   }
 
-  // Any authenticated user can read a trainer's branding to render the portal.
+  // Org members only — the trainer themself, their coaches, and players/parents
+  // (incl. children) actively associated with them. Anyone else gets the same
+  // 404 as a non-existent id.
   @Get(':id/branding')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOkResponse({ type: BrandingView })
-  async brandingById(@Param('id', ParseUUIDPipe) id: string): Promise<BrandingView> {
-    const profile = await this.trainers.findById(id);
-    if (!profile) {
-      throw new NotFoundException({
-        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
-        message: 'Trainer not found.',
-      });
-    }
+  async brandingById(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+  ): Promise<BrandingView> {
+    const profile = await this.trainers.findAccessibleById(req.user as Principal, id);
     return toBranding(profile);
   }
 }
