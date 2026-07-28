@@ -6,8 +6,14 @@ import { ErrorCode } from '../../shared/errors/error-codes';
 import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
 import { AuditService } from '../audit/audit.service';
 import { Principal } from '../auth/principal';
+import {
+  AssociationStatus,
+  TrainerPlayerAssociation,
+} from '../enrollment/entities/trainer-player-association.entity';
+import { PlayersService } from '../players/players.service';
 import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
+import { Role } from '../users/entities/user.enums';
 import { TrainerProfile } from './entities/trainer-profile.entity';
 
 export const AUDIT_BRANDING_COLOR_SET = 'trainer.branding-color-set';
@@ -29,6 +35,9 @@ export class TrainersService {
   constructor(
     @InjectRepository(TrainerProfile)
     private readonly trainersRepository: Repository<TrainerProfile>,
+    @InjectRepository(TrainerPlayerAssociation)
+    private readonly associations: Repository<TrainerPlayerAssociation>,
+    private readonly playersService: PlayersService,
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly audit: AuditService,
   ) {}
@@ -55,6 +64,56 @@ export class TrainersService {
 
   async findById(id: string): Promise<TrainerProfile | null> {
     return this.trainersRepository.findOne({ where: { id } });
+  }
+
+  /**
+   * Branding by id, scoped to organisation members — a competing trainer or an
+   * unaffiliated player must not resolve another org's id. 404, not 403, so the
+   * reply gives nothing away either way.
+   */
+  async findAccessibleById(principal: Principal, id: string): Promise<TrainerProfile> {
+    const profile = await this.findById(id);
+    if (!profile || !(await this.isOrgMember(principal, id))) {
+      throw new NotFoundException({
+        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
+        message: 'Trainer not found.',
+      });
+    }
+    return profile;
+  }
+
+  /**
+   * Is this principal inside the named organisation? Mirrors
+   * CoachesService.isOrgMember — each service owning a tenant-scoped resource
+   * runs its own check against the principal, per the pattern this repo already
+   * uses for coach visibility.
+   */
+  private async isOrgMember(principal: Principal, trainerProfileId: string): Promise<boolean> {
+    if (principal.role === Role.SuperAdmin) {
+      return true;
+    }
+    if (principal.role === Role.Trainer || principal.role === Role.Coach) {
+      return principal.trainerOrgId === trainerProfileId;
+    }
+
+    // A child login sees only the one profile it is, never a sibling's.
+    const profileIds = principal.isChild
+      ? principal.childPlayerProfileId === null
+        ? []
+        : [principal.childPlayerProfileId]
+      : (await this.playersService.findByOwner(principal.userId)).map((p) => p.id);
+    if (profileIds.length === 0) {
+      return false;
+    }
+
+    const count = await this.associations.count({
+      where: {
+        trainerProfileId,
+        playerProfileId: In(profileIds),
+        status: AssociationStatus.Active,
+      },
+    });
+    return count > 0;
   }
 
   async findByIds(ids: string[]): Promise<TrainerProfile[]> {

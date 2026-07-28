@@ -143,6 +143,25 @@ describe('GDPR deletion completeness (e2e)', () => {
     expect(log.deletedAt).toBeInstanceOf(Date);
   });
 
+  it('also writes a compliance record for a cascade-anonymised child login', async () => {
+    const admin = await adminSession();
+    const fam = await seedFamily();
+
+    await deleteUser(admin.token, fam.parent.userId).expect(200);
+
+    // The child login is erased right alongside the parent — its original
+    // email has to be on its own record, not just folded into the parent's.
+    const log = (await ctx.dataSource
+      .getRepository(UserDeletionLog)
+      .findOne({ where: { userId: fam.childUserId } })) as UserDeletionLog;
+
+    expect(log).not.toBeNull();
+    expect(log.originalEmail).toBe(fam.childEmail);
+    expect(log.deletedByUserId).toBe(admin.id);
+    expect(log.reason).toBe(REASON);
+    expect(log.originalData).toEqual({ cascadedFromUserId: fam.parent.userId });
+  });
+
   it('anonymises the account itself', async () => {
     const admin = await adminSession();
     const fam = await seedFamily();

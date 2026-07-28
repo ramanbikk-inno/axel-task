@@ -348,11 +348,11 @@ export class AdminService {
     // Cascades to the children's own logins, which would otherwise stay usable
     // with the child's name and email intact.
     const childUserIds = await this.playersService.childUserIdsByOwner(target.id);
+    // Captured before anonymisation, same reason as `originalEmail` above: each
+    // child login gets its own compliance record, not just the primary target's.
+    const childUsers = await this.usersService.findByIds(childUserIds);
     // Each child login has its own address to sweep out of those same copies.
-    const erasedEmails = [
-      originalEmail,
-      ...(await this.usersService.findByIds(childUserIds)).map((u) => u.email),
-    ];
+    const erasedEmails = [originalEmail, ...childUsers.map((u) => u.email)];
 
     // Profile photos live outside `users` too — captured before anonymisation
     // wipes the column, same reason as photoPublicId above. Covers deleting a
@@ -367,26 +367,40 @@ export class AdminService {
 
     await this.dataSource.transaction(async (manager: EntityManager) => {
       const deletionLogs = manager.getRepository(UserDeletionLog);
-      await deletionLogs.save(
-        deletionLogs.create({
-          userId: target.id,
-          originalEmail: target.email,
-          originalFirstName: target.firstName ?? null,
-          originalLastName: target.lastName ?? null,
-          originalPhone: target.phone ?? null,
-          originalRole: target.role,
-          deletedByUserId: actor.userId,
-          reason,
-          deletedAt: now,
-          originalData: { childUserIds, hadPhoto: photoPublicId !== null },
-        }),
-      );
+      const logErasure = (
+        user: User,
+        originalData: Record<string, unknown> | null,
+      ): Promise<UserDeletionLog> =>
+        deletionLogs.save(
+          deletionLogs.create({
+            userId: user.id,
+            originalEmail: user.email,
+            originalFirstName: user.firstName ?? null,
+            originalLastName: user.lastName ?? null,
+            originalPhone: user.phone ?? null,
+            originalRole: user.role,
+            deletedByUserId: actor.userId,
+            reason,
+            deletedAt: now,
+            originalData,
+          }),
+        );
+
+      await logErasure(target, { childUserIds, hadPhoto: photoPublicId !== null });
+      // Each cascaded child login is itself a deleted user under §8's compliance
+      // requirement — the primary target's row alone doesn't cover their address.
+      for (const childUser of childUsers) {
+        await logErasure(childUser, { cascadedFromUserId: target.id });
+      }
 
       await this.usersService.anonymize(target.id, manager);
       await this.playersService.anonymizeByOwner(target.id, manager);
       // A child's profile is owned by the parent, so the owner sweep above never
       // reaches it when the child's own account is the target.
       await this.playersService.anonymizeByChildUserId(target.id, manager);
+      // No-op unless the target ever held a coach engagement — clears bio,
+      // credentials and certifications that would otherwise outlive the erasure.
+      await this.coachesService.anonymizeByUserId(target.id, manager);
       for (const childUserId of childUserIds) {
         await this.usersService.anonymize(childUserId, manager);
         await this.playersService.anonymizeByChildUserId(childUserId, manager);

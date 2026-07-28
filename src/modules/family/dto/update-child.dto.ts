@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsObject,
   IsOptional,
   IsString,
@@ -59,4 +60,10 @@ export class UpdateChildDto {
   @ValidateNested()
   @Type(() => EmergencyContactDto)
   emergencyContact?: EmergencyContactDto | null;
+
+  /** Default OFF; a NOT NULL column, so a clearing null is not meaningful here. */
+  @ApiPropertyOptional({ description: 'Allow this child to spend tokens without approval' })
+  @IsOptionalNotNull()
+  @IsBoolean()
+  allowChildTokenSpendNoApproval?: boolean;
 }

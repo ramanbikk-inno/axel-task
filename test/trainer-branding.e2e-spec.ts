@@ -4,6 +4,11 @@ import request from 'supertest';
 import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { createUser, FACTORY_PASSWORD } from './helpers/user.factory';
 import { oversizedPngBase64, PNG_1X1_BASE64 } from './helpers/image.fixtures';
+import {
+  AssociationStatus,
+  TrainerPlayerAssociation,
+} from '../src/modules/enrollment/entities/trainer-player-association.entity';
+import { PlayerProfile } from '../src/modules/players/entities/player-profile.entity';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
 import { Role } from '../src/modules/users/entities/user.enums';
 import { ErrorCode } from '../src/shared/errors/error-codes';
@@ -70,7 +75,7 @@ describe('Trainer portal branding (e2e)', () => {
     expect(mine.body.logoUrl).toBe('https://storage.test/uploads/mock.png');
   });
 
-  it('org users (players) can read a trainer`s branding by id to render the portal', async () => {
+  it('a player actively associated with the trainer can read their branding by id', async () => {
     const trainer = await makeTrainer('coach2@example.com', 'Beta Ballers');
     await request(app.getHttpServer())
       .patch('/api/v1/trainers/me/branding')
@@ -78,10 +83,26 @@ describe('Trainer portal branding (e2e)', () => {
       .send({ primaryColor: '#ff5722' })
       .expect(200);
 
-    const player = await ctx.registerVerifiedPlayer({ email: 'p@example.com' });
+    const player = await createUser(ctx.dataSource, { email: 'p@example.com' });
+    const profile = await ctx.dataSource
+      .getRepository(PlayerProfile)
+      .save(
+        ctx.dataSource
+          .getRepository(PlayerProfile)
+          .create({ ownerUserId: player.id, displayName: 'Pat Player', isChild: false }),
+      );
+    await ctx.dataSource.getRepository(TrainerPlayerAssociation).save(
+      ctx.dataSource.getRepository(TrainerPlayerAssociation).create({
+        trainerProfileId: trainer.trainerProfileId,
+        playerProfileId: profile.id,
+        status: AssociationStatus.Active,
+        connectedAt: new Date(),
+      }),
+    );
+
     const login = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
-      .send({ email: player.email, password: player.password })
+      .send({ email: 'p@example.com', password: FACTORY_PASSWORD })
       .expect(200);
 
     const res = await request(app.getHttpServer())
@@ -90,6 +111,27 @@ describe('Trainer portal branding (e2e)', () => {
       .expect(200);
     expect(res.body.businessName).toBe('Beta Ballers');
     expect(res.body.primaryColor).toBe('#ff5722');
+  });
+
+  it('404s reading another trainer`s branding by id: unassociated player and a competing trainer', async () => {
+    const trainer = await makeTrainer('coach6@example.com', 'Delta Dribblers');
+    const competitor = await makeTrainer('coach7@example.com', 'Echo Elites');
+
+    const outsider = await ctx.registerVerifiedPlayer({ email: 'outsider@example.com' });
+    const outsiderLogin = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: outsider.email, password: outsider.password })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/trainers/${trainer.trainerProfileId}/branding`)
+      .set('Authorization', `Bearer ${outsiderLogin.body.accessToken as string}`)
+      .expect(404);
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/trainers/${trainer.trainerProfileId}/branding`)
+      .set('Authorization', `Bearer ${competitor.token}`)
+      .expect(404);
   });
 
   it('rejects an invalid hex color (422) and an oversized logo (400)', async () => {

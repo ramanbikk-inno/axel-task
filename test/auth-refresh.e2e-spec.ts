@@ -64,6 +64,14 @@ describe('Auth refresh rotation + reuse detection (e2e)', () => {
       .post('/api/v1/auth/refresh')
       .send({ refreshToken: second })
       .expect(401);
+
+    // Reuse kills the session, not just the refresh-token family — otherwise an
+    // access token already minted from the legitimate rotation stays usable
+    // for the rest of its 15-minute life even though the session is compromised.
+    await request(ctx.app.getHttpServer())
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${rotated.body.accessToken as string}`)
+      .expect(401);
   });
 
   it('rejects a refresh once the session has been idle past the 24h default', async () => {

@@ -53,6 +53,10 @@ export class PlayerProfileView {
   @ApiProperty({ nullable: true })
   photoUrl!: string | null;
 
+  /** Only meaningful for a child profile. Default OFF — see US-01.05. */
+  @ApiProperty()
+  allowChildTokenSpendNoApproval!: boolean;
+
   @ApiProperty({ type: [TrainerContextView] })
   trainers!: TrainerContextView[];
 
@@ -68,6 +72,7 @@ export class PlayerProfileView {
       skillLevel: profile.skillLevel,
       emergencyContact: profile.emergencyContact,
       photoUrl: profile.photoUrl,
+      allowChildTokenSpendNoApproval: profile.allowChildTokenSpendNoApproval,
       trainers,
     };
   }

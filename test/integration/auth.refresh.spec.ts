@@ -48,6 +48,7 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
   let refreshRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock; update: jest.Mock };
   let sessionRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock; update: jest.Mock };
   let userRepo: { findOne: jest.Mock };
+  let impersonationLogs: { closeForSession: jest.Mock; closeForTargetUser: jest.Mock };
   let tokens: jest.Mocked<
     Pick<
       TokenService,
@@ -85,13 +86,7 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
         { provide: PasswordService, useValue: { hash: jest.fn(), verify: jest.fn() } },
         { provide: MailService, useValue: {} },
         { provide: UsersService, useValue: { findById: jest.fn(async () => user) } },
-        {
-          provide: ImpersonationLogService,
-          useValue: {
-            closeForSession: jest.fn().mockResolvedValue(undefined),
-            closeForTargetUser: jest.fn().mockResolvedValue(undefined),
-          },
-        },
+        { provide: ImpersonationLogService, useValue: impersonationLogs },
         {
           provide: PlayersService,
           useValue: { create: jest.fn().mockResolvedValue({ id: 'profile-1' }) },
@@ -144,6 +139,10 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       update: jest.fn(async () => undefined),
     };
     userRepo = { findOne: jest.fn(async () => user) };
+    impersonationLogs = {
+      closeForSession: jest.fn().mockResolvedValue(undefined),
+      closeForTargetUser: jest.fn().mockResolvedValue(undefined),
+    };
     clock = new FakeClock();
     clock.set(new Date('2026-06-08T00:00:00.000Z'));
     tokens = {
@@ -192,7 +191,7 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
     );
   });
 
-  it('reuse detection: an already-revoked token revokes the whole family and throws TOKEN_REUSED (401)', async () => {
+  it('reuse detection: an already-revoked token revokes the whole family and the session, and throws TOKEN_REUSED (401)', async () => {
     refreshRepo.findOne.mockResolvedValue({
       id: 'jti-1',
       sessionId: 'session-1',
@@ -211,6 +210,14 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       { familyId: 'fam-1' },
       expect.objectContaining({ revokedAt: expect.any(Date) }),
     );
+    // The stolen family is only half the fix — an access token already minted
+    // from a successful rotation is still valid until its own exp unless the
+    // session itself dies too.
+    expect(sessionRepo.update).toHaveBeenCalledWith(
+      { id: 'session-1' },
+      expect.objectContaining({ revokedAt: expect.any(Date), revokedReason: 'token-reuse' }),
+    );
+    expect(impersonationLogs.closeForSession).toHaveBeenCalledWith('session-1', expect.any(Date));
   });
 
   it('rejects when no refresh row matches the jti', async () => {

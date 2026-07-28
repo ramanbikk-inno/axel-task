@@ -378,7 +378,16 @@ export class AuthService {
     }
 
     if (row.revokedAt !== null || row.replacedById !== null) {
-      await this.refreshTokens.update({ familyId: row.familyId }, { revokedAt: this.clock.now() });
+      const now = this.clock.now();
+      await this.refreshTokens.update({ familyId: row.familyId }, { revokedAt: now });
+      // Reuse means the family is compromised, not just this one token — kill
+      // the session too, or an access token already minted from the thief's
+      // successful rotation stays live until its own exp.
+      await this.sessions.update(
+        { id: row.sessionId },
+        { revokedAt: now, revokedReason: 'token-reuse' },
+      );
+      await this.impersonationLogs.closeForSession(row.sessionId, now);
       throw new UnauthorizedException({
         errorCode: ErrorCode.TOKEN_REUSED,
         message: 'Refresh token reuse detected.',

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
+import { escapeHtml } from './escape-html';
 import { Mailer } from './mailer.interface';
 
 @Injectable()
@@ -50,7 +51,11 @@ export class ResendMailer implements Mailer {
   }
 
   async sendWelcome(input: { to: string; firstName: string }): Promise<void> {
-    await this.send(input.to, 'Welcome to Axel', `<p>Welcome aboard, ${input.firstName}!</p>`);
+    await this.send(
+      input.to,
+      'Welcome to Axel',
+      `<p>Welcome aboard, ${escapeHtml(input.firstName)}!</p>`,
+    );
   }
 
   async sendTrainerInvite(input: {
@@ -61,15 +66,16 @@ export class ResendMailer implements Mailer {
     await this.send(
       input.to,
       'Set up your trainer account',
-      `<p>Hi ${input.firstName}, set up your account via <a href="${input.setupUrl}">this link</a>.</p>`,
+      `<p>Hi ${escapeHtml(input.firstName)}, set up your account via <a href="${input.setupUrl}">this link</a>.</p>`,
     );
   }
 
   async sendJoinConfirmation(input: { to: string; trainerName: string }): Promise<void> {
+    const trainerName = escapeHtml(input.trainerName);
     await this.send(
       input.to,
       `You joined ${input.trainerName}`,
-      `<p>You are now connected with ${input.trainerName}. You can see their events and content once your email is verified.</p>`,
+      `<p>You are now connected with ${trainerName}. You can see their events and content once your email is verified.</p>`,
     );
   }
 
@@ -79,7 +85,7 @@ export class ResendMailer implements Mailer {
     acceptUrl: string;
     message?: string;
   }): Promise<void> {
-    const note = input.message ? `<p>${input.message}</p>` : '';
+    const note = input.message ? `<p>${escapeHtml(input.message)}</p>` : '';
     await this.send(
       input.to,
       `${input.trainerName} invited you to coach`,
@@ -93,10 +99,12 @@ export class ResendMailer implements Mailer {
     trainerName: string;
     joinUrl: string;
   }): Promise<void> {
+    const childName = escapeHtml(input.childName);
+    const trainerName = escapeHtml(input.trainerName);
     await this.send(
       input.to,
       `${input.childName} wants to join ${input.trainerName}'s program`,
-      `<p>${input.childName} opened a registration link for ${input.trainerName}. ` +
+      `<p>${childName} opened a registration link for ${trainerName}. ` +
         `Children cannot add trainers themselves, so nothing has changed yet.</p>` +
         `<p><a href="${input.joinUrl}">Review registration</a></p>`,
     );
@@ -110,11 +118,12 @@ export class ResendMailer implements Mailer {
     endTime: string;
     reason: string;
   }): Promise<void> {
+    const trainerName = escapeHtml(input.trainerName);
     await this.send(
       input.to,
       'You were scheduled outside your availability',
-      `<p>${input.trainerName} scheduled you on ${input.dayName} from ${input.startTime} to ${input.endTime}, which falls outside the availability you set.</p>` +
-        `<p>Reason given: ${input.reason}</p>` +
+      `<p>${trainerName} scheduled you on ${input.dayName} from ${input.startTime} to ${input.endTime}, which falls outside the availability you set.</p>` +
+        `<p>Reason given: ${escapeHtml(input.reason)}</p>` +
         `<p>You are not blocked from this session — contact your trainer if you need the assignment changed.</p>`,
     );
   }
