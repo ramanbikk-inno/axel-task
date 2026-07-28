@@ -46,7 +46,20 @@ class FakeClock {
 describe('AuthService.refresh (rotation + reuse detection)', () => {
   let service: AuthService;
   let refreshRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock; update: jest.Mock };
-  let sessionRepo: { findOne: jest.Mock; save: jest.Mock; create: jest.Mock; update: jest.Mock };
+  let sessionRepo: {
+    findOne: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
+  /** Captures the conditional session revoke the reuse branch issues. */
+  let sessionRevoke: {
+    set: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    execute: jest.Mock;
+  };
   let userRepo: { findOne: jest.Mock };
   let impersonationLogs: { closeForSession: jest.Mock; closeForTargetUser: jest.Mock };
   let tokens: jest.Mocked<
@@ -124,6 +137,14 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       create: jest.fn((x) => x),
       update: jest.fn(async () => undefined),
     };
+    // Chainable stub for .createQueryBuilder().update().set().where().andWhere().execute().
+    // `affected: 1` is the live-session case; tests override it for a dead one.
+    sessionRevoke = {
+      set: jest.fn(() => sessionRevoke),
+      where: jest.fn(() => sessionRevoke),
+      andWhere: jest.fn(() => sessionRevoke),
+      execute: jest.fn(async () => ({ affected: 1 })),
+    };
     sessionRepo = {
       // Matches clock.set below, so idle-timeout tests are the only ones that move it.
       findOne: jest.fn(async () => ({
@@ -137,6 +158,7 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
       save: jest.fn(async (x) => ({ id: 'session-1', ...x })),
       create: jest.fn((x) => x),
       update: jest.fn(async () => undefined),
+      createQueryBuilder: jest.fn(() => ({ update: jest.fn(() => sessionRevoke) })),
     };
     userRepo = { findOne: jest.fn(async () => user) };
     impersonationLogs = {
@@ -213,11 +235,65 @@ describe('AuthService.refresh (rotation + reuse detection)', () => {
     // The stolen family is only half the fix — an access token already minted
     // from a successful rotation is still valid until its own exp unless the
     // session itself dies too.
-    expect(sessionRepo.update).toHaveBeenCalledWith(
-      { id: 'session-1' },
+    expect(sessionRevoke.set).toHaveBeenCalledWith(
       expect.objectContaining({ revokedAt: expect.any(Date), revokedReason: 'token-reuse' }),
     );
+    expect(sessionRevoke.where).toHaveBeenCalledWith('id = :id', { id: 'session-1' });
     expect(impersonationLogs.closeForSession).toHaveBeenCalledWith('session-1', expect.any(Date));
+  });
+
+  it('reuse detection leaves an already-ended session alone rather than restating when it ended', async () => {
+    refreshRepo.findOne.mockResolvedValue({
+      id: 'jti-1',
+      sessionId: 'session-1',
+      userId: 'user-1',
+      familyId: 'fam-1',
+      tokenHash: 'hash:old.refresh.jwt',
+      expiresAt: new Date('2026-06-15T00:00:00.000Z'),
+      revokedAt: new Date('2026-06-07T00:00:00.000Z'),
+      replacedById: 'jti-x',
+    });
+    // The scoped UPDATE matched nothing: the session was already revoked (an
+    // ordinary logout) or already past its hard expiry.
+    sessionRevoke.execute.mockResolvedValue({ affected: 0 });
+
+    await expect(service.refresh('old.refresh.jwt', {})).rejects.toMatchObject({
+      response: { errorCode: ErrorCode.TOKEN_REUSED },
+    });
+
+    // The family is still revoked — that part is unconditional.
+    expect(refreshRepo.update).toHaveBeenCalledWith(
+      { familyId: 'fam-1' },
+      expect.objectContaining({ revokedAt: expect.any(Date) }),
+    );
+    // But the impersonation log is NOT re-closed. `revoked_at` is what dates an
+    // impersonation, so moving it would report a duration past the 1h cap, and
+    // overwriting revokedReason would relabel a logout as a theft.
+    expect(impersonationLogs.closeForSession).not.toHaveBeenCalled();
+  });
+
+  it('reuse detection only revokes a session that is still live', async () => {
+    refreshRepo.findOne.mockResolvedValue({
+      id: 'jti-1',
+      sessionId: 'session-1',
+      userId: 'user-1',
+      familyId: 'fam-1',
+      tokenHash: 'hash:old.refresh.jwt',
+      expiresAt: new Date('2026-06-15T00:00:00.000Z'),
+      revokedAt: new Date('2026-06-07T00:00:00.000Z'),
+      replacedById: 'jti-x',
+    });
+
+    await expect(service.refresh('old.refresh.jwt', {})).rejects.toMatchObject({
+      response: { errorCode: ErrorCode.TOKEN_REUSED },
+    });
+
+    // Both guards are on the UPDATE itself, so the decision is atomic.
+    expect(sessionRevoke.andWhere).toHaveBeenCalledWith('revoked_at IS NULL');
+    expect(sessionRevoke.andWhere).toHaveBeenCalledWith(
+      '(expires_at IS NULL OR expires_at > :now)',
+      { now: expect.any(Date) },
+    );
   });
 
   it('rejects when no refresh row matches the jti', async () => {

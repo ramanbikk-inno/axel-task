@@ -346,11 +346,17 @@ export class AdminService {
     const originalEmail = target.email;
 
     // Cascades to the children's own logins, which would otherwise stay usable
-    // with the child's name and email intact.
-    const childUserIds = await this.playersService.childUserIdsByOwner(target.id);
-    // Captured before anonymisation, same reason as `originalEmail` above: each
-    // child login gets its own compliance record, not just the primary target's.
-    const childUsers = await this.usersService.findByIds(childUserIds);
+    // with the child's name and email intact. Captured before anonymisation, same
+    // reason as `originalEmail` above: each child gets its own compliance record.
+    //
+    // Erasing a child login does not clear `child_user_id`, so an already-erased
+    // child is still listed here. Skipping it is what keeps this idempotent: its
+    // deletion-log row exists, and the unique index on user_id would reject a
+    // second one and roll the parent's erasure back.
+    const childUsers = (
+      await this.usersService.findByIds(await this.playersService.childUserIdsByOwner(target.id))
+    ).filter((u) => u.status !== UserStatus.Deleted);
+    const childUserIds = childUsers.map((u) => u.id);
     // Each child login has its own address to sweep out of those same copies.
     const erasedEmails = [originalEmail, ...childUsers.map((u) => u.email)];
 
