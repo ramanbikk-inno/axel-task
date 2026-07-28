@@ -162,6 +162,32 @@ describe('GDPR deletion completeness (e2e)', () => {
     expect(log.originalData).toEqual({ cascadedFromUserId: fam.parent.userId });
   });
 
+  it('still erases the parent when their child login was erased first', async () => {
+    const admin = await adminSession();
+    const fam = await seedFamily();
+
+    await deleteUser(admin.token, fam.childUserId).expect(200);
+
+    // Erasing the child does not clear player_profiles.child_user_id, so the
+    // parent's cascade still lists it. Re-logging it would hit the unique index
+    // on user_deletion_logs.user_id, roll the whole transaction back, and leave
+    // the parent permanently un-erasable — a right-to-erasure request that can
+    // never be fulfilled.
+    await deleteUser(admin.token, fam.parent.userId).expect(200);
+
+    const parentUser = (await ctx.dataSource
+      .getRepository(User)
+      .findOne({ where: { id: fam.parent.userId }, withDeleted: true })) as User;
+    expect(parentUser.status).toBe(UserStatus.Deleted);
+    expect(parentUser.email).toBe(`deleted_${fam.parent.userId}@example.com`);
+
+    // Exactly one compliance record each, and the child's still names them.
+    const logs = await ctx.dataSource.getRepository(UserDeletionLog).find();
+    expect(logs.map((l) => l.userId).sort()).toEqual([fam.parent.userId, fam.childUserId].sort());
+    const childLog = logs.find((l) => l.userId === fam.childUserId) as UserDeletionLog;
+    expect(childLog.originalEmail).toBe(fam.childEmail);
+  });
+
   it('anonymises the account itself', async () => {
     const admin = await adminSession();
     const fam = await seedFamily();

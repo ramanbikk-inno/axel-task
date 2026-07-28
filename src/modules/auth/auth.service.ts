@@ -383,11 +383,24 @@ export class AuthService {
       // Reuse means the family is compromised, not just this one token — kill
       // the session too, or an access token already minted from the thief's
       // successful rotation stays live until its own exp.
-      await this.sessions.update(
-        { id: row.sessionId },
-        { revokedAt: now, revokedReason: 'token-reuse' },
-      );
-      await this.impersonationLogs.closeForSession(row.sessionId, now);
+      //
+      // Only a session that is still live, though. A replay long after the
+      // session already ended must not restate when it ended: SessionValidator
+      // already rejects both revoked and expired sessions, so there is nothing
+      // left to revoke, and `revoked_at` is what reconcileOpenLogs reads to date
+      // an impersonation — moving it would report a duration past the 1h cap and
+      // would relabel an ordinary logout as a theft.
+      const revoked = await this.sessions
+        .createQueryBuilder()
+        .update(AuthSession)
+        .set({ revokedAt: now, revokedReason: 'token-reuse' })
+        .where('id = :id', { id: row.sessionId })
+        .andWhere('revoked_at IS NULL')
+        .andWhere('(expires_at IS NULL OR expires_at > :now)', { now })
+        .execute();
+      if (revoked.affected) {
+        await this.impersonationLogs.closeForSession(row.sessionId, now);
+      }
       throw new UnauthorizedException({
         errorCode: ErrorCode.TOKEN_REUSED,
         message: 'Refresh token reuse detected.',
