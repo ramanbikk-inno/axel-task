@@ -17,6 +17,8 @@ import { CheckPolicies } from '../../src/modules/ability/check-policies.decorato
 import { PoliciesGuard } from '../../src/modules/ability/policies.guard';
 import { Role } from '../../src/modules/users/entities/user.enums';
 
+// Stands in for ImpersonationController, the one place @CheckPolicies still
+// narrows anything — admin routes rely on RolesGuard alone.
 @Controller('policy-probe')
 class PolicyProbeController {
   @Get('create-user')
@@ -32,7 +34,7 @@ class PolicyProbeModule {}
 
 describe('PoliciesGuard (integration via probe controller)', () => {
   let app: INestApplication;
-  let currentPrincipal: Principal;
+  let currentPrincipal: Principal | undefined;
 
   const principal = (role: Role): Principal => ({
     userId: 'u1',
@@ -83,5 +85,15 @@ describe('PoliciesGuard (integration via probe controller)', () => {
     currentPrincipal = principal(Role.PlayerParent);
 
     await request(app.getHttpServer()).get('/api/v1/policy-probe/create-user').expect(403);
+  });
+
+  it('denies a request that carries no principal, with its own message', async () => {
+    currentPrincipal = undefined;
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/policy-probe/create-user')
+      .expect(403);
+
+    expect(response.body.message).toBe('Forbidden');
   });
 });

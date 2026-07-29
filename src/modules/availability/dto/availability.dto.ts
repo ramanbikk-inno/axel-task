@@ -16,6 +16,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+import { PaginationQueryDto } from '../../../shared/dto/pagination.query.dto';
+
 // Time-of-day in 24h HH:MM, confined to a single calendar day (00:00–23:59).
 // Availability windows do not cross midnight: endTime must be strictly after
 // startTime and both fall on the same day, so a window cannot end at 24:00.
@@ -168,22 +170,7 @@ export class RecordCoachOverrideDto {
   overrideReason!: string;
 }
 
-export class ListCoachOverridesQuery {
-  @ApiPropertyOptional({ default: 1, minimum: 1 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page: number = 1;
-
-  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit: number = 20;
-}
+export class ListCoachOverridesQuery extends PaginationQueryDto {}
 
 export class CoachOverrideView {
   @ApiProperty() id!: string;

@@ -34,6 +34,11 @@ interface ObjectExceptionResponse {
   error?: string;
 }
 
+interface UniqueViolationResponse {
+  errorCode: ErrorCode;
+  message: string;
+}
+
 /**
  * The subset of a driver error we can rely on. TypeORM re-throws the pg error
  * with `code` intact on QueryFailedError.
@@ -65,6 +70,57 @@ export class AllExceptionsFilter implements ExceptionFilter {
     [HttpStatus.GONE]: ErrorCode.EXPIRED_TOKEN,
     [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.RATE_LIMITED,
     [HttpStatus.INTERNAL_SERVER_ERROR]: ErrorCode.INTERNAL_ERROR,
+  };
+
+  /**
+   * A lost race on a unique index has to answer with the same code the
+   * application-level pre-check would have used. Keys are the real constraint /
+   * index names from the migrations; anything unlisted gets the generic reply.
+   */
+  private static readonly UNIQUE_VIOLATION_BY_CONSTRAINT: Record<string, UniqueViolationResponse> =
+    {
+      uq_users_email: {
+        errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
+        message: 'An account with this email already exists.',
+      },
+      uq_trainer_player: {
+        errorCode: ErrorCode.ALREADY_ASSOCIATED,
+        message: 'You are already connected with this trainer.',
+      },
+      uq_coach_profiles_active_user_id: {
+        errorCode: ErrorCode.COACH_ACTIVE_ELSEWHERE,
+        message:
+          'This coach is currently active with another trainer and must be off-boarded first.',
+      },
+      uq_player_profiles_child_user_id: {
+        errorCode: ErrorCode.CHILD_LOGIN_EXISTS,
+        message: 'This child already has a login.',
+      },
+      uq_share_links_code: {
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        message: 'Could not create the share link. Please try again.',
+      },
+      UQ_refresh_tokens_token_hash: {
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Token conflict. Please request a new one.',
+      },
+      UQ_email_verification_tokens_token_hash: {
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Token conflict. Please request a new one.',
+      },
+      UQ_password_reset_tokens_token_hash: {
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Token conflict. Please request a new one.',
+      },
+      UQ_account_setup_tokens_token_hash: {
+        errorCode: ErrorCode.INVALID_TOKEN,
+        message: 'Token conflict. Please request a new one.',
+      },
+    };
+
+  private static readonly GENERIC_UNIQUE_VIOLATION: UniqueViolationResponse = {
+    errorCode: ErrorCode.VALIDATION_ERROR,
+    message: 'That record already exists.',
   };
 
   private static readonly ERROR_TITLE_BY_STATUS: Record<number, string> = {
@@ -122,10 +178,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     switch (driver.code) {
       case PG_UNIQUE_VIOLATION:
         return new HttpException(
-          {
-            errorCode: this.uniqueViolationCode(driver.constraint),
-            message: this.uniqueViolationMessage(driver.constraint),
-          },
+          this.uniqueViolationResponse(driver.constraint),
           HttpStatus.CONFLICT,
         );
       case PG_INVALID_TEXT_REPRESENTATION:
@@ -151,16 +204,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
   }
 
-  private uniqueViolationCode(constraint: string | undefined): ErrorCode {
-    return constraint !== undefined && constraint.includes('email')
-      ? ErrorCode.EMAIL_ALREADY_EXISTS
-      : ErrorCode.VALIDATION_ERROR;
-  }
-
-  private uniqueViolationMessage(constraint: string | undefined): string {
-    return constraint !== undefined && constraint.includes('email')
-      ? 'An account with this email already exists.'
-      : 'That record already exists.';
+  private uniqueViolationResponse(constraint: string | undefined): UniqueViolationResponse {
+    if (constraint === undefined) {
+      return AllExceptionsFilter.GENERIC_UNIQUE_VIOLATION;
+    }
+    return (
+      AllExceptionsFilter.UNIQUE_VIOLATION_BY_CONSTRAINT[constraint] ??
+      AllExceptionsFilter.GENERIC_UNIQUE_VIOLATION
+    );
   }
 
   private resolveStatus(exception: unknown): number {

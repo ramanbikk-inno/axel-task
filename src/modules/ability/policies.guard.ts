@@ -1,10 +1,9 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
 
-import { Principal } from '../auth/principal';
 import { AbilityFactory } from './ability.factory';
 import { CHECK_POLICIES_KEY, PolicyHandler } from './check-policies.decorator';
+import { getPrincipalOrThrow } from './request-principal';
 
 @Injectable()
 export class PoliciesGuard implements CanActivate {
@@ -24,15 +23,7 @@ export class PoliciesGuard implements CanActivate {
       return true;
     }
 
-    const request: Request & { user?: Principal } = context
-      .switchToHttp()
-      .getRequest<Request & { user?: Principal }>();
-    const principal: Principal | undefined = request.user;
-
-    if (principal === undefined) {
-      throw new ForbiddenException('Forbidden');
-    }
-
+    const principal = getPrincipalOrThrow(context, 'Forbidden');
     const ability = this.abilityFactory.createForPrincipal(principal);
 
     const allowed: boolean = handlers.every((handler) => handler(ability));

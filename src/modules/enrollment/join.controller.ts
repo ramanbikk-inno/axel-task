@@ -11,19 +11,19 @@ import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { JoinMembersDto, JoinMembersPromptView } from './dto/join-members.dto';
 import { JoinRegisterDto } from './dto/join-register.dto';
-import { EnrollmentService, JoinResult } from './enrollment.service';
+import { JoinResult, JoinService } from './join.service';
 
 @ApiTags('join')
 @Controller('join')
 export class JoinController {
-  constructor(private readonly enrollment: EnrollmentService) {}
+  constructor(private readonly joinService: JoinService) {}
 
   // Public: new player/parent registers via a trainer's ShareLink.
   @Post(':code/register')
   @HttpCode(201)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async register(@Param('code') code: string, @Body() dto: JoinRegisterDto): Promise<JoinResult> {
-    return this.enrollment.registerViaShareLink(code, dto);
+    return this.joinService.registerViaShareLink(code, dto);
   }
 
   /** The "Who will train with [New Trainer]?" selection prompt. */
@@ -34,7 +34,7 @@ export class JoinController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: JoinMembersPromptView })
   async members(@Param('code') code: string, @Req() req: Request): Promise<JoinMembersPromptView> {
-    return this.enrollment.eligibleMembers(code, req.user as Principal);
+    return this.joinService.eligibleMembers(code, req.user as Principal);
   }
 
   // Authenticated: an existing player joins another trainer (multi-trainer),
@@ -49,6 +49,6 @@ export class JoinController {
     @Body() dto: JoinMembersDto,
     @Req() req: Request,
   ): Promise<JoinResult> {
-    return this.enrollment.joinAsExistingPlayer(code, req.user as Principal, dto.playerProfileIds);
+    return this.joinService.joinAsExistingPlayer(code, req.user as Principal, dto.playerProfileIds);
   }
 }

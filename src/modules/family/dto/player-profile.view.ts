@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 import { EmergencyContact, PlayerProfile } from '../../players/entities/player-profile.entity';
+import { toPlayerProfileFields } from '../../players/dto/player-profile-fields';
 
 export class TrainerContextView {
   @ApiProperty()
@@ -61,19 +62,6 @@ export class PlayerProfileView {
   trainers!: TrainerContextView[];
 
   static from(profile: PlayerProfile, trainers: TrainerContextView[]): PlayerProfileView {
-    return {
-      id: profile.id,
-      displayName: profile.displayName,
-      isChild: profile.isChild,
-      birthDate: profile.birthDate,
-      gender: profile.gender,
-      school: profile.school,
-      jerseyNumber: profile.jerseyNumber,
-      skillLevel: profile.skillLevel,
-      emergencyContact: profile.emergencyContact,
-      photoUrl: profile.photoUrl,
-      allowChildTokenSpendNoApproval: profile.allowChildTokenSpendNoApproval,
-      trainers,
-    };
+    return { ...toPlayerProfileFields(profile), trainers };
   }
 }

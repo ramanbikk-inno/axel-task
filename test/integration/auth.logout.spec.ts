@@ -4,6 +4,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { SingleUseTokenService } from '../../src/modules/auth/single-use-token.service';
+import { AgeGateService } from '../../src/shared/registration/age-gate.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
 import { PlayersService } from '../../src/modules/players/players.service';
 import { TokenService } from '../../src/modules/auth/token.service';
@@ -53,6 +55,8 @@ describe('AuthService.logout', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
+        SingleUseTokenService,
+        AgeGateService,
         { provide: getRepositoryToken(User), useValue: repoStub() },
         { provide: getRepositoryToken(AuthSession), useValue: sessions },
         { provide: getRepositoryToken(RefreshToken), useValue: refreshTokens },

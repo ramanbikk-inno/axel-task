@@ -3,7 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
+import { AuditService } from '../audit/audit.service';
+import { changedFields } from '../audit/changed-fields';
+import { Principal } from '../auth/principal';
 import { EmergencyContact, PlayerProfile } from './entities/player-profile.entity';
+
+/**
+ * Same value as ProfileService's constant of the same name. Declared here too
+ * because players cannot import profile — profile already imports players.
+ */
+export const AUDIT_PLAYER_PROFILE_UPDATED = 'profile.player-updated';
 
 export interface CreatePlayerProfileInput {
   ownerUserId: string;
@@ -16,11 +25,22 @@ export interface CreatePlayerProfileInput {
   emergencyContact?: EmergencyContact | null;
 }
 
+/** The fields both the self-service and admin routes may patch on a self profile. */
+export interface UpdateSelfProfileFields {
+  displayName?: string;
+  school?: string | null;
+  jerseyNumber?: string | null;
+  gender?: string | null;
+  birthDate?: string;
+  emergencyContact?: EmergencyContact | null;
+}
+
 @Injectable()
 export class PlayersService {
   constructor(
     @InjectRepository(PlayerProfile)
     private readonly profiles: Repository<PlayerProfile>,
+    private readonly audit: AuditService,
   ) {}
 
   private repo(manager?: EntityManager): Repository<PlayerProfile> {
@@ -69,22 +89,37 @@ export class PlayersService {
     return this.profiles.find({ where: { id: In(ids) } });
   }
 
-  /** Update the account holder's own (self) profile fields. */
-  async updateSelfProfile(
-    ownerUserId: string,
-    input: {
-      displayName?: string;
-      school?: string | null;
-      jerseyNumber?: string | null;
-      gender?: string | null;
-      birthDate?: string;
-      emergencyContact?: EmergencyContact | null;
-    },
-  ): Promise<PlayerProfile | null> {
-    const profile = await this.findSelfProfile(ownerUserId);
-    if (!profile) {
-      return null;
-    }
+  /**
+   * Update + audit in one place, for the self-service and admin routes alike.
+   * The caller resolves the profile, so each keeps its own not-found status.
+   * The audit row is attributed to the profile's owner.
+   */
+  async applyProfileUpdate(
+    profile: PlayerProfile,
+    input: UpdateSelfProfileFields,
+    actor: Principal,
+    manager?: EntityManager,
+  ): Promise<PlayerProfile> {
+    PlayersService.assignSelfFields(profile, input);
+    const saved = await this.repo(manager).save(profile);
+    await this.audit.record(
+      {
+        action: AUDIT_PLAYER_PROFILE_UPDATED,
+        actor,
+        targetUserId: saved.ownerUserId,
+        target: { type: 'PlayerProfile', id: saved.id },
+        metadata: { fields: changedFields(input) },
+      },
+      manager,
+    );
+    return saved;
+  }
+
+  /**
+   * Only keys the caller supplied are written. The nullable fields accept an
+   * explicit null, which is how one gets cleared.
+   */
+  private static assignSelfFields(profile: PlayerProfile, input: UpdateSelfProfileFields): void {
     if (input.displayName !== undefined) {
       profile.displayName = input.displayName;
     }
@@ -103,25 +138,6 @@ export class PlayersService {
     if (input.emergencyContact !== undefined) {
       profile.emergencyContact = input.emergencyContact;
     }
-    return this.profiles.save(profile);
-  }
-
-  /** Targeted by profile id, not owner: a child's profile is owned by their parent. */
-  async updateOwnChildProfile(
-    id: string,
-    input: { school?: string | null; jerseyNumber?: string | null },
-  ): Promise<PlayerProfile> {
-    const patch: QueryDeepPartialEntity<PlayerProfile> = {};
-    if (input.school !== undefined) {
-      patch.school = input.school;
-    }
-    if (input.jerseyNumber !== undefined) {
-      patch.jerseyNumber = input.jerseyNumber;
-    }
-    if (Object.keys(patch).length > 0) {
-      await this.profiles.update({ id }, patch);
-    }
-    return (await this.profiles.findOne({ where: { id } })) as PlayerProfile;
   }
 
   /**

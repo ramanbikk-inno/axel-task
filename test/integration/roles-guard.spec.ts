@@ -30,7 +30,7 @@ class AdminOnlyModule {}
 
 describe('RolesGuard (integration via probe controller)', () => {
   let app: INestApplication;
-  let currentPrincipal: Principal;
+  let currentPrincipal: Principal | undefined;
 
   const principal = (role: Role): Principal => ({
     userId: 'u1',
@@ -77,5 +77,13 @@ describe('RolesGuard (integration via probe controller)', () => {
     currentPrincipal = principal(Role.PlayerParent);
 
     await request(app.getHttpServer()).get('/api/v1/admin-only').expect(403);
+  });
+
+  it('returns 403 with its own message when no principal is attached', async () => {
+    currentPrincipal = undefined;
+
+    const response = await request(app.getHttpServer()).get('/api/v1/admin-only').expect(403);
+
+    expect(response.body.message).toBe('Insufficient role');
   });
 });

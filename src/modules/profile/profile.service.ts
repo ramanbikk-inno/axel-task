@@ -2,12 +2,12 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nest
 import { Inject } from '@nestjs/common';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AgeGateService } from '../../shared/registration/age-gate.service';
 import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/changed-fields';
-import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
-import { PlayersService } from '../players/players.service';
+import { AUDIT_PLAYER_PROFILE_UPDATED, PlayersService } from '../players/players.service';
 import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
 import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
@@ -36,8 +36,6 @@ import {
 export const AUDIT_PROFILE_UPDATED = 'profile.updated';
 export const AUDIT_PROFILE_PHOTO_UPDATED = 'profile.photo-updated';
 export const AUDIT_PROFILE_PHOTO_REMOVED = 'profile.photo-removed';
-export const AUDIT_TRAINER_PROFILE_UPDATED = 'profile.trainer-updated';
-export const AUDIT_PLAYER_PROFILE_UPDATED = 'profile.player-updated';
 
 @Injectable()
 export class ProfileService {
@@ -47,7 +45,7 @@ export class ProfileService {
     private readonly usersService: UsersService,
     private readonly trainersService: TrainersService,
     private readonly playersService: PlayersService,
-    private readonly authService: AuthService,
+    private readonly ageGate: AgeGateService,
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly audit: AuditService,
   ) {}
@@ -169,25 +167,23 @@ export class ProfileService {
 
   async updateTrainer(actor: Principal, dto: UpdateTrainerProfileDto): Promise<MyProfileView> {
     const userId = actor.userId;
-    const updated = await this.trainersService.updateProfileByUserId(userId, {
-      businessName: dto.businessName,
-      website: dto.website,
-      address: dto.address,
-      description: dto.description,
-    });
-    if (!updated) {
+    const profile = await this.trainersService.findByUserId(userId);
+    if (!profile) {
       throw new ForbiddenException({
         errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
         message: 'No trainer profile for this account.',
       });
     }
-    await this.audit.record({
-      action: AUDIT_TRAINER_PROFILE_UPDATED,
+    await this.trainersService.applyProfileUpdate(
+      profile,
+      {
+        businessName: dto.businessName,
+        website: dto.website,
+        address: dto.address,
+        description: dto.description,
+      },
       actor,
-      targetUserId: userId,
-      target: { type: 'TrainerProfile', id: updated.id },
-      metadata: { fields: changedFields(dto) },
-    });
+    );
     return this.getMe(userId);
   }
 
@@ -207,20 +203,26 @@ export class ProfileService {
     if (dto.birthDate !== undefined) {
       // The same floor registration enforces. Without it, an account created as
       // an adult could be edited down to a minor's date afterwards.
-      this.authService.assertOldEnoughForOwnAccount(dto.birthDate);
+      this.ageGate.assertOldEnoughForOwnAccount(dto.birthDate);
     }
 
-    let profile = await this.playersService.updateSelfProfile(userId, {
-      displayName: dto.displayName,
-      school: dto.school,
-      jerseyNumber: dto.jerseyNumber,
-      gender: dto.gender,
-      birthDate: dto.birthDate,
-      emergencyContact: dto.emergencyContact,
-    });
-    if (!profile) {
+    const existing = await this.playersService.findSelfProfile(userId);
+    if (existing) {
+      await this.playersService.applyProfileUpdate(
+        existing,
+        {
+          displayName: dto.displayName,
+          school: dto.school,
+          jerseyNumber: dto.jerseyNumber,
+          gender: dto.gender,
+          birthDate: dto.birthDate,
+          emergencyContact: dto.emergencyContact,
+        },
+        actor,
+      );
+    } else {
       // Only accounts predating registration-time profile creation reach this.
-      profile = await this.playersService.create({
+      const created = await this.playersService.create({
         ownerUserId: userId,
         displayName: dto.displayName ?? this.nameOf(user),
         isChild: false,
@@ -230,14 +232,14 @@ export class ProfileService {
         birthDate: dto.birthDate ?? null,
         emergencyContact: dto.emergencyContact ?? null,
       });
+      await this.audit.record({
+        action: AUDIT_PLAYER_PROFILE_UPDATED,
+        actor,
+        targetUserId: userId,
+        target: { type: 'PlayerProfile', id: created.id },
+        metadata: { fields: changedFields(dto) },
+      });
     }
-    await this.audit.record({
-      action: AUDIT_PLAYER_PROFILE_UPDATED,
-      actor,
-      targetUserId: userId,
-      target: { type: 'PlayerProfile', id: profile.id },
-      metadata: { fields: changedFields(dto) },
-    });
     return this.getMe(userId);
   }
 
@@ -246,7 +248,7 @@ export class ProfileService {
     dto: UpdateOwnChildProfileDto,
   ): Promise<MyProfileView> {
     const profileId = this.requireChildProfileId(actor);
-    const updated = await this.playersService.updateOwnChildProfile(profileId, {
+    const updated = await this.playersService.updateChildProfile(profileId, {
       school: dto.school,
       jerseyNumber: dto.jerseyNumber,
     });

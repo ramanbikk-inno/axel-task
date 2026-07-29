@@ -23,8 +23,9 @@ import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
 import { CreateShareLinkDto } from './dto/create-share-link.dto';
 import { RosterEntryView, RosterQueryDto, UpdateRosterEntryDto } from './dto/roster.dto';
-import { EnrollmentService, ResolvedShareLink } from './enrollment.service';
 import { ShareLink } from './entities/share-link.entity';
+import { RosterService } from './roster.service';
+import { ResolvedShareLink, ShareLinksService } from './share-links.service';
 
 interface ShareLinkView {
   id: string;
@@ -42,7 +43,8 @@ export class ShareLinksController {
   private readonly appUrl: string;
 
   constructor(
-    private readonly enrollment: EnrollmentService,
+    private readonly shareLinks: ShareLinksService,
+    private readonly rosterService: RosterService,
     config: ConfigService,
   ) {
     this.appUrl = config.get<string>('APP_URL') ?? 'http://localhost:3000';
@@ -68,7 +70,7 @@ export class ShareLinksController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: [RosterEntryView] })
   async roster(@Query() query: RosterQueryDto, @Req() req: Request): Promise<RosterEntryView[]> {
-    return this.enrollment.roster(req.user as Principal, query);
+    return this.rosterService.list(req.user as Principal, query);
   }
 
   /** Skill level is the trainer's assessment, not the player's. */
@@ -83,7 +85,7 @@ export class ShareLinksController {
     @Body() dto: UpdateRosterEntryDto,
     @Req() req: Request,
   ): Promise<RosterEntryView> {
-    return this.enrollment.setRosterSkillLevel(
+    return this.rosterService.setSkillLevel(
       req.user as Principal,
       playerProfileId,
       dto.skillLevel ?? null,
@@ -100,7 +102,7 @@ export class ShareLinksController {
     @Param('playerProfileId', ParseUUIDPipe) playerProfileId: string,
     @Req() req: Request,
   ): Promise<void> {
-    await this.enrollment.removeFromRoster(req.user as Principal, playerProfileId);
+    await this.rosterService.remove(req.user as Principal, playerProfileId);
   }
 
   @Post('sharelinks')
@@ -111,7 +113,7 @@ export class ShareLinksController {
   async create(@Body() _dto: CreateShareLinkDto, @Req() req: Request): Promise<ShareLinkView> {
     // The body is validated (and rejects anything but player_static) but carries
     // no choice: this endpoint only ever mints a static player link.
-    const link = await this.enrollment.createTrainerShareLink(req.user as Principal);
+    const link = await this.shareLinks.createForTrainer(req.user as Principal);
     return this.toView(link);
   }
 
@@ -121,7 +123,7 @@ export class ShareLinksController {
   @Roles(Role.Trainer)
   @ApiBearerAuth()
   async list(@Req() req: Request): Promise<ShareLinkView[]> {
-    const links = await this.enrollment.listTrainerShareLinks(req.user as Principal);
+    const links = await this.shareLinks.listForTrainer(req.user as Principal);
     return links.map((l) => this.toView(l));
   }
 
@@ -129,6 +131,6 @@ export class ShareLinksController {
   @Get('sharelinks/:code')
   @HttpCode(200)
   async resolve(@Param('code') code: string): Promise<ResolvedShareLink> {
-    return this.enrollment.resolve(code);
+    return this.shareLinks.resolve(code);
   }
 }

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
+import { repoFor } from '../../shared/database/repo-for';
 import { User } from './entities/user.entity';
 import { Role, UserStatus } from './entities/user.enums';
 
@@ -75,8 +76,7 @@ export class UsersService {
   }
 
   async create(input: CreateUserInput, manager?: EntityManager): Promise<User> {
-    const repository: Repository<User> =
-      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
+    const repository = repoFor(this.usersRepository, User, manager);
     const user: User = repository.create({
       email: input.email,
       role: input.role,
@@ -150,9 +150,7 @@ export class UsersService {
   }
 
   async setStatus(id: string, status: UserStatus, manager?: EntityManager): Promise<void> {
-    const repository: Repository<User> =
-      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
-    await repository.update({ id }, { status });
+    await repoFor(this.usersRepository, User, manager).update({ id }, { status });
   }
 
   /**
@@ -161,9 +159,7 @@ export class UsersService {
    * "Deleted User".
    */
   async anonymize(id: string, manager?: EntityManager): Promise<void> {
-    const repository: Repository<User> =
-      manager !== undefined ? manager.getRepository(User) : this.usersRepository;
-    await repository.update(
+    await repoFor(this.usersRepository, User, manager).update(
       { id },
       {
         firstName: 'Deleted',

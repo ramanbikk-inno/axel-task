@@ -6,9 +6,11 @@ import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { EnrollmentModule } from '../enrollment/enrollment.module';
 import { MailModule } from '../mail/mail.module';
-import { PlayersModule } from '../players/players.module';
+import { OrgMembershipModule } from '../org-membership/org-membership.module';
 import { TrainersModule } from '../trainers/trainers.module';
 import { UsersModule } from '../users/users.module';
+import { CoachInvitationService } from './coach-invitation.service';
+import { CoachProfileService } from './coach-profile.service';
 import { CoachesController } from './coaches.controller';
 import { CoachesService } from './coaches.service';
 import { CoachProfile } from './entities/coach-profile.entity';
@@ -18,7 +20,7 @@ import { CoachProfile } from './entities/coach-profile.entity';
     TypeOrmModule.forFeature([CoachProfile]),
     TrainersModule,
     EnrollmentModule,
-    PlayersModule,
+    OrgMembershipModule,
     AuthModule,
     AuditModule,
     UsersModule,
@@ -26,7 +28,7 @@ import { CoachProfile } from './entities/coach-profile.entity';
     CryptoModule,
   ],
   controllers: [CoachesController],
-  providers: [CoachesService],
-  exports: [CoachesService],
+  providers: [CoachProfileService, CoachInvitationService, CoachesService],
+  exports: [CoachProfileService, CoachInvitationService, CoachesService],
 })
 export class CoachesModule {}

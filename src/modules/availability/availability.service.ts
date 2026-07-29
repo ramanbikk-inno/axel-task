@@ -201,10 +201,16 @@ export class AvailabilityService {
     startMinute: number,
     endMinute: number,
   ): Promise<boolean> {
-    const rows = await this.slots.find({
-      where: { coachProfileId, dayOfWeek: day },
-    });
+    const rows = await this.daySlotsFor(coachProfileId, day);
     return coversWindow(rows, day, startMinute, endMinute);
+  }
+
+  /** A coach's stated windows for one weekday, ordered for display. */
+  private daySlotsFor(coachProfileId: string, day: number): Promise<AvailabilitySlot[]> {
+    return this.slots.find({
+      where: { coachProfileId, dayOfWeek: day },
+      order: { startMinute: 'ASC' },
+    });
   }
 
   /**
@@ -226,10 +232,7 @@ export class AvailabilityService {
       });
     }
 
-    const rows = await this.slots.find({
-      where: { coachProfileId: coach.id, dayOfWeek: query.dayOfWeek },
-      order: { startMinute: 'ASC' },
-    });
+    const rows = await this.daySlotsFor(coach.id, query.dayOfWeek);
     // Same primitive the recorded verdict uses, so the warning and the stored
     // hadConflict cannot disagree.
     const available = coversWindow(rows, query.dayOfWeek, start, end);

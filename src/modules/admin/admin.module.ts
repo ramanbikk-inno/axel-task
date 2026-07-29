@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { ClockModule } from '../../shared/clock/clock.module';
+import { RegistrationModule } from '../../shared/registration/registration.module';
 import { AbilityModule } from '../ability/ability.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
@@ -14,6 +15,7 @@ import { TrainersModule } from '../trainers/trainers.module';
 import { UsersModule } from '../users/users.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { UserErasureService } from './user-erasure.service';
 import { UserDeletionLog } from './entities/user-deletion-log.entity';
 
 @Module({
@@ -31,9 +33,10 @@ import { UserDeletionLog } from './entities/user-deletion-log.entity';
     StorageModule,
     ClockModule,
     CoachesModule,
+    RegistrationModule,
     TypeOrmModule.forFeature([UserDeletionLog]),
   ],
   controllers: [AdminController],
-  providers: [AdminService],
+  providers: [AdminService, UserErasureService],
 })
 export class AdminModule {}

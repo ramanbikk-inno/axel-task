@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -12,15 +13,19 @@ export const JSON_BODY_LIMIT = '5mb';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  // Validated env only — reading process.env here would bypass the schema and
+  // let defaults drift from env.validation.ts.
+  const config = app.get(ConfigService);
 
-  app.set('trust proxy', trustProxySetting(process.env.TRUST_PROXY));
+  app.set('trust proxy', trustProxySetting(config.get<string>('TRUST_PROXY')));
   app.use(json({ limit: JSON_BODY_LIMIT }));
   app.use(urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
   app.use(helmet());
 
   // CORS_ORIGINS was already a required, validated env var — it was simply
   // never applied, so no browser client could call the API at all.
-  const origins = (process.env.CORS_ORIGINS ?? '')
+  const origins = config
+    .getOrThrow<string>('CORS_ORIGINS')
     .split(',')
     .map((o) => o.trim())
     .filter((o) => o !== '');
@@ -42,8 +47,7 @@ async function bootstrap(): Promise<void> {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);
 
-  const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
+  await app.listen(config.getOrThrow<number>('PORT'));
 }
 
 void bootstrap();

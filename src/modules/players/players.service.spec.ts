@@ -1,7 +1,11 @@
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 
+import { AuditService } from '../audit/audit.service';
+import { Principal } from '../auth/principal';
 import { PlayerProfile } from './entities/player-profile.entity';
-import { PlayersService } from './players.service';
+import { AUDIT_PLAYER_PROFILE_UPDATED, PlayersService } from './players.service';
+
+const auditStub = (record: jest.Mock): AuditService => ({ record }) as unknown as AuditService;
 
 interface Stub {
   service: PlayersService;
@@ -13,7 +17,7 @@ function build(row: Partial<PlayerProfile> = { id: 'profile-1' }): Stub {
   const update = jest.fn().mockResolvedValue({ affected: 1 });
   const findOne = jest.fn().mockResolvedValue(row);
   const profiles = { update, findOne } as unknown as Repository<PlayerProfile>;
-  return { service: new PlayersService(profiles), update, findOne };
+  return { service: new PlayersService(profiles, auditStub(jest.fn())), update, findOne };
 }
 
 /** The patch the repository is asked to apply, for the single update call made. */
@@ -116,6 +120,7 @@ interface SelfStub {
   service: PlayersService;
   findOne: jest.Mock;
   save: jest.Mock;
+  auditRecord: jest.Mock;
   row: PlayerProfile;
 }
 
@@ -133,74 +138,107 @@ function buildSelf(over: Partial<PlayerProfile> = {}, found = true): SelfStub {
   } as PlayerProfile;
   const findOne = jest.fn().mockResolvedValue(found ? row : null);
   const save = jest.fn().mockImplementation((p: PlayerProfile) => Promise.resolve(p));
+  const auditRecord = jest.fn();
   const profiles = { findOne, save } as unknown as Repository<PlayerProfile>;
-  return { service: new PlayersService(profiles), findOne, save, row };
+  return {
+    service: new PlayersService(profiles, auditStub(auditRecord)),
+    findOne,
+    save,
+    auditRecord,
+    row,
+  };
 }
 
-/** The lookup is scoped to isChild: false, keeping a child's row out of reach. */
-describe('PlayersService.updateSelfProfile', () => {
+const ACTOR = { userId: 'user-1', sessionId: 'sess-1' } as Principal;
+
+/** Scoped to isChild: false, keeping a child's row out of the owner's own profile lookup. */
+describe('PlayersService.findSelfProfile', () => {
   it('resolves only the non-child profile for the owner', async () => {
     const { service, findOne } = buildSelf();
 
-    await service.updateSelfProfile('user-1', { displayName: 'Sam' });
+    await service.findSelfProfile('user-1');
 
     expect(findOne).toHaveBeenCalledWith({ where: { ownerUserId: 'user-1', isChild: false } });
   });
 
-  it('writes a supplied birth date', async () => {
-    const { service, save } = buildSelf();
+  it('returns null when the owner has no self profile', async () => {
+    const { service } = buildSelf({}, false);
 
-    await service.updateSelfProfile('user-1', { birthDate: '1990-06-15' });
-
-    expect(save.mock.calls[0][0]).toMatchObject({ birthDate: '1990-06-15' });
+    await expect(service.findSelfProfile('user-1')).resolves.toBeNull();
   });
+});
 
-  it('leaves the birth date alone when the caller does not mention it', async () => {
-    const { service, save } = buildSelf();
+/**
+ * Update and audit are one unit here, so neither the self-service nor the admin
+ * route can edit a profile without leaving a record behind.
+ */
+describe('PlayersService.applyProfileUpdate', () => {
+  it('writes only the keys the caller supplied', async () => {
+    const { service, save, row } = buildSelf();
 
-    await service.updateSelfProfile('user-1', { school: 'Oakwood' });
+    await service.applyProfileUpdate(row, { school: 'Oakwood' }, ACTOR);
 
     expect(save.mock.calls[0][0]).toMatchObject({
-      birthDate: '1994-03-22',
       school: 'Oakwood',
-    });
-  });
-
-  it('clears the nullable fields on an explicit null', async () => {
-    const { service, save } = buildSelf();
-
-    await service.updateSelfProfile('user-1', { school: null, jerseyNumber: null, gender: null });
-
-    expect(save.mock.calls[0][0]).toMatchObject({
-      school: null,
-      jerseyNumber: null,
-      gender: null,
-      // Not swept up by the clears beside it.
+      displayName: 'Sam Smith',
       birthDate: '1994-03-22',
     });
   });
 
-  it('returns null rather than creating anything when there is no self profile', async () => {
-    const { service, save } = buildSelf({}, false);
+  it('clears a nullable field on an explicit null', async () => {
+    const { service, save, row } = buildSelf();
 
-    // ProfileService relies on this to decide whether to create one.
-    const result = await service.updateSelfProfile('user-1', { birthDate: '1990-06-15' });
+    await service.applyProfileUpdate(row, { school: null, emergencyContact: null }, ACTOR);
 
-    expect(result).toBeNull();
-    expect(save).not.toHaveBeenCalled();
+    expect(save.mock.calls[0][0]).toMatchObject({ school: null, emergencyContact: null });
   });
 
-  it('saves once, with the whole row', async () => {
-    const { service, save } = buildSelf();
+  it('records the update against the profile owner, naming the changed fields', async () => {
+    const { service, auditRecord, row } = buildSelf();
 
-    await service.updateSelfProfile('user-1', { displayName: 'Sam', birthDate: '1990-06-15' });
+    await service.applyProfileUpdate(row, { school: 'Oakwood', jerseyNumber: undefined }, ACTOR);
 
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][0]).toMatchObject({
-      id: 'self-1',
-      displayName: 'Sam',
-      birthDate: '1990-06-15',
+    expect(auditRecord).toHaveBeenCalledTimes(1);
+    expect(auditRecord.mock.calls[0][0]).toEqual({
+      action: AUDIT_PLAYER_PROFILE_UPDATED,
+      actor: ACTOR,
+      // The owner, not the actor: an admin or an impersonating session edits
+      // somebody else's profile.
+      targetUserId: 'user-1',
+      target: { type: 'PlayerProfile', id: 'self-1' },
+      metadata: { fields: ['school'] },
     });
+  });
+
+  it('audits only after the row is saved', async () => {
+    const order: string[] = [];
+    const { service, save, auditRecord, row } = buildSelf();
+    save.mockImplementation((p: PlayerProfile) => {
+      order.push('save');
+      return Promise.resolve(p);
+    });
+    auditRecord.mockImplementation(() => {
+      order.push('audit');
+      return Promise.resolve(undefined);
+    });
+
+    await service.applyProfileUpdate(row, { school: 'Oakwood' }, ACTOR);
+
+    expect(order).toEqual(['save', 'audit']);
+  });
+
+  it('runs the save and the audit row on a supplied transaction', async () => {
+    const { service, save, auditRecord, row } = buildSelf();
+    const txSave = jest.fn().mockImplementation((p: PlayerProfile) => Promise.resolve(p));
+    const manager = {
+      getRepository: jest.fn().mockReturnValue({ save: txSave }),
+    } as unknown as EntityManager;
+
+    await service.applyProfileUpdate(row, { school: 'Oakwood' }, ACTOR, manager);
+
+    expect(txSave).toHaveBeenCalledTimes(1);
+    expect(save).not.toHaveBeenCalled();
+    expect(auditRecord.mock.calls[0][1]).toBe(manager);
   });
 });
 

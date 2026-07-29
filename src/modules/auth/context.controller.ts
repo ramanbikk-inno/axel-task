@@ -71,18 +71,7 @@ export class ContextController {
         o.trainerProfileId === selected.trainerProfileId,
     ) as ContextOption;
 
-    // The tenant claims changed, so the old access token is stale. Only the
-    // access token is reissued: it is the same session, so the refresh token
-    // and its rotation family stay exactly as they were.
-    const accessToken = this.tokens.signAccess({
-      userId: principal.userId,
-      role: principal.role,
-      sessionId: principal.sessionId,
-      activeTrainerProfileId: selected.trainerProfileId,
-      trainerOrgId: principal.trainerOrgId,
-      tokenVersion: principal.tokenVersion,
-      actorUserId: principal.actor?.userId,
-    });
+    const accessToken = this.reissueAccessToken(principal, selected.trainerProfileId);
 
     return { active, accessToken, expiresIn: this.tokens.accessTtlSeconds() };
   }
@@ -94,17 +83,26 @@ export class ContextController {
     const principal = req.user as Principal;
     await this.context.clear(principal);
 
-    const accessToken = this.tokens.signAccess({
+    const accessToken = this.reissueAccessToken(principal, null);
+
+    return { accessToken, expiresIn: this.tokens.accessTtlSeconds() };
+  }
+
+  /**
+   * The tenant claims changed, so the old access token is stale. Only the access
+   * token is reissued: it is the same session, so the refresh token and its
+   * rotation family stay exactly as they were.
+   */
+  private reissueAccessToken(principal: Principal, activeTrainerProfileId: string | null): string {
+    return this.tokens.signAccess({
       userId: principal.userId,
       role: principal.role,
       sessionId: principal.sessionId,
-      activeTrainerProfileId: null,
+      activeTrainerProfileId,
       trainerOrgId: principal.trainerOrgId,
       tokenVersion: principal.tokenVersion,
       actorUserId: principal.actor?.userId,
     });
-
-    return { accessToken, expiresIn: this.tokens.accessTtlSeconds() };
   }
 }
 
