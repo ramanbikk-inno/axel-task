@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
+import { repoFor } from '../../shared/database/repo-for';
 import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/changed-fields';
 import { Principal } from '../auth/principal';
@@ -44,7 +45,7 @@ export class PlayersService {
   ) {}
 
   private repo(manager?: EntityManager): Repository<PlayerProfile> {
-    return manager !== undefined ? manager.getRepository(PlayerProfile) : this.profiles;
+    return repoFor(this.profiles, PlayerProfile, manager);
   }
 
   async create(input: CreatePlayerProfileInput, manager?: EntityManager): Promise<PlayerProfile> {

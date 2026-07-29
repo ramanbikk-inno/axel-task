@@ -4,7 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { DeepPartial, FindOptionsWhere, Repository } from 'typeorm';
+import { DeepPartial, FindOptionsWhere, IsNull, Repository } from 'typeorm';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 
 import { ClockService } from '../../shared/clock/clock.service';
@@ -76,15 +76,28 @@ export class SingleUseTokenService {
     return row;
   }
 
+  /**
+   * Consumed atomically: two concurrent callers can both pass `validate` on the
+   * same still-unconsumed row, and only the `consumedAt IS NULL` guard here
+   * decides which one actually spends it. The loser gets the same
+   * TOKEN_ALREADY_USED a sequential replay would.
+   */
   async markConsumed<T extends SingleUseTokenBase>(
     repo: Repository<T>,
     id: string,
     now: Date,
+    messages: Pick<SingleUseTokenMessages, 'alreadyUsed'>,
   ): Promise<void> {
-    const criteria: FindOptionsWhere<T> = { id } as FindOptionsWhere<T>;
+    const criteria: FindOptionsWhere<T> = { id, consumedAt: IsNull() } as FindOptionsWhere<T>;
     const patch: QueryDeepPartialEntity<T> = {
       consumedAt: now,
     } as unknown as QueryDeepPartialEntity<T>;
-    await repo.update(criteria, patch);
+    const result = await repo.update(criteria, patch);
+    if (!result.affected) {
+      throw new ConflictException({
+        errorCode: ErrorCode.TOKEN_ALREADY_USED,
+        message: messages.alreadyUsed,
+      });
+    }
   }
 }

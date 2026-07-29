@@ -13,6 +13,7 @@ import { UsersModule } from '../users/users.module';
 import { AssociationsService } from './associations.service';
 import { JoinController } from './join.controller';
 import { JoinService } from './join.service';
+import { RosterController } from './roster.controller';
 import { RosterService } from './roster.service';
 import { ShareLinksController } from './share-links.controller';
 import { ShareLinksService } from './share-links.service';
@@ -32,7 +33,7 @@ import { TrainerPlayerAssociation } from './entities/trainer-player-association.
     CryptoModule,
     RegistrationModule,
   ],
-  controllers: [ShareLinksController, JoinController],
+  controllers: [ShareLinksController, RosterController, JoinController],
   providers: [JoinService, RosterService, ShareLinksService, AssociationsService],
   exports: [ShareLinksService, AssociationsService],
 })

@@ -6,6 +6,7 @@ import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { ClockService } from '../../shared/clock/clock.service';
 import { SESSION_IDLE_TIMEOUT_DEFAULT } from '../../shared/config/env.validation';
 import { durationToSeconds } from '../../shared/config/duration';
+import { repoFor } from '../../shared/database/repo-for';
 import { displayNameFor } from '../../shared/format/display-name';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { PG_UNIQUE_VIOLATION } from '../../shared/errors/all-exceptions.filter';
@@ -26,7 +27,7 @@ import { EmailVerificationToken } from './entities/email-verification-token.enti
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { Principal } from './principal';
-import { SingleUseTokenService } from './single-use-token.service';
+import { SingleUseTokenMessages, SingleUseTokenService } from './single-use-token.service';
 import { TokenService } from './token.service';
 
 const REGISTER_MESSAGE = 'Registration received. Check your email to verify your account.';
@@ -290,11 +291,12 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<void> {
-    const row = await this.singleUseTokens.validate(this.emailVerifications, token, {
+    const messages: SingleUseTokenMessages = {
       invalid: 'Invalid verification token.',
       alreadyUsed: 'This verification token has already been used.',
       expired: 'This verification token has expired.',
-    });
+    };
+    const row = await this.singleUseTokens.validate(this.emailVerifications, token, messages);
 
     const user = await this.usersService.findById(row.userId);
     if (!user) {
@@ -306,7 +308,7 @@ export class AuthService {
     this.assertAccountUsable(user);
 
     const now = this.clock.now();
-    await this.singleUseTokens.markConsumed(this.emailVerifications, row.id, now);
+    await this.singleUseTokens.markConsumed(this.emailVerifications, row.id, now, messages);
     await this.usersService.markEmailVerified(row.userId, now);
 
     await this.mail.sendWelcomeEmail(user.email, user.firstName ?? '');
@@ -540,15 +542,16 @@ export class AuthService {
   }
 
   async resetPassword(input: { token: string; newPassword: string }): Promise<void> {
-    const row = await this.singleUseTokens.validate(this.passwordResets, input.token, {
+    const messages: SingleUseTokenMessages = {
       invalid: 'Invalid reset token.',
       alreadyUsed: 'This reset token has already been used.',
       expired: 'This reset token has expired.',
-    });
+    };
+    const row = await this.singleUseTokens.validate(this.passwordResets, input.token, messages);
 
     const passwordHash = await this.passwords.hash(input.newPassword);
     const now = this.clock.now();
-    await this.singleUseTokens.markConsumed(this.passwordResets, row.id, now);
+    await this.singleUseTokens.markConsumed(this.passwordResets, row.id, now, messages);
     await this.usersService.setPasswordAndBumpVersion(row.userId, passwordHash);
     await this.sessions.update(
       { userId: row.userId, revokedAt: IsNull() },
@@ -670,8 +673,7 @@ export class AuthService {
   }
 
   async createSetupToken(userId: string, manager?: EntityManager): Promise<string> {
-    const repository =
-      manager !== undefined ? manager.getRepository(AccountSetupToken) : this.accountSetups;
+    const repository = repoFor(this.accountSetups, AccountSetupToken, manager);
     return this.singleUseTokens.issue(repository, userId, ACCOUNT_SETUP_TTL_MS);
   }
 
@@ -679,11 +681,12 @@ export class AuthService {
     input: { token: string; newPassword: string },
     meta: { ip?: string; userAgent?: string },
   ): Promise<AuthTokens> {
-    const row = await this.singleUseTokens.validate(this.accountSetups, input.token, {
+    const messages: SingleUseTokenMessages = {
       invalid: 'Invalid setup token.',
       alreadyUsed: 'This setup token has already been used.',
       expired: 'This setup token has expired.',
-    });
+    };
+    const row = await this.singleUseTokens.validate(this.accountSetups, input.token, messages);
 
     const user = await this.usersService.findById(row.userId);
     if (!user) {
@@ -696,7 +699,7 @@ export class AuthService {
 
     const passwordHash = await this.passwords.hash(input.newPassword);
     const now = this.clock.now();
-    await this.singleUseTokens.markConsumed(this.accountSetups, row.id, now);
+    await this.singleUseTokens.markConsumed(this.accountSetups, row.id, now, messages);
     await this.usersService.setPasswordAndBumpVersion(user.id, passwordHash);
     await this.usersService.markEmailVerified(user.id, now);
 

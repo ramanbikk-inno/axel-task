@@ -19,17 +19,6 @@ export class PasswordService {
     return argon2.hash(plain, this.options);
   }
 
-  /**
-   * @deprecated Test-only shim: the e2e suite forges a weakly-parameterised
-   * hash through it. Call argon2.hash directly there and drop this.
-   */
-  async hashWith(
-    plain: string,
-    options: { memoryCost: number; timeCost: number; parallelism: number },
-  ): Promise<string> {
-    return argon2.hash(plain, { type: argon2.argon2id, ...options });
-  }
-
   async verify(hash: string, plain: string): Promise<boolean> {
     return argon2.verify(hash, plain);
   }

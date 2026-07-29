@@ -12,7 +12,6 @@ import { UsersModule } from '../users/users.module';
 import { CoachInvitationService } from './coach-invitation.service';
 import { CoachProfileService } from './coach-profile.service';
 import { CoachesController } from './coaches.controller';
-import { CoachesService } from './coaches.service';
 import { CoachProfile } from './entities/coach-profile.entity';
 
 @Module({
@@ -28,7 +27,7 @@ import { CoachProfile } from './entities/coach-profile.entity';
     CryptoModule,
   ],
   controllers: [CoachesController],
-  providers: [CoachProfileService, CoachInvitationService, CoachesService],
-  exports: [CoachProfileService, CoachInvitationService, CoachesService],
+  providers: [CoachProfileService, CoachInvitationService],
+  exports: [CoachProfileService, CoachInvitationService],
 })
 export class CoachesModule {}

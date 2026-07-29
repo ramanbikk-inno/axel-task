@@ -207,7 +207,10 @@ describe('AuthService password reset & change', () => {
 
     await service.resetPassword({ token: 'reset-plain', newPassword: 'NewStr0ng!Pass' });
 
-    expect(passwordResets.update).toHaveBeenCalledWith({ id: 'prt-1' }, { consumedAt: NOW });
+    expect(passwordResets.update).toHaveBeenCalledWith(
+      { id: 'prt-1', consumedAt: IsNull() },
+      { consumedAt: NOW },
+    );
     expect(usersService.setPasswordAndBumpVersion).toHaveBeenCalledWith('user-1', 'new-hash');
     expect(sessions.update).toHaveBeenCalledWith(
       { userId: 'user-1', revokedAt: IsNull() },

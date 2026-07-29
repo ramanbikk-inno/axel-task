@@ -1,7 +1,7 @@
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { SingleUseTokenService } from '../../src/modules/auth/single-use-token.service';
@@ -197,7 +197,10 @@ describe('AuthService email verification', () => {
 
     await service.verifyEmail('plain-token-abc');
 
-    expect(emailVerifications.update).toHaveBeenCalledWith({ id: 'evt-1' }, { consumedAt: NOW });
+    expect(emailVerifications.update).toHaveBeenCalledWith(
+      { id: 'evt-1', consumedAt: IsNull() },
+      { consumedAt: NOW },
+    );
     expect(usersService.markEmailVerified).toHaveBeenCalledWith('user-new-1', NOW);
     expect(mail.sendWelcomeEmail).toHaveBeenCalledWith('new@example.com', 'Ada');
   });

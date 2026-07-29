@@ -13,7 +13,7 @@ import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/changed-fields';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
-import { CoachesService } from '../coaches/coaches.service';
+import { CoachProfileService } from '../coaches/coach-profile.service';
 import { CoachView, UpdateCoachProfileDto } from '../coaches/dto/coach.dto';
 import { MailService } from '../mail/mail.service';
 import { UpdatePlayerProfileDto, UpdateTrainerProfileDto } from '../profile/dto/profile.dto';
@@ -63,7 +63,7 @@ export class AdminService {
     private readonly audit: AuditService,
     private readonly playersService: PlayersService,
     private readonly ageGate: AgeGateService,
-    private readonly coachesService: CoachesService,
+    private readonly coachProfiles: CoachProfileService,
     private readonly userErasure: UserErasureService,
   ) {}
 
@@ -266,7 +266,7 @@ export class AdminService {
   ): Promise<CoachView> {
     const target = await this.requireUser(targetUserId);
     AdminService.requireRole(target, Role.Coach, 'coach');
-    return this.coachesService.adminUpdateProfile(targetUserId, actor, input);
+    return this.coachProfiles.adminUpdateProfile(targetUserId, actor, input);
   }
 
   /** Super Admin edits a player's own (non-child) trainee profile fields. */
@@ -311,9 +311,7 @@ export class AdminService {
       user: UserSummaryDto.fromEntity(user),
       trainer: user.role === Role.Trainer ? await this.trainerViewFor(targetUserId) : null,
       coach:
-        user.role === Role.Coach
-          ? await this.coachesService.findActiveByUserId(targetUserId)
-          : null,
+        user.role === Role.Coach ? await this.coachProfiles.findActiveByUserId(targetUserId) : null,
       player: user.role === Role.PlayerParent ? await this.playerViewFor(targetUserId) : null,
     };
   }

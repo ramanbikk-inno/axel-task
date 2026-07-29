@@ -12,9 +12,9 @@ import { Role } from '../users/entities/user.enums';
 
 /**
  * The one answer to "is this principal inside that trainer organisation?".
- * Trainers and coaches each carried their own copy of this check and had already
- * drifted apart — one filtered active associations in the database, the other in
- * memory — so the same authorization question could get two answers.
+ * Trainers and coaches each carried their own copy of this check — same rule,
+ * one filtering active associations in the database and the other in memory —
+ * so any future change to the rule had two call sites to find and update.
  */
 @Injectable()
 export class OrgMembershipService {

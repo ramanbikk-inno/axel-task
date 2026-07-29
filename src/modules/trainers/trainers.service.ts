@@ -9,7 +9,7 @@ import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/changed-fields';
 import { Principal } from '../auth/principal';
 import { OrgMembershipService } from '../org-membership/org-membership.service';
-import { discardAsset } from '../storage/discard-asset';
+import { replaceStoredAsset } from '../storage/replace-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from './entities/trainer-profile.entity';
 
@@ -170,21 +170,18 @@ export class TrainersService {
     });
 
     const previousPublicId = profile.logoPublicId;
-    const stored = await this.storage.upload({
-      buffer,
-      fileName: input.fileName,
-      mimeType: input.mimeType,
-      folder: 'logos',
+    const { persisted: saved } = await replaceStoredAsset({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId,
+      upload: { buffer, fileName: input.fileName, mimeType: input.mimeType, folder: 'logos' },
+      persist: (uploaded) => {
+        profile.logoUrl = uploaded?.url ?? null;
+        profile.logoPublicId = uploaded?.publicId ?? null;
+        return this.trainersRepository.save(profile);
+      },
     });
-    profile.logoUrl = stored.url;
-    profile.logoPublicId = stored.publicId;
-    const saved = await this.trainersRepository.save(profile);
 
-    // After the row points at the new asset, never before: deleting first
-    // would leave the profile referencing nothing if the upload then failed.
-    if (previousPublicId !== null && previousPublicId !== stored.publicId) {
-      await discardAsset(this.storage, previousPublicId, this.logger);
-    }
     await this.audit.record({
       action: AUDIT_BRANDING_LOGO_SET,
       actor,
@@ -204,13 +201,17 @@ export class TrainersService {
       });
     }
 
-    const previousPublicId = profile.logoPublicId;
-    profile.logoUrl = null;
-    profile.logoPublicId = null;
-    const saved = await this.trainersRepository.save(profile);
-    if (previousPublicId !== null) {
-      await discardAsset(this.storage, previousPublicId, this.logger);
-    }
+    const { persisted: saved } = await replaceStoredAsset({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId: profile.logoPublicId,
+      persist: () => {
+        profile.logoUrl = null;
+        profile.logoPublicId = null;
+        return this.trainersRepository.save(profile);
+      },
+    });
+
     await this.audit.record({
       action: AUDIT_BRANDING_LOGO_REMOVED,
       actor,

@@ -16,7 +16,7 @@ module.exports = {
     node: true,
     jest: true,
   },
-  ignorePatterns: ['.eslintrc.js', 'dist/', 'node_modules/', 'coverage/'],
+  ignorePatterns: ['.eslintrc.js', 'commitlint.config.js', 'dist/', 'node_modules/', 'coverage/'],
   rules: {
     '@typescript-eslint/no-explicit-any': 'error',
     '@typescript-eslint/explicit-function-return-type': ['error', { allowExpressions: true }],

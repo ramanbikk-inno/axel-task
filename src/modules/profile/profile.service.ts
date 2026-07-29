@@ -9,7 +9,7 @@ import { Principal } from '../auth/principal';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { AUDIT_PLAYER_PROFILE_UPDATED, PlayersService } from '../players/players.service';
 import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
-import { discardAsset } from '../storage/discard-asset';
+import { replaceStoredAsset } from '../storage/replace-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { TrainersService } from '../trainers/trainers.service';
@@ -73,7 +73,7 @@ export class ProfileService {
 
   async uploadPhoto(actor: Principal, dto: UploadPhotoDto): Promise<MyProfileView> {
     const userId = actor.userId;
-    await this.requireUser(userId);
+    const user = await this.requireUser(userId);
 
     // Verifies the bytes really are an image of the declared type — the
     // client-supplied mimeType alone would let a script through as image/png.
@@ -88,26 +88,23 @@ export class ProfileService {
     const childProfileId = actor.isChild ? this.requireChildProfileId(actor) : null;
     const previousPublicId =
       childProfileId === null
-        ? (await this.requireUser(userId)).photoPublicId
+        ? user.photoPublicId
         : (await this.loadChildProfile(childProfileId)).photoPublicId;
 
-    const stored = await this.storage.upload({
-      buffer,
-      fileName: dto.fileName,
-      mimeType: dto.mimeType,
-      folder: 'avatars',
+    await replaceStoredAsset<void>({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId,
+      upload: { buffer, fileName: dto.fileName, mimeType: dto.mimeType, folder: 'avatars' },
+      persist: async (stored) => {
+        if (childProfileId === null) {
+          await this.usersService.setPhoto(userId, stored);
+        } else {
+          await this.playersService.setPhoto(childProfileId, stored);
+        }
+      },
     });
-    if (childProfileId === null) {
-      await this.usersService.setPhoto(userId, stored);
-    } else {
-      await this.playersService.setPhoto(childProfileId, stored);
-    }
 
-    // Only after the row points at the new asset: deleting first would leave a
-    // profile referencing nothing if the upload then failed.
-    if (previousPublicId !== null && previousPublicId !== stored.publicId) {
-      await discardAsset(this.storage, previousPublicId, this.logger);
-    }
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_UPDATED,
       actor,
@@ -135,14 +132,19 @@ export class ProfileService {
       });
     }
 
-    if (childProfileId === null) {
-      await this.usersService.setPhoto(actor.userId, null);
-    } else {
-      await this.playersService.setPhoto(childProfileId, null);
-    }
-    if (existing.photoPublicId !== null) {
-      await discardAsset(this.storage, existing.photoPublicId, this.logger);
-    }
+    await replaceStoredAsset<void>({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId: existing.photoPublicId,
+      persist: async () => {
+        if (childProfileId === null) {
+          await this.usersService.setPhoto(actor.userId, null);
+        } else {
+          await this.playersService.setPhoto(childProfileId, null);
+        }
+      },
+    });
+
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_REMOVED,
       actor,

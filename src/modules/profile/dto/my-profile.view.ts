@@ -1,7 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 import { EmergencyContact, PlayerProfile } from '../../players/entities/player-profile.entity';
-import { toPlayerProfileFields } from '../../players/dto/player-profile-fields';
+import {
+  PlayerProfileFields,
+  toPlayerProfileFields,
+} from '../../players/dto/player-profile-fields';
 import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { Role, UserStatus } from '../../users/entities/user.enums';
@@ -13,7 +16,7 @@ class TrainerProfileView {
   @ApiProperty({ nullable: true }) description!: string | null;
 }
 
-class SelfPlayerProfileView {
+class SelfPlayerProfileView implements PlayerProfileFields {
   @ApiProperty() id!: string;
   @ApiProperty() displayName!: string;
   @ApiProperty({ nullable: true }) school!: string | null;

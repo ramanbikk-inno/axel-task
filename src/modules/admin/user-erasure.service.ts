@@ -6,7 +6,7 @@ import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
-import { CoachesService } from '../coaches/coaches.service';
+import { CoachProfileService } from '../coaches/coach-profile.service';
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayersService } from '../players/players.service';
 import { discardAsset } from '../storage/discard-asset';
@@ -37,7 +37,7 @@ export class UserErasureService {
     private readonly shareLinks: ShareLinksService,
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly clock: ClockService,
-    private readonly coachesService: CoachesService,
+    private readonly coachProfiles: CoachProfileService,
   ) {}
 
   /**
@@ -132,7 +132,7 @@ export class UserErasureService {
       await this.playersService.anonymizeByChildUserId(target.id, manager);
       // No-op unless the target ever held a coach engagement — clears bio,
       // credentials and certifications that would otherwise outlive the erasure.
-      await this.coachesService.anonymizeByUserId(target.id, manager);
+      await this.coachProfiles.anonymizeByUserId(target.id, manager);
       for (const childUserId of childUserIds) {
         await this.usersService.anonymize(childUserId, manager);
         await this.playersService.anonymizeByChildUserId(childUserId, manager);

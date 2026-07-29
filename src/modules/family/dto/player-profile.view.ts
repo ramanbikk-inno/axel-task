@@ -1,7 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 import { EmergencyContact, PlayerProfile } from '../../players/entities/player-profile.entity';
-import { toPlayerProfileFields } from '../../players/dto/player-profile-fields';
+import {
+  PlayerProfileFields,
+  toPlayerProfileFields,
+} from '../../players/dto/player-profile-fields';
 
 export class TrainerContextView {
   @ApiProperty()
@@ -21,7 +24,7 @@ export class TrainerContextView {
   status!: string;
 }
 
-export class PlayerProfileView {
+export class PlayerProfileView implements PlayerProfileFields {
   @ApiProperty()
   id!: string;
 

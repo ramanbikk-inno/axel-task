@@ -6,7 +6,7 @@ import { AgeGateService } from '../../shared/registration/age-gate.service';
 import { AuditService } from '../audit/audit.service';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
-import { CoachesService } from '../coaches/coaches.service';
+import { CoachProfileService } from '../coaches/coach-profile.service';
 import { MailService } from '../mail/mail.service';
 import { PlayersService } from '../players/players.service';
 import { TrainersService } from '../trainers/trainers.service';
@@ -49,7 +49,7 @@ describe('AdminService.createTrainer', () => {
     } as unknown as DataSource;
 
     const ageGate = {} as unknown as AgeGateService;
-    const coachesService = {} as unknown as CoachesService;
+    const coachProfiles = {} as unknown as CoachProfileService;
     const userErasure = {} as unknown as UserErasureService;
 
     const service = new AdminService(
@@ -61,7 +61,7 @@ describe('AdminService.createTrainer', () => {
       audit,
       playersService,
       ageGate,
-      coachesService,
+      coachProfiles,
       userErasure,
     );
 
@@ -230,7 +230,7 @@ describe('AdminService role-profile editing', () => {
         applyProfileUpdate: playerApplyProfileUpdate,
       } as unknown as PlayersService,
       { assertOldEnoughForOwnAccount: assertOldEnough } as unknown as AgeGateService,
-      { adminUpdateProfile } as unknown as CoachesService,
+      { adminUpdateProfile } as unknown as CoachProfileService,
       {} as UserErasureService,
     );
 
@@ -301,7 +301,7 @@ describe('AdminService role-profile editing', () => {
       ).rejects.toMatchObject({ response: { errorCode: ErrorCode.ROLE_MISMATCH } });
     });
 
-    it('delegates to CoachesService.adminUpdateProfile, which owns the lookup and audit', async () => {
+    it('delegates to CoachProfileService.adminUpdateProfile, which owns the lookup and audit', async () => {
       const { service, adminUpdateProfile } = makeService(Role.Coach);
       adminUpdateProfile.mockResolvedValue({ id: 'coach-1', bio: 'New bio' });
 
