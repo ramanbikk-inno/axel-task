@@ -431,6 +431,7 @@ describe('API surface gaps (e2e)', () => {
           email: 'too-young@example.com',
           password: 'Str0ng!Passw0rd',
           birthDate: '2015-01-01',
+          firstName: 'Reg',
         })
         .expect(403);
 
@@ -453,6 +454,7 @@ describe('API surface gaps (e2e)', () => {
           email: 'too-young-link@example.com',
           password: 'Str0ng!Passw0rd',
           birthDate: '2015-01-01',
+          firstName: 'Reg',
         })
         .expect(403);
 
@@ -471,6 +473,7 @@ describe('API surface gaps (e2e)', () => {
           email: 'old-enough@example.com',
           password: 'Str0ng!Passw0rd',
           birthDate: ADULT_DOB,
+          firstName: 'Reg',
         })
         .expect(201);
     });
@@ -489,6 +492,7 @@ describe('API surface gaps (e2e)', () => {
           email: 'future@example.com',
           password: 'Str0ng!Passw0rd',
           birthDate: '2099-01-01',
+          firstName: 'Reg',
         })
         .expect(400);
     });
@@ -496,18 +500,33 @@ describe('API surface gaps (e2e)', () => {
     it('does not leak whether the address is taken when the applicant is underage', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'taken@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .send({
+          email: 'taken@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: ADULT_DOB,
+          firstName: 'Reg',
+        })
         .expect(201);
 
       // Same 403 for a taken address as for a fresh one: the age check runs
       // first, so this endpoint cannot be used to probe for existing accounts.
       const taken = await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'taken@example.com', password: 'Str0ng!Passw0rd', birthDate: '2015-01-01' })
+        .send({
+          email: 'taken@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: '2015-01-01',
+          firstName: 'Reg',
+        })
         .expect(403);
       const fresh = await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'fresh@example.com', password: 'Str0ng!Passw0rd', birthDate: '2015-01-01' })
+        .send({
+          email: 'fresh@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: '2015-01-01',
+          firstName: 'Reg',
+        })
         .expect(403);
 
       // requestId and timestamp are per-request by design; everything a caller

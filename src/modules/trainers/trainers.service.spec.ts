@@ -28,6 +28,7 @@ interface Stub {
   service: TrainersService;
   findOne: jest.Mock;
   save: jest.Mock;
+  update: jest.Mock;
   isOrgMember: jest.Mock;
   auditRecord: jest.Mock;
 }
@@ -35,15 +36,16 @@ interface Stub {
 function build(): Stub {
   const findOne = jest.fn().mockResolvedValue(null);
   const save = jest.fn().mockImplementation((p: TrainerProfile) => Promise.resolve(p));
+  const update = jest.fn().mockResolvedValue({ affected: 1 });
   const isOrgMember = jest.fn().mockResolvedValue(false);
   const auditRecord = jest.fn().mockResolvedValue(undefined);
   const service = new TrainersService(
-    { findOne, save } as unknown as Repository<TrainerProfile>,
+    { findOne, save, update } as unknown as Repository<TrainerProfile>,
     { isOrgMember } as unknown as OrgMembershipService,
     {} as unknown as StorageService,
     { record: auditRecord } as unknown as AuditService,
   );
-  return { service, findOne, save, isOrgMember, auditRecord };
+  return { service, findOne, save, update, isOrgMember, auditRecord };
 }
 
 describe('TrainersService.findAccessibleById', () => {
@@ -142,5 +144,49 @@ describe('TrainersService.applyProfileUpdate', () => {
     expect(txSave).toHaveBeenCalledTimes(1);
     expect(save).not.toHaveBeenCalled();
     expect(auditRecord.mock.calls[0][1]).toBe(manager);
+  });
+});
+
+describe('TrainersService.anonymizeByUserId', () => {
+  it('clears the org PII a GDPR erasure has to remove', async () => {
+    const { service, update } = build();
+
+    await service.anonymizeByUserId('user-1');
+
+    expect(update).toHaveBeenCalledWith(
+      { userId: 'user-1' },
+      {
+        businessName: 'Deleted User',
+        website: null,
+        address: null,
+        description: null,
+        logoUrl: null,
+        logoPublicId: null,
+      },
+    );
+  });
+
+  it('leaves the payment fields alone — financial records, not personal data', async () => {
+    const { service, update } = build();
+
+    await service.anonymizeByUserId('user-1');
+
+    const [, patch] = update.mock.calls[0] as [unknown, Record<string, unknown>];
+    expect(patch).not.toHaveProperty('stripeAccountId');
+    expect(patch).not.toHaveProperty('subscriptionStatus');
+    expect(patch).not.toHaveProperty('platformFeePercent');
+  });
+
+  it('runs on the caller’s transaction manager when one is given', async () => {
+    const { service, update } = build();
+    const managerUpdate = jest.fn().mockResolvedValue({ affected: 1 });
+    const manager = {
+      getRepository: jest.fn().mockReturnValue({ update: managerUpdate }),
+    } as unknown as EntityManager;
+
+    await service.anonymizeByUserId('user-1', manager);
+
+    expect(managerUpdate).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
   });
 });

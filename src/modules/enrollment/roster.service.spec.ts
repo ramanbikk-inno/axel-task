@@ -9,7 +9,7 @@ import { PlayersService } from '../players/players.service';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { TrainersService } from '../trainers/trainers.service';
 import { User } from '../users/entities/user.entity';
-import { Role } from '../users/entities/user.enums';
+import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
 import { AssociationsService } from './associations.service';
 import { RosterEntryView } from './dto/roster.dto';
@@ -272,6 +272,7 @@ describe('RosterService.list', () => {
         firstName: 'Jamie',
         lastName: 'Chen',
         phone: '+1 555 0000',
+        status: UserStatus.Active,
       }),
     ]);
 
@@ -290,6 +291,9 @@ describe('RosterService.list', () => {
       accountEmail: 'parent@example.com',
       accountName: 'Jamie Chen',
       accountPhone: '+1 555 0000',
+      // The account's own status, not the association's — a deactivation moves
+      // this one and leaves `status` alone.
+      accountStatus: UserStatus.Active,
       status: AssociationStatus.Active,
       connectedAt,
     });

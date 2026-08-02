@@ -11,6 +11,7 @@ import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayersService } from '../players/players.service';
 import { discardAsset } from '../storage/discard-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
+import { TrainersService } from '../trainers/trainers.service';
 import { User } from '../users/entities/user.entity';
 import { UserStatus, Role } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
@@ -38,6 +39,7 @@ export class UserErasureService {
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly clock: ClockService,
     private readonly coachProfiles: CoachProfileService,
+    private readonly trainers: TrainersService,
   ) {}
 
   /**
@@ -97,6 +99,10 @@ export class UserErasureService {
       childLoginProfile?.photoPublicId ?? null,
     ].filter((id): id is string => id !== null);
 
+    // Same reason again for the org's logo: anonymisation clears the handle, so
+    // the asset could never be found afterwards. Null for every non-trainer.
+    const logoPublicId = (await this.trainers.findByUserId(target.id))?.logoPublicId ?? null;
+
     await this.dataSource.transaction(async (manager: EntityManager) => {
       const deletionLogs = manager.getRepository(UserDeletionLog);
       const logErasure = (
@@ -133,6 +139,9 @@ export class UserErasureService {
       // No-op unless the target ever held a coach engagement — clears bio,
       // credentials and certifications that would otherwise outlive the erasure.
       await this.coachProfiles.anonymizeByUserId(target.id, manager);
+      // Same for a trainer's organisation: business name, address, website,
+      // description and logo all outlive the erasure otherwise.
+      await this.trainers.anonymizeByUserId(target.id, manager);
       for (const childUserId of childUserIds) {
         await this.usersService.anonymize(childUserId, manager);
         await this.playersService.anonymizeByChildUserId(childUserId, manager);
@@ -168,6 +177,9 @@ export class UserErasureService {
     }
     for (const publicId of profilePhotoPublicIds) {
       await discardAsset(this.storage, publicId, this.logger);
+    }
+    if (logoPublicId !== null) {
+      await discardAsset(this.storage, logoPublicId, this.logger);
     }
 
     const updated = await requireUser(this.usersService, target.id);

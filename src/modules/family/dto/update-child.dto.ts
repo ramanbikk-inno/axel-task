@@ -66,4 +66,10 @@ export class UpdateChildDto {
   @IsOptionalNotNull()
   @IsBoolean()
   allowChildTokenSpendNoApproval?: boolean;
+
+  /** Same escape hatch as on create — a rename can land on a twin. */
+  @ApiPropertyOptional({ description: 'Proceed despite an exact name + birth date match.' })
+  @IsOptional()
+  @IsBoolean()
+  allowDuplicate?: boolean;
 }

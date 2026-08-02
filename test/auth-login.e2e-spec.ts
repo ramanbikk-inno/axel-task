@@ -23,7 +23,12 @@ describe('Auth login/register/me (e2e)', () => {
   it('POST /auth/register returns 201 with the generic message', async () => {
     const res = await request(ctx.app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email: 'newplayer@example.com', password: FACTORY_PASSWORD, birthDate: '1994-03-22' })
+      .send({
+        email: 'newplayer@example.com',
+        password: FACTORY_PASSWORD,
+        birthDate: '1994-03-22',
+        firstName: 'Reg',
+      })
       .expect(201);
 
     expect(res.body).toEqual({
@@ -36,7 +41,12 @@ describe('Auth login/register/me (e2e)', () => {
 
     const res = await request(ctx.app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email: 'dup@example.com', password: FACTORY_PASSWORD, birthDate: '1994-03-22' })
+      .send({
+        email: 'dup@example.com',
+        password: FACTORY_PASSWORD,
+        birthDate: '1994-03-22',
+        firstName: 'Reg',
+      })
       .expect(201);
 
     expect(res.body).toEqual({

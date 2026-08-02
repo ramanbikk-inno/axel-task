@@ -41,6 +41,10 @@ export class ShareLink {
   @Column({ name: 'target_email', type: 'text', nullable: true })
   targetEmail!: string | null;
 
+  /** Optional invitee name on a coach invite; never set on a static player link. */
+  @Column({ name: 'target_name', type: 'text', nullable: true })
+  targetName!: string | null;
+
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt!: Date | null;
 

@@ -58,6 +58,7 @@ const shareLink = (over: Partial<ShareLink> = {}): ShareLink =>
     code: 'code-abc',
     type: ShareLinkType.CoachUnique,
     targetEmail: 'coach@example.com',
+    targetName: null,
     expiresAt: new Date(NOW.getTime() + SEVEN_DAYS_MS),
     maxUses: 1,
     useCount: 0,
@@ -204,9 +205,19 @@ describe('CoachInvitationService.invite', () => {
       type: ShareLinkType.CoachUnique,
       createdByUserId: 'user-1',
       targetEmail: dto.email,
+      targetName: null,
       expiresAt: new Date(NOW.getTime() + SEVEN_DAYS_MS),
       maxUses: 1,
     });
+  });
+
+  it('stores the optional invitee name when the trainer supplies one', async () => {
+    const { service, create } = build();
+    create.mockResolvedValue(shareLink({ id: 'link-9', code: 'code-9' }));
+
+    await service.invite(PRINCIPAL, { ...dto, name: 'Jordan Lee' });
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ targetName: 'Jordan Lee' }));
   });
 
   it('sends the invite email to the invitee, naming the trainer and carrying the optional message', async () => {
@@ -249,6 +260,7 @@ describe('CoachInvitationService.invite', () => {
       id: 'link-9',
       code: 'code-9',
       email: dto.email,
+      name: null,
       status: 'pending',
       expiresAt: created.expiresAt,
       createdAt: created.createdAt,
@@ -318,7 +330,11 @@ describe('CoachInvitationService.resendInvitation', () => {
 
   it('deactivates the old link and creates the replacement inside one transaction', async () => {
     const { service, findByIdLink, deactivate, create, manager } = build();
-    const existing = shareLink({ id: 'link-1', targetEmail: 'coach@example.com' });
+    const existing = shareLink({
+      id: 'link-1',
+      targetEmail: 'coach@example.com',
+      targetName: 'Jordan Lee',
+    });
     findByIdLink.mockResolvedValue(existing);
     create.mockResolvedValue(shareLink({ id: 'link-2', code: 'new-code' }));
 
@@ -331,6 +347,8 @@ describe('CoachInvitationService.resendInvitation', () => {
         type: ShareLinkType.CoachUnique,
         createdByUserId: 'user-1',
         targetEmail: 'coach@example.com',
+        // A resend must not lose the name the trainer typed.
+        targetName: 'Jordan Lee',
         expiresAt: new Date(NOW.getTime() + SEVEN_DAYS_MS),
         maxUses: 1,
       },

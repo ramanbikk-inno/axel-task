@@ -80,6 +80,7 @@ export class RosterService {
           accountEmail: account?.email ?? null,
           accountName: account ? displayNameFor(account, account.email) : null,
           accountPhone: account?.phone ?? null,
+          accountStatus: account?.status ?? null,
           status: a.status,
           connectedAt: a.connectedAt,
         };

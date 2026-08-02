@@ -74,13 +74,13 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       const email = 'once@example.com';
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email, password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .send({ email, password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB, firstName: 'Reg' })
         .expect(201);
       // Enumeration-safe: the second attempt is a silent no-op, and must not
       // leave a second profile behind either.
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email, password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .send({ email, password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB, firstName: 'Reg' })
         .expect(201);
 
       expect(await ctx.dataSource.getRepository(PlayerProfile).count()).toBe(1);
@@ -89,26 +89,35 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
     it('leaves no profile behind when the age check rejects the registration', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'minor@example.com', password: 'Str0ng!Passw0rd', birthDate: '2015-01-01' })
+        .send({
+          email: 'minor@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: '2015-01-01',
+          firstName: 'Reg',
+        })
         .expect(403);
 
       expect(await ctx.dataSource.getRepository(PlayerProfile).count()).toBe(0);
     });
 
-    it('names the profile after the registrant, falling back to the email', async () => {
+    it('names the profile after the registrant, and no longer accepts a nameless one', async () => {
       const named = await ctx.registerVerifiedPlayer({ email: 'named@example.com' });
       const namedProfile = await selfProfileOf(named.userId);
       // registerVerifiedPlayer supplies first and last names.
       expect(namedProfile!.displayName).not.toBe('named@example.com');
 
+      // The email fallback in displayNameFor used to be reachable from here,
+      // which put a raw address on the trainer's roster. RegisterDto now
+      // requires a first name, so the only way in is with one.
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
         .send({ email: 'bare@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
-        .expect(201);
-      const bare = await ctx.dataSource
-        .getRepository(PlayerProfile)
-        .findOneBy({ displayName: 'bare@example.com' });
-      expect(bare).not.toBeNull();
+        .expect(422);
+      expect(
+        await ctx.dataSource
+          .getRepository(PlayerProfile)
+          .findOneBy({ displayName: 'bare@example.com' }),
+      ).toBeNull();
     });
   });
 
@@ -119,7 +128,12 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
 
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'rollback@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .send({
+          email: 'rollback@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: ADULT_DOB,
+          firstName: 'Reg',
+        })
         .expect(500);
 
       // Without a transaction the user row would survive with no profile, so the
@@ -135,7 +149,12 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
 
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'retry@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .send({
+          email: 'retry@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: ADULT_DOB,
+          firstName: 'Reg',
+        })
         .expect(500);
       jest.restoreAllMocks();
 
@@ -143,12 +162,17 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       // the caller: no account usable, and no way to make one.
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'retry@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .send({
+          email: 'retry@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: ADULT_DOB,
+          firstName: 'Reg',
+        })
         .expect(201);
 
       const profile = await ctx.dataSource
         .getRepository(PlayerProfile)
-        .findOneBy({ displayName: 'retry@example.com' });
+        .findOneBy({ displayName: 'Reg' });
       expect(profile!.birthDate).toBe(ADULT_DOB);
     });
 
@@ -161,9 +185,12 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
       const users = app.get(UsersService);
       jest.spyOn(users, 'findByEmail').mockResolvedValueOnce(null);
 
-      const res = await request(app.getHttpServer())
-        .post('/api/v1/auth/register')
-        .send({ email: taken, password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB });
+      const res = await request(app.getHttpServer()).post('/api/v1/auth/register').send({
+        email: taken,
+        password: 'Str0ng!Passw0rd',
+        birthDate: ADULT_DOB,
+        firstName: 'Reg',
+      });
 
       // A 409 here would tell an unauthenticated caller the address is taken,
       // which is exactly what the generic 201 exists to hide.
@@ -178,7 +205,12 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
 
       await request(app.getHttpServer())
         .post('/api/v1/auth/register')
-        .send({ email: 'no-mail@example.com', password: 'Str0ng!Passw0rd', birthDate: ADULT_DOB })
+        .send({
+          email: 'no-mail@example.com',
+          password: 'Str0ng!Passw0rd',
+          birthDate: ADULT_DOB,
+          firstName: 'Reg',
+        })
         .expect(500);
 
       // The mail goes out after the commit, so a rolled-back registration must
@@ -303,6 +335,7 @@ describe('Birth date on the account holder’s own profile (e2e)', () => {
           email: 'resurrect@example.com',
           password: 'Str0ng!Passw0rd',
           birthDate: '1988-11-30',
+          firstName: 'Reg',
         })
         .expect(201);
 

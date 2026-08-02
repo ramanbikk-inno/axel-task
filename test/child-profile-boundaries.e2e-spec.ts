@@ -174,11 +174,11 @@ describe('Child login against the self-profile routes (e2e)', () => {
       await expectNoSelfProfileConjured(res.body.id as string);
     });
 
-    it('edits its own name and phone', async () => {
+    it('edits its own name', async () => {
       const fam = await seedFamily();
 
       // Blocking the trainee-profile route must not take the ordinary account
-      // fields with it.
+      // fields with it. The phone is the exception — see the sibling case below.
       const res = await request(app.getHttpServer())
         .patch('/api/v1/profile/me')
         .set(auth(fam.childToken))
@@ -188,6 +188,19 @@ describe('Child login against the self-profile routes (e2e)', () => {
       // The account fields moved; the trainee profile is still the parent's row.
       expect(res.body.player).toMatchObject({ id: fam.childProfileId, isChild: true });
       await expectNoSelfProfileConjured(res.body.id as string);
+    });
+
+    it('cannot rewrite the family phone number', async () => {
+      const fam = await seedFamily();
+
+      // "Parent owns all contact information for family": a child login shares
+      // the parent's contact details, so this is the parent's field to set.
+      await request(app.getHttpServer())
+        .patch('/api/v1/profile/me')
+        .set(auth(fam.childToken))
+        .send({ phone: '+1 555 111 2222' })
+        .expect(403)
+        .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.CHILD_ACTION_NOT_ALLOWED));
     });
 
     it('sees its own trainer contexts and nothing of the parent’s', async () => {

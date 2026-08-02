@@ -22,12 +22,12 @@ export class JoinRegisterDto {
   })
   password!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  /** Required for the same reason as on /auth/register. */
+  @ApiProperty()
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  firstName?: string;
+  firstName!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
