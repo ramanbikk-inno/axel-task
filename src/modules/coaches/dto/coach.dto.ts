@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 import {
   IsStrongPassword,
@@ -15,6 +15,13 @@ export class InviteCoachDto {
   @IsEmail()
   email!: string;
 
+  @ApiPropertyOptional({ description: "The invitee's name, shown on the pending invitation" })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  name?: string;
+
   @ApiPropertyOptional({ description: 'Optional message included in the invitation email' })
   @IsOptional()
   @IsString()
@@ -27,15 +34,17 @@ export class AcceptCoachInviteDto {
   @IsStrongPassword()
   password!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  /** Required for the same reason as on /auth/register. */
+  @ApiProperty()
   @IsString()
+  @MinLength(1)
   @MaxLength(100)
-  firstName?: string;
+  firstName!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(100)
   lastName?: string;
 }
@@ -46,6 +55,7 @@ export class CoachInvitationView {
   @ApiProperty() id!: string;
   @ApiProperty() code!: string;
   @ApiProperty() email!: string;
+  @ApiPropertyOptional({ nullable: true }) name!: string | null;
   @ApiProperty() status!: CoachInvitationStatus;
   @ApiProperty({ nullable: true }) expiresAt!: Date | null;
   @ApiProperty() createdAt!: Date;

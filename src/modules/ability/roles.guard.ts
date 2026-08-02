@@ -1,9 +1,8 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
 
-import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
+import { getPrincipalOrThrow } from './request-principal';
 import { ROLES_KEY } from './roles.decorator';
 
 @Injectable()
@@ -20,14 +19,7 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const request: Request & { user?: Principal } = context
-      .switchToHttp()
-      .getRequest<Request & { user?: Principal }>();
-    const principal: Principal | undefined = request.user;
-
-    if (principal === undefined) {
-      throw new ForbiddenException('Insufficient role');
-    }
+    const principal = getPrincipalOrThrow(context, 'Insufficient role');
 
     if (!requiredRoles.includes(principal.role)) {
       throw new ForbiddenException('Insufficient role');

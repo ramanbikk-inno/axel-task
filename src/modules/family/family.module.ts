@@ -8,6 +8,7 @@ import { PlayersModule } from '../players/players.module';
 import { StorageModule } from '../storage/storage.module';
 import { TrainersModule } from '../trainers/trainers.module';
 import { UsersModule } from '../users/users.module';
+import { ChildAccountService } from './child-account.service';
 import { FamilyController } from './family.controller';
 import { FamilyService } from './family.service';
 
@@ -23,7 +24,7 @@ import { FamilyService } from './family.service';
     StorageModule,
   ],
   controllers: [FamilyController],
-  providers: [FamilyService],
+  providers: [FamilyService, ChildAccountService],
   exports: [FamilyService],
 })
 export class FamilyModule {}

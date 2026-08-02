@@ -1,9 +1,9 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { ClockService } from '../../shared/clock/clock.service';
-import { ErrorCode } from '../../shared/errors/error-codes';
-import { AuthService } from './auth.service';
+import { ClockService } from '../clock/clock.service';
+import { ErrorCode } from '../errors/error-codes';
+import { AgeGateService } from './age-gate.service';
 
 const NOW = new Date('2026-07-26T12:00:00.000Z');
 
@@ -13,33 +13,13 @@ class FixedClock extends ClockService {
   }
 }
 
-/** Only the clock and config are read, so every other dependency stays unset. */
-function build(minimumAge?: number, idleTimeout?: string): AuthService {
+function build(minimumAge?: number): AgeGateService {
   const config = {
-    get: jest.fn((key: string): unknown => {
-      if (key === 'MIN_SELF_REGISTRATION_AGE') {
-        return minimumAge;
-      }
-      return key === 'SESSION_IDLE_TIMEOUT' ? idleTimeout : undefined;
-    }),
+    get: jest.fn((key: string): unknown =>
+      key === 'MIN_SELF_REGISTRATION_AGE' ? minimumAge : undefined,
+    ),
   } as unknown as ConfigService;
-  const unused = null as never;
-  return new AuthService(
-    unused,
-    unused,
-    unused,
-    unused,
-    unused,
-    unused,
-    unused,
-    unused,
-    new FixedClock(),
-    unused,
-    unused,
-    unused,
-    config,
-    unused,
-  );
+  return new AgeGateService(new FixedClock(), config);
 }
 
 const expectRejection = (
@@ -64,7 +44,7 @@ const expectRejection = (
  * substance of the rule: an off-by-one is the difference between admitting and
  * refusing a minor.
  */
-describe('AuthService.assertOldEnoughForOwnAccount', () => {
+describe('AgeGateService.assertOldEnoughForOwnAccount', () => {
   describe('at the default threshold of 18', () => {
     it('admits an applicant on the morning of their eighteenth birthday', () => {
       expect(() => build(18).assertOldEnoughForOwnAccount('2008-07-26')).not.toThrow();
@@ -134,9 +114,6 @@ describe('AuthService.assertOldEnoughForOwnAccount', () => {
     });
 
     it('rejects a date carrying a time component', () => {
-      // The regression that made this a shared helper: an ISO date-time used to
-      // pass validation, produce an Invalid Date, and compare false against
-      // every bound — so the age gate let anything through.
       expectRejection(
         18,
         '2015-01-01T00:00:00.000Z',
@@ -160,8 +137,6 @@ describe('AuthService.assertOldEnoughForOwnAccount', () => {
     });
 
     it('treats yesterday as a real date, not a malformed one', () => {
-      // Distinguishes "in the future" from "very recent": only the former is a
-      // 400. At a floor of 0 this is simply someone aged 0.
       expect(() => build(0).assertOldEnoughForOwnAccount('2026-07-25')).not.toThrow();
     });
   });

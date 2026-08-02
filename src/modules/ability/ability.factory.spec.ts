@@ -74,6 +74,12 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.Read, { __type: 'User', trainerOrgId: 'org-2' })).toBe(false);
     });
 
+    it('cannot update a User, even in its own org', () => {
+      // Editing an account is a Super Admin function. The grant used to be here
+      // with no route behind it, which read as a capability the trainer had.
+      expect(ability.can(Action.Update, { __type: 'User', trainerOrgId: 'org-1' })).toBe(false);
+    });
+
     it('cannot manage all', () => {
       expect(ability.can(Action.Manage, 'all')).toBe(false);
     });
@@ -134,20 +140,18 @@ describe('AbilityFactory', () => {
       // A Coach's trainerOrgId comes from their employer's row; when the
       // session validator left it null every rule below silently matched
       // nothing.
-      expect(ability.can(Action.Read, { __type: 'PlayerProfile', trainerOrgId: 'org-1' })).toBe(
-        true,
-      );
       expect(ability.can(Action.Read, { __type: 'Branding', trainerOrgId: 'org-1' })).toBe(true);
       expect(ability.can(Action.Read, { __type: 'TrainerOrg', id: 'org-1' })).toBe(true);
+      expect(ability.can(Action.Read, { __type: 'Branding', trainerOrgId: 'org-2' })).toBe(false);
+      expect(ability.can(Action.Read, { __type: 'TrainerOrg', id: 'org-2' })).toBe(false);
     });
 
-    it('is view-only over the roster of the trainer it works for', () => {
-      const player = { __type: 'PlayerProfile', trainerOrgId: 'org-1' };
-      expect(ability.can(Action.Read, player)).toBe(true);
-      expect(ability.can(Action.Update, player)).toBe(false);
-    });
-
-    it('cannot see another trainer’s roster', () => {
+    it('is granted no roster read, in its own org or any other', () => {
+      // The roster route is @Roles(Role.Trainer); a coach-facing roster is
+      // Epic-03. The grant existed with nothing behind it.
+      expect(ability.can(Action.Read, { __type: 'PlayerProfile', trainerOrgId: 'org-1' })).toBe(
+        false,
+      );
       expect(ability.can(Action.Read, { __type: 'PlayerProfile', trainerOrgId: 'org-2' })).toBe(
         false,
       );

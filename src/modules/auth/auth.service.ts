@@ -1,26 +1,17 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  GoneException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
-import {
-  MIN_SELF_REGISTRATION_AGE_DEFAULT,
-  SESSION_IDLE_TIMEOUT_DEFAULT,
-} from '../../shared/config/env.validation';
+import { SESSION_IDLE_TIMEOUT_DEFAULT } from '../../shared/config/env.validation';
 import { durationToSeconds } from '../../shared/config/duration';
+import { repoFor } from '../../shared/database/repo-for';
 import { displayNameFor } from '../../shared/format/display-name';
-import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { PG_UNIQUE_VIOLATION } from '../../shared/errors/all-exceptions.filter';
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AgeGateService } from '../../shared/registration/age-gate.service';
 import { ImpersonationLogService } from '../impersonation/impersonation-log.service';
 import { MailService } from '../mail/mail.service';
 import { PlayersService } from '../players/players.service';
@@ -36,12 +27,30 @@ import { EmailVerificationToken } from './entities/email-verification-token.enti
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { Principal } from './principal';
+import { SingleUseTokenMessages, SingleUseTokenService } from './single-use-token.service';
 import { TokenService } from './token.service';
 
 const REGISTER_MESSAGE = 'Registration received. Check your email to verify your account.';
 
 /** The unique index behind users.email, as Postgres names it in a violation. */
 const USERS_EMAIL_INDEX = 'uq_users_email';
+
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+const ACCOUNT_SETUP_TTL_MS = 72 * 60 * 60 * 1000;
+
+/** Overrides `issueTokensForSession` accepts for a supervised (impersonation) session. */
+export interface SessionOverrides {
+  impersonatedBy?: string;
+  actorUserId?: string;
+  expiresAt?: Date;
+}
+
+export interface IssuedSession {
+  sessionId: string;
+  accessToken: string;
+  refreshToken: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -60,12 +69,14 @@ export class AuthService {
     @InjectRepository(AccountSetupToken)
     private readonly accountSetups: Repository<AccountSetupToken>,
     private readonly tokens: TokenService,
+    private readonly singleUseTokens: SingleUseTokenService,
     private readonly passwords: PasswordService,
     private readonly mail: MailService,
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
     private readonly impersonationLogs: ImpersonationLogService,
     private readonly playersService: PlayersService,
+    private readonly ageGate: AgeGateService,
     private readonly config: ConfigService,
     private readonly dataSource: DataSource,
   ) {
@@ -75,37 +86,6 @@ export class AuthService {
       ) * 1000;
   }
 
-  /**
-   * Minors belong to a parent's account as a child profile, not their own. Every
-   * path onto an own-name account must call this, including the edit.
-   */
-  assertOldEnoughForOwnAccount(birthDate: string): void {
-    const born = parseCalendarDate(birthDate);
-    if (born === null) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
-        message: 'birthDate must be a calendar date in YYYY-MM-DD format.',
-      });
-    }
-
-    const now = this.clock.now();
-    if (born.getTime() > now.getTime()) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.VALIDATION_ERROR,
-        message: 'birthDate cannot be in the future.',
-      });
-    }
-
-    const minimumAge =
-      this.config.get<number>('MIN_SELF_REGISTRATION_AGE') ?? MIN_SELF_REGISTRATION_AGE_DEFAULT;
-    if (ageInYears(born, now) < minimumAge) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.UNDERAGE_SELF_REGISTRATION,
-        message: `You must be at least ${minimumAge} to create your own account. Ask a parent to add you to their account.`,
-      });
-    }
-  }
-
   private async getDummyHash(): Promise<string> {
     if (this.dummyHash === null) {
       this.dummyHash = await this.passwords.hash('dummy-password-for-constant-time-verification');
@@ -113,14 +93,32 @@ export class AuthService {
     return this.dummyHash;
   }
 
-  private async issueTokensForSession(
+  private toAuthTokens(pair: { accessToken: string; refreshToken: string }): AuthTokens {
+    return {
+      accessToken: pair.accessToken,
+      refreshToken: pair.refreshToken,
+      tokenType: 'Bearer',
+      expiresIn: this.tokens.accessTtlSeconds(),
+    };
+  }
+
+  /**
+   * Mint a session + access/refresh token pair for `user`. Shared by an
+   * ordinary login and by ImpersonationService.start, via `overrides` — a
+   * supervised session sets `impersonatedBy`, `actorUserId` and the capped
+   * `expiresAt`; an ordinary one leaves all three unset.
+   */
+  async issueTokensForSession(
     user: User,
     meta: { ip?: string; userAgent?: string },
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+    overrides: SessionOverrides = {},
+  ): Promise<IssuedSession> {
     const session = await this.sessions.save(
       this.sessions.create({
         userId: user.id,
         activeTrainerProfileId: null,
+        impersonatedBy: overrides.impersonatedBy ?? null,
+        expiresAt: overrides.expiresAt ?? null,
         createdAt: this.clock.now(),
         lastUsedAt: this.clock.now(),
         userAgent: meta.userAgent ?? null,
@@ -137,9 +135,14 @@ export class AuthService {
       activeTrainerProfileId: null,
       trainerOrgId: null,
       tokenVersion: user.tokenVersion,
+      actorUserId: overrides.actorUserId,
     });
 
-    const refresh = this.tokens.signRefresh({ userId: user.id, sessionId: session.id });
+    const refresh = this.tokens.signRefresh({
+      userId: user.id,
+      sessionId: session.id,
+      notAfter: overrides.expiresAt,
+    });
 
     await this.refreshTokens.save(
       this.refreshTokens.create({
@@ -154,7 +157,7 @@ export class AuthService {
       }),
     );
 
-    return { accessToken, refreshToken: refresh.token };
+    return { sessionId: session.id, accessToken, refreshToken: refresh.token };
   }
 
   async login(dto: LoginDto, meta: { ip?: string; userAgent?: string }): Promise<AuthTokens> {
@@ -212,18 +215,13 @@ export class AuthService {
     const pair = await this.issueTokensForSession(user, meta);
     await this.usersService.touchLastLogin(user.id, this.clock.now());
 
-    return {
-      accessToken: pair.accessToken,
-      refreshToken: pair.refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: this.tokens.accessTtlSeconds(),
-    };
+    return this.toAuthTokens(pair);
   }
 
   async register(dto: RegisterDto): Promise<{ message: string }> {
     // Before the existence check, or the response tells the caller whether the
     // address is already taken.
-    this.assertOldEnoughForOwnAccount(dto.birthDate);
+    this.ageGate.assertOldEnoughForOwnAccount(dto.birthDate);
 
     // Before the existence check, not just before the transaction: hashing only
     // for free addresses makes a taken one answer ~40ms faster.
@@ -293,27 +291,12 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<void> {
-    const tokenHash = this.tokens.hashOpaqueToken(token);
-    const row = await this.emailVerifications.findOne({ where: { tokenHash } });
-    if (!row) {
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.INVALID_TOKEN,
-        message: 'Invalid verification token.',
-      });
-    }
-    if (row.consumedAt) {
-      throw new ConflictException({
-        errorCode: ErrorCode.TOKEN_ALREADY_USED,
-        message: 'This verification token has already been used.',
-      });
-    }
-    const now = this.clock.now();
-    if (row.expiresAt.getTime() < now.getTime()) {
-      throw new GoneException({
-        errorCode: ErrorCode.EXPIRED_TOKEN,
-        message: 'This verification token has expired.',
-      });
-    }
+    const messages: SingleUseTokenMessages = {
+      invalid: 'Invalid verification token.',
+      alreadyUsed: 'This verification token has already been used.',
+      expired: 'This verification token has expired.',
+    };
+    const row = await this.singleUseTokens.validate(this.emailVerifications, token, messages);
 
     const user = await this.usersService.findById(row.userId);
     if (!user) {
@@ -324,7 +307,8 @@ export class AuthService {
     }
     this.assertAccountUsable(user);
 
-    await this.emailVerifications.update({ id: row.id }, { consumedAt: now });
+    const now = this.clock.now();
+    await this.singleUseTokens.markConsumed(this.emailVerifications, row.id, now, messages);
     await this.usersService.markEmailVerified(row.userId, now);
 
     await this.mail.sendWelcomeEmail(user.email, user.firstName ?? '');
@@ -355,10 +339,10 @@ export class AuthService {
       return;
     }
 
-    const { token, tokenHash } = this.tokens.generateOpaqueToken();
-    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
-    await this.emailVerifications.save(
-      this.emailVerifications.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }),
+    const token = await this.singleUseTokens.issue(
+      this.emailVerifications,
+      user.id,
+      EMAIL_VERIFICATION_TTL_MS,
     );
     await this.mail.sendVerificationEmail(user.email, token);
   }
@@ -506,12 +490,7 @@ export class AuthService {
     }
     await this.sessions.save(session);
 
-    return {
-      accessToken,
-      refreshToken: newRefresh.token,
-      tokenType: 'Bearer',
-      expiresIn: this.tokens.accessTtlSeconds(),
-    };
+    return this.toAuthTokens({ accessToken, refreshToken: newRefresh.token });
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -554,39 +533,25 @@ export class AuthService {
       return;
     }
 
-    const { token, tokenHash } = this.tokens.generateOpaqueToken();
-    const expiresAt = new Date(this.clock.now().getTime() + 60 * 60 * 1000);
-    await this.passwordResets.save(
-      this.passwordResets.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }),
+    const token = await this.singleUseTokens.issue(
+      this.passwordResets,
+      user.id,
+      PASSWORD_RESET_TTL_MS,
     );
     await this.mail.sendPasswordResetEmail(user.email, token);
   }
 
   async resetPassword(input: { token: string; newPassword: string }): Promise<void> {
-    const tokenHash = this.tokens.hashOpaqueToken(input.token);
-    const row = await this.passwordResets.findOne({ where: { tokenHash } });
-    if (!row) {
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.INVALID_TOKEN,
-        message: 'Invalid reset token.',
-      });
-    }
-    if (row.consumedAt) {
-      throw new ConflictException({
-        errorCode: ErrorCode.TOKEN_ALREADY_USED,
-        message: 'This reset token has already been used.',
-      });
-    }
-    const now = this.clock.now();
-    if (row.expiresAt.getTime() < now.getTime()) {
-      throw new GoneException({
-        errorCode: ErrorCode.EXPIRED_TOKEN,
-        message: 'This reset token has expired.',
-      });
-    }
+    const messages: SingleUseTokenMessages = {
+      invalid: 'Invalid reset token.',
+      alreadyUsed: 'This reset token has already been used.',
+      expired: 'This reset token has expired.',
+    };
+    const row = await this.singleUseTokens.validate(this.passwordResets, input.token, messages);
 
     const passwordHash = await this.passwords.hash(input.newPassword);
-    await this.passwordResets.update({ id: row.id }, { consumedAt: now });
+    const now = this.clock.now();
+    await this.singleUseTokens.markConsumed(this.passwordResets, row.id, now, messages);
     await this.usersService.setPasswordAndBumpVersion(row.userId, passwordHash);
     await this.sessions.update(
       { userId: row.userId, revokedAt: IsNull() },
@@ -648,12 +613,7 @@ export class AuthService {
 
     await this.mail.sendPasswordChangedEmail(user.email);
 
-    return {
-      accessToken: pair.accessToken,
-      refreshToken: pair.refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: this.tokens.accessTtlSeconds(),
-    };
+    return this.toAuthTokens(pair);
   }
 
   /**
@@ -703,48 +663,30 @@ export class AuthService {
       manager,
     );
 
-    const { token, tokenHash } = this.tokens.generateOpaqueToken();
-    const expiresAt = new Date(this.clock.now().getTime() + 24 * 60 * 60 * 1000);
-    const evRepo = manager.getRepository(EmailVerificationToken);
-    await evRepo.save(evRepo.create({ userId: user.id, tokenHash, consumedAt: null, expiresAt }));
+    const verificationToken = await this.singleUseTokens.issue(
+      manager.getRepository(EmailVerificationToken),
+      user.id,
+      EMAIL_VERIFICATION_TTL_MS,
+    );
 
-    return { user, verificationToken: token };
+    return { user, verificationToken };
   }
 
   async createSetupToken(userId: string, manager?: EntityManager): Promise<string> {
-    const repository =
-      manager !== undefined ? manager.getRepository(AccountSetupToken) : this.accountSetups;
-    const { token, tokenHash } = this.tokens.generateOpaqueToken();
-    const expiresAt = new Date(this.clock.now().getTime() + 72 * 60 * 60 * 1000);
-    await repository.save(repository.create({ userId, tokenHash, consumedAt: null, expiresAt }));
-    return token;
+    const repository = repoFor(this.accountSetups, AccountSetupToken, manager);
+    return this.singleUseTokens.issue(repository, userId, ACCOUNT_SETUP_TTL_MS);
   }
 
   async setupPassword(
     input: { token: string; newPassword: string },
     meta: { ip?: string; userAgent?: string },
   ): Promise<AuthTokens> {
-    const tokenHash = this.tokens.hashOpaqueToken(input.token);
-    const row = await this.accountSetups.findOne({ where: { tokenHash } });
-    if (!row) {
-      throw new UnauthorizedException({
-        errorCode: ErrorCode.INVALID_TOKEN,
-        message: 'Invalid setup token.',
-      });
-    }
-    if (row.consumedAt) {
-      throw new ConflictException({
-        errorCode: ErrorCode.TOKEN_ALREADY_USED,
-        message: 'This setup token has already been used.',
-      });
-    }
-    const now = this.clock.now();
-    if (row.expiresAt.getTime() < now.getTime()) {
-      throw new GoneException({
-        errorCode: ErrorCode.EXPIRED_TOKEN,
-        message: 'This setup token has expired.',
-      });
-    }
+    const messages: SingleUseTokenMessages = {
+      invalid: 'Invalid setup token.',
+      alreadyUsed: 'This setup token has already been used.',
+      expired: 'This setup token has expired.',
+    };
+    const row = await this.singleUseTokens.validate(this.accountSetups, input.token, messages);
 
     const user = await this.usersService.findById(row.userId);
     if (!user) {
@@ -756,7 +698,8 @@ export class AuthService {
     this.assertAccountUsable(user);
 
     const passwordHash = await this.passwords.hash(input.newPassword);
-    await this.accountSetups.update({ id: row.id }, { consumedAt: now });
+    const now = this.clock.now();
+    await this.singleUseTokens.markConsumed(this.accountSetups, row.id, now, messages);
     await this.usersService.setPasswordAndBumpVersion(user.id, passwordHash);
     await this.usersService.markEmailVerified(user.id, now);
 
@@ -769,11 +712,6 @@ export class AuthService {
     }
 
     const pair = await this.issueTokensForSession(refreshed, meta);
-    return {
-      accessToken: pair.accessToken,
-      refreshToken: pair.refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: this.tokens.accessTtlSeconds(),
-    };
+    return this.toAuthTokens(pair);
   }
 }

@@ -1,5 +1,6 @@
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import * as argon2 from 'argon2';
 import { CryptoModule } from './crypto.module';
 import { PasswordService } from './password.service';
 
@@ -51,7 +52,8 @@ describe('PasswordService', () => {
   });
 
   it('needsRehash() is true for a hash made with weaker parameters', async () => {
-    const weakHash: string = await service.hashWith('Str0ng!Passw0rd', {
+    const weakHash: string = await argon2.hash('Str0ng!Passw0rd', {
+      type: argon2.argon2id,
       memoryCost: 8192,
       timeCost: 2,
       parallelism: 1,

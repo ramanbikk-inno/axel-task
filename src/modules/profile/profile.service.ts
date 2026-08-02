@@ -2,14 +2,14 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nest
 import { Inject } from '@nestjs/common';
 
 import { ErrorCode } from '../../shared/errors/error-codes';
+import { AgeGateService } from '../../shared/registration/age-gate.service';
 import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/changed-fields';
-import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
-import { PlayersService } from '../players/players.service';
+import { AUDIT_PLAYER_PROFILE_UPDATED, PlayersService } from '../players/players.service';
 import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
-import { discardAsset } from '../storage/discard-asset';
+import { replaceStoredAsset } from '../storage/replace-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainerProfile } from '../trainers/entities/trainer-profile.entity';
 import { TrainersService } from '../trainers/trainers.service';
@@ -36,8 +36,6 @@ import {
 export const AUDIT_PROFILE_UPDATED = 'profile.updated';
 export const AUDIT_PROFILE_PHOTO_UPDATED = 'profile.photo-updated';
 export const AUDIT_PROFILE_PHOTO_REMOVED = 'profile.photo-removed';
-export const AUDIT_TRAINER_PROFILE_UPDATED = 'profile.trainer-updated';
-export const AUDIT_PLAYER_PROFILE_UPDATED = 'profile.player-updated';
 
 @Injectable()
 export class ProfileService {
@@ -47,7 +45,7 @@ export class ProfileService {
     private readonly usersService: UsersService,
     private readonly trainersService: TrainersService,
     private readonly playersService: PlayersService,
-    private readonly authService: AuthService,
+    private readonly ageGate: AgeGateService,
     @Inject(STORAGE) private readonly storage: StorageService,
     private readonly audit: AuditService,
   ) {}
@@ -58,6 +56,17 @@ export class ProfileService {
   }
 
   async updateCommon(actor: Principal, dto: UpdateProfileDto): Promise<MyProfileView> {
+    // A child owns their own name on this route, but not the family's phone
+    // number: "Parent owns all contact information for family". A child login
+    // shares the parent's contact details, so letting the child rewrite them
+    // rewrites how the trainer reaches the parent.
+    if (actor.isChild && dto.phone !== undefined) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.CHILD_ACTION_NOT_ALLOWED,
+        message: 'Ask your parent to change the contact phone number.',
+      });
+    }
+
     await this.requireUser(actor.userId);
     const user = await this.usersService.updateProfile(actor.userId, {
       firstName: dto.firstName,
@@ -75,7 +84,7 @@ export class ProfileService {
 
   async uploadPhoto(actor: Principal, dto: UploadPhotoDto): Promise<MyProfileView> {
     const userId = actor.userId;
-    await this.requireUser(userId);
+    const user = await this.requireUser(userId);
 
     // Verifies the bytes really are an image of the declared type — the
     // client-supplied mimeType alone would let a script through as image/png.
@@ -90,26 +99,23 @@ export class ProfileService {
     const childProfileId = actor.isChild ? this.requireChildProfileId(actor) : null;
     const previousPublicId =
       childProfileId === null
-        ? (await this.requireUser(userId)).photoPublicId
+        ? user.photoPublicId
         : (await this.loadChildProfile(childProfileId)).photoPublicId;
 
-    const stored = await this.storage.upload({
-      buffer,
-      fileName: dto.fileName,
-      mimeType: dto.mimeType,
-      folder: 'avatars',
+    await replaceStoredAsset<void>({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId,
+      upload: { buffer, fileName: dto.fileName, mimeType: dto.mimeType, folder: 'avatars' },
+      persist: async (stored) => {
+        if (childProfileId === null) {
+          await this.usersService.setPhoto(userId, stored);
+        } else {
+          await this.playersService.setPhoto(childProfileId, stored);
+        }
+      },
     });
-    if (childProfileId === null) {
-      await this.usersService.setPhoto(userId, stored);
-    } else {
-      await this.playersService.setPhoto(childProfileId, stored);
-    }
 
-    // Only after the row points at the new asset: deleting first would leave a
-    // profile referencing nothing if the upload then failed.
-    if (previousPublicId !== null && previousPublicId !== stored.publicId) {
-      await discardAsset(this.storage, previousPublicId, this.logger);
-    }
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_UPDATED,
       actor,
@@ -137,14 +143,19 @@ export class ProfileService {
       });
     }
 
-    if (childProfileId === null) {
-      await this.usersService.setPhoto(actor.userId, null);
-    } else {
-      await this.playersService.setPhoto(childProfileId, null);
-    }
-    if (existing.photoPublicId !== null) {
-      await discardAsset(this.storage, existing.photoPublicId, this.logger);
-    }
+    await replaceStoredAsset<void>({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId: existing.photoPublicId,
+      persist: async () => {
+        if (childProfileId === null) {
+          await this.usersService.setPhoto(actor.userId, null);
+        } else {
+          await this.playersService.setPhoto(childProfileId, null);
+        }
+      },
+    });
+
     await this.audit.record({
       action: AUDIT_PROFILE_PHOTO_REMOVED,
       actor,
@@ -169,25 +180,23 @@ export class ProfileService {
 
   async updateTrainer(actor: Principal, dto: UpdateTrainerProfileDto): Promise<MyProfileView> {
     const userId = actor.userId;
-    const updated = await this.trainersService.updateProfileByUserId(userId, {
-      businessName: dto.businessName,
-      website: dto.website,
-      address: dto.address,
-      description: dto.description,
-    });
-    if (!updated) {
+    const profile = await this.trainersService.findByUserId(userId);
+    if (!profile) {
       throw new ForbiddenException({
         errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
         message: 'No trainer profile for this account.',
       });
     }
-    await this.audit.record({
-      action: AUDIT_TRAINER_PROFILE_UPDATED,
+    await this.trainersService.applyProfileUpdate(
+      profile,
+      {
+        businessName: dto.businessName,
+        website: dto.website,
+        address: dto.address,
+        description: dto.description,
+      },
       actor,
-      targetUserId: userId,
-      target: { type: 'TrainerProfile', id: updated.id },
-      metadata: { fields: changedFields(dto) },
-    });
+    );
     return this.getMe(userId);
   }
 
@@ -207,20 +216,26 @@ export class ProfileService {
     if (dto.birthDate !== undefined) {
       // The same floor registration enforces. Without it, an account created as
       // an adult could be edited down to a minor's date afterwards.
-      this.authService.assertOldEnoughForOwnAccount(dto.birthDate);
+      this.ageGate.assertOldEnoughForOwnAccount(dto.birthDate);
     }
 
-    let profile = await this.playersService.updateSelfProfile(userId, {
-      displayName: dto.displayName,
-      school: dto.school,
-      jerseyNumber: dto.jerseyNumber,
-      gender: dto.gender,
-      birthDate: dto.birthDate,
-      emergencyContact: dto.emergencyContact,
-    });
-    if (!profile) {
+    const existing = await this.playersService.findSelfProfile(userId);
+    if (existing) {
+      await this.playersService.applyProfileUpdate(
+        existing,
+        {
+          displayName: dto.displayName,
+          school: dto.school,
+          jerseyNumber: dto.jerseyNumber,
+          gender: dto.gender,
+          birthDate: dto.birthDate,
+          emergencyContact: dto.emergencyContact,
+        },
+        actor,
+      );
+    } else {
       // Only accounts predating registration-time profile creation reach this.
-      profile = await this.playersService.create({
+      const created = await this.playersService.create({
         ownerUserId: userId,
         displayName: dto.displayName ?? this.nameOf(user),
         isChild: false,
@@ -230,14 +245,14 @@ export class ProfileService {
         birthDate: dto.birthDate ?? null,
         emergencyContact: dto.emergencyContact ?? null,
       });
+      await this.audit.record({
+        action: AUDIT_PLAYER_PROFILE_UPDATED,
+        actor,
+        targetUserId: userId,
+        target: { type: 'PlayerProfile', id: created.id },
+        metadata: { fields: changedFields(dto) },
+      });
     }
-    await this.audit.record({
-      action: AUDIT_PLAYER_PROFILE_UPDATED,
-      actor,
-      targetUserId: userId,
-      target: { type: 'PlayerProfile', id: profile.id },
-      metadata: { fields: changedFields(dto) },
-    });
     return this.getMe(userId);
   }
 
@@ -246,7 +261,7 @@ export class ProfileService {
     dto: UpdateOwnChildProfileDto,
   ): Promise<MyProfileView> {
     const profileId = this.requireChildProfileId(actor);
-    const updated = await this.playersService.updateOwnChildProfile(profileId, {
+    const updated = await this.playersService.updateChildProfile(profileId, {
       school: dto.school,
       jerseyNumber: dto.jerseyNumber,
     });

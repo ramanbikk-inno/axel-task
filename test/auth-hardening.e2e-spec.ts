@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import * as argon2 from 'argon2';
 import request from 'supertest';
 
 import { bootstrapE2E, E2EContext } from './setup-e2e';
@@ -164,7 +165,8 @@ describe('Auth hardening (e2e)', () => {
 
       // Simulate a hash written under older, cheaper parameters. timeCost has
       // a floor of 2 in argon2, so the memory cost is what differs here.
-      const weak = await ctx.passwords.hashWith(player.password, {
+      const weak = await argon2.hash(player.password, {
+        type: argon2.argon2id,
         memoryCost: 8192,
         timeCost: 2,
         parallelism: 1,

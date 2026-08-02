@@ -24,12 +24,17 @@ export class RegisterDto {
   @IsStrongPassword()
   password!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  /**
+   * Required: §9 makes name mandatory for every user, and without one the
+   * player profile falls back to the raw email address as its display name,
+   * which then shows on the trainer's roster. `lastName` stays optional so a
+   * mononym is still registrable.
+   */
+  @ApiProperty()
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  firstName?: string;
+  firstName!: string;
 
   @ApiPropertyOptional()
   @IsOptional()

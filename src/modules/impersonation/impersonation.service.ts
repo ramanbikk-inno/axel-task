@@ -7,6 +7,8 @@ import { displayNameFor } from '../../shared/format/display-name';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { Action, AbilityFactory } from '../ability/ability.factory';
 import { AuditService } from '../audit/audit.service';
+import { AuthService } from '../auth/auth.service';
+import { AuthTokens } from '../auth/auth.types';
 import { AuthSession } from '../auth/entities/auth-session.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { Principal } from '../auth/principal';
@@ -26,11 +28,7 @@ export interface ImpersonationBanner {
   role: string;
 }
 
-export interface StartImpersonationResult {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: 'Bearer';
-  expiresIn: number;
+export interface StartImpersonationResult extends AuthTokens {
   sessionExpiresAt: string;
   banner: ImpersonationBanner;
 }
@@ -41,6 +39,7 @@ export class ImpersonationService {
     @InjectRepository(AuthSession) private readonly sessions: Repository<AuthSession>,
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
     @InjectRepository(ImpersonationLog) private readonly logs: Repository<ImpersonationLog>,
+    private readonly authService: AuthService,
     private readonly tokens: TokenService,
     private readonly clock: ClockService,
     private readonly usersService: UsersService,
@@ -88,58 +87,24 @@ export class ImpersonationService {
     const now = this.clock.now();
     const sessionExpiresAt = new Date(now.getTime() + IMPERSONATION_TTL_MS);
 
-    const session = await this.sessions.save(
-      this.sessions.create({
-        userId: target.id,
-        activeTrainerProfileId: null,
-        impersonatedBy: principal.userId,
-        expiresAt: sessionExpiresAt,
-        createdAt: now,
-        lastUsedAt: now,
-        userAgent: meta.userAgent ?? null,
-        ip: meta.ip ?? null,
-        revokedAt: null,
-        revokedReason: null,
-      }),
-    );
-
-    const accessToken = this.tokens.signAccess({
-      userId: target.id,
-      role: target.role,
-      sessionId: session.id,
-      activeTrainerProfileId: null,
-      trainerOrgId: null,
-      tokenVersion: target.tokenVersion,
+    // Same session/token issuance as an ordinary login, just capped to the
+    // session and stamped with who is behind the wheel. Capping the refresh
+    // token to the session, not the ordinary seven days, matters: `refresh()`
+    // already refuses a token whose session has expired, but that is one
+    // runtime check standing between a live seven-day credential and an
+    // account; the JWT's own `exp` should say the same thing the session row
+    // does.
+    const issued = await this.authService.issueTokensForSession(target, meta, {
+      impersonatedBy: principal.userId,
       actorUserId: principal.userId,
+      expiresAt: sessionExpiresAt,
     });
-
-    // Capped to the session, not the ordinary seven days. `refresh()` already
-    // refuses a token whose session has expired, but that is one runtime check
-    // standing between a live seven-day credential and an account; the JWT's
-    // own `exp` should say the same thing the session row does.
-    const refresh = this.tokens.signRefresh({
-      userId: target.id,
-      sessionId: session.id,
-      notAfter: sessionExpiresAt,
-    });
-    await this.refreshTokens.save(
-      this.refreshTokens.create({
-        id: refresh.jti,
-        sessionId: session.id,
-        userId: target.id,
-        familyId: refresh.familyId,
-        tokenHash: this.tokens.hashOpaqueToken(refresh.token),
-        expiresAt: refresh.expiresAt,
-        revokedAt: null,
-        replacedById: null,
-      }),
-    );
 
     await this.logs.save(
       this.logs.create({
         adminUserId: principal.userId,
         targetUserId: target.id,
-        sessionId: session.id,
+        sessionId: issued.sessionId,
         startedAt: now,
         endedAt: null,
         durationSeconds: null,
@@ -148,8 +113,8 @@ export class ImpersonationService {
     );
 
     return {
-      accessToken,
-      refreshToken: refresh.token,
+      accessToken: issued.accessToken,
+      refreshToken: issued.refreshToken,
       tokenType: 'Bearer',
       expiresIn: this.tokens.accessTtlSeconds(),
       sessionExpiresAt: sessionExpiresAt.toISOString(),

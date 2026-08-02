@@ -6,6 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { ClockModule } from '../../shared/clock/clock.module';
 import { CryptoModule } from '../../shared/crypto/crypto.module';
+import { RegistrationModule } from '../../shared/registration/registration.module';
 import { CoachProfile } from '../coaches/entities/coach-profile.entity';
 import { ImpersonationLogModule } from '../impersonation/impersonation-log.module';
 import { MailModule } from '../mail/mail.module';
@@ -26,6 +27,7 @@ import { EmailVerificationToken } from './entities/email-verification-token.enti
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { SessionValidatorService } from './session-validator.service';
+import { SingleUseTokenService } from './single-use-token.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenService } from './token.service';
 
@@ -39,6 +41,7 @@ import { TokenService } from './token.service';
     UsersModule,
     MailModule,
     PlayersModule,
+    RegistrationModule,
     // Leaf module, so logout and bulk revocation can close an impersonation's
     // audit row without a cycle back into ImpersonationModule.
     ImpersonationLogModule,
@@ -57,7 +60,14 @@ import { TokenService } from './token.service';
     AbilityModule,
   ],
   controllers: [AuthController, ContextController],
-  providers: [TokenService, JwtStrategy, AuthService, SessionValidatorService, ContextService],
+  providers: [
+    TokenService,
+    SingleUseTokenService,
+    JwtStrategy,
+    AuthService,
+    SessionValidatorService,
+    ContextService,
+  ],
   exports: [TokenService, AuthService, SessionValidatorService, ContextService],
 })
 export class AuthModule {}

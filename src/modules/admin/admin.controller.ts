@@ -15,9 +15,6 @@ import {
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 
-import { Action, AppAbility } from '../ability/ability.factory';
-import { CheckPolicies } from '../ability/check-policies.decorator';
-import { PoliciesGuard } from '../ability/policies.guard';
 import { Roles } from '../ability/roles.decorator';
 import { RolesGuard } from '../ability/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -37,6 +34,8 @@ import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { DeleteUserDto, UserStatusChangeDto } from './dto/user-status-change.dto';
 import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
 
+// User CRUD here is SuperAdmin-only, and a SuperAdmin's ability is an
+// unconditional `manage all` — a CASL check on top of RolesGuard can never fail.
 @ApiTags('admin')
 @Controller('users')
 export class AdminController {
@@ -44,9 +43,8 @@ export class AdminController {
 
   @Post()
   @HttpCode(201)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Create, 'User'))
   @ApiBearerAuth()
   async createTrainer(
     @Body() dto: CreateTrainerDto,
@@ -58,9 +56,8 @@ export class AdminController {
 
   @Get()
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Read, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: PaginatedUsersDto })
   async listUsers(@Query() query: ListUsersQueryDto): Promise<PaginatedUsersDto> {
@@ -69,9 +66,8 @@ export class AdminController {
 
   @Get(':id')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Read, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: AdminUserDetailView })
   async getUser(@Param('id', ParseUUIDPipe) id: string): Promise<AdminUserDetailView> {
@@ -80,9 +76,8 @@ export class AdminController {
 
   @Post(':id/deactivate')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: UserSummaryDto })
   async deactivateUser(
@@ -96,9 +91,8 @@ export class AdminController {
 
   @Post(':id/reactivate')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: UserSummaryDto })
   async reactivateUser(
@@ -112,9 +106,8 @@ export class AdminController {
 
   @Patch(':id')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: UserSummaryDto })
   async updateUser(
@@ -128,9 +121,8 @@ export class AdminController {
 
   @Patch(':id/trainer-profile')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: AdminTrainerProfileView })
   async updateTrainerProfile(
@@ -144,9 +136,8 @@ export class AdminController {
 
   @Patch(':id/coach-profile')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: CoachView })
   async updateCoachProfile(
@@ -160,9 +151,8 @@ export class AdminController {
 
   @Patch(':id/player-profile')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Update, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: AdminPlayerProfileView })
   async updatePlayerProfile(
@@ -176,9 +166,8 @@ export class AdminController {
 
   @Delete(':id')
   @HttpCode(200)
-  @UseGuards(JwtAuthGuard, RolesGuard, PoliciesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.SuperAdmin)
-  @CheckPolicies((ability: AppAbility) => ability.can(Action.Delete, 'User'))
   @ApiBearerAuth()
   @ApiOkResponse({ type: UserSummaryDto })
   async deleteUser(

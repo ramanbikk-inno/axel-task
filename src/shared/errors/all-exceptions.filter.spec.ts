@@ -196,21 +196,80 @@ describe('AllExceptionsFilter', () => {
       expect(body.message).toBe('An account with this email already exists.');
     });
 
-    it('maps a non-email unique violation to a generic 409', () => {
-      const { host, captured } = makeHost('/api/v1/coaches', 'req-8');
+    it.each([
+      [
+        'uq_trainer_player',
+        ErrorCode.ALREADY_ASSOCIATED,
+        'You are already connected with this trainer.',
+      ],
+      [
+        'uq_coach_profiles_active_user_id',
+        ErrorCode.COACH_ACTIVE_ELSEWHERE,
+        'This coach is currently active with another trainer and must be off-boarded first.',
+      ],
+      [
+        'uq_player_profiles_child_user_id',
+        ErrorCode.CHILD_LOGIN_EXISTS,
+        'This child already has a login.',
+      ],
+      [
+        'uq_share_links_code',
+        ErrorCode.VALIDATION_ERROR,
+        'Could not create the share link. Please try again.',
+      ],
+      [
+        'UQ_refresh_tokens_token_hash',
+        ErrorCode.INVALID_TOKEN,
+        'Token conflict. Please request a new one.',
+      ],
+      [
+        'UQ_email_verification_tokens_token_hash',
+        ErrorCode.INVALID_TOKEN,
+        'Token conflict. Please request a new one.',
+      ],
+      [
+        'UQ_password_reset_tokens_token_hash',
+        ErrorCode.INVALID_TOKEN,
+        'Token conflict. Please request a new one.',
+      ],
+      [
+        'UQ_account_setup_tokens_token_hash',
+        ErrorCode.INVALID_TOKEN,
+        'Token conflict. Please request a new one.',
+      ],
+    ])(
+      'maps the %s unique violation to its own 409 code',
+      (constraint: string, errorCode: ErrorCode, message: string) => {
+        const { host, captured } = makeHost('/api/v1/x', 'req-8');
 
-      filter.catch(
-        Object.assign(new Error('duplicate key value'), {
-          code: '23505',
-          constraint: 'uq_coach_profiles_active_user_id',
-        }),
-        host,
-      );
+        filter.catch(
+          Object.assign(new Error('duplicate key value'), { code: '23505', constraint }),
+          host,
+        );
 
-      const { status, body } = captured();
-      expect(status).toBe(409);
-      expect(body.errorCode).toBe(ErrorCode.VALIDATION_ERROR);
-    });
+        const { status, body } = captured();
+        expect(status).toBe(409);
+        expect(body.errorCode).toBe(errorCode);
+        expect(body.message).toBe(message);
+      },
+    );
+
+    it.each([['uq_something_unmapped'], [undefined]])(
+      'falls back to the generic 409 for constraint %s',
+      (constraint: string | undefined) => {
+        const { host, captured } = makeHost('/api/v1/x', 'req-8b');
+
+        filter.catch(
+          Object.assign(new Error('duplicate key value'), { code: '23505', constraint }),
+          host,
+        );
+
+        const { status, body } = captured();
+        expect(status).toBe(409);
+        expect(body.errorCode).toBe(ErrorCode.VALIDATION_ERROR);
+        expect(body.message).toBe('That record already exists.');
+      },
+    );
 
     it.each([
       ['22P02', 400, 'malformed value'],

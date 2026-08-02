@@ -37,6 +37,21 @@ export type AppAbility = MongoAbility<[Action, Subjects | Record<string, unknown
 type Can = AbilityBuilder<AppAbility>['can'];
 type Cannot = AbilityBuilder<AppAbility>['cannot'];
 
+/**
+ * NOT the enforcement layer. These rules are consulted only where a route
+ * declares `@CheckPolicies` and lists `PoliciesGuard` — today that is the
+ * impersonation route alone. Everywhere else, access is decided by `@Roles`,
+ * `NotAChildGuard` and the ownership checks inside each service.
+ *
+ * PoliciesGuard cannot be registered globally to close that gap: global guards
+ * run before the controller-scoped `JwtAuthGuard`, so it would read a principal
+ * that is not on the request yet.
+ *
+ * The practical rule when editing this file: a `can` that no route reaches
+ * grants nothing and misleads the next reader — add the route or drop the rule.
+ * A `cannot` is worth keeping regardless, as a standing denial for whatever
+ * consults it later.
+ */
 @Injectable()
 export class AbilityFactory {
   /**
@@ -94,7 +109,9 @@ export class AbilityFactory {
         // every rule below was scoped to a null org and matched nothing.
         const orgScope: MongoQuery = { trainerOrgId: principal.trainerOrgId } as MongoQuery;
         can(Action.Read, 'User', orgScope);
-        can(Action.Update, 'User', orgScope);
+        // No Update on 'User': editing an account is a Super Admin function
+        // (PATCH /users/:id), and a trainer edits their org through the roster
+        // and CoachProfile rules below.
         can(Action.Manage, 'TrainerPlayerAssociation', orgScope);
         can(Action.Read, 'PlayerProfile', orgScope);
         can(Action.Read, 'Availability', orgScope);
@@ -120,8 +137,9 @@ export class AbilityFactory {
           coachProfileId: principal.coachProfileId,
         } as MongoQuery);
 
-        // View-only over the trainer's roster they deliver sessions for.
-        can(Action.Read, 'PlayerProfile', orgScope);
+        // No Read on 'PlayerProfile': the roster route is trainer-only, and a
+        // coach-facing roster belongs to Epic-03. Restore this with the route,
+        // not before it.
         can(Action.Read, 'TrainerOrg', { id: principal.trainerOrgId } as MongoQuery);
         can(Action.Read, 'Branding', orgScope);
 

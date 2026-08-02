@@ -115,12 +115,12 @@ describe('Trainer invites coach (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/v1/coaches/invitations/${code}/accept`)
-      .send({ password: COACH_PASSWORD })
+      .send({ password: COACH_PASSWORD, firstName: 'Cody' })
       .expect(201);
 
     await request(app.getHttpServer())
       .post(`/api/v1/coaches/invitations/${code}/accept`)
-      .send({ password: COACH_PASSWORD })
+      .send({ password: COACH_PASSWORD, firstName: 'Cody' })
       .expect(410)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.SHARE_LINK_EXPIRED));
   });
@@ -133,13 +133,13 @@ describe('Trainer invites coach (e2e)', () => {
     const codeA = await invite(trainerA.token, 'shared@example.com');
     await request(app.getHttpServer())
       .post(`/api/v1/coaches/invitations/${codeA}/accept`)
-      .send({ password: COACH_PASSWORD })
+      .send({ password: COACH_PASSWORD, firstName: 'Cody' })
       .expect(201);
 
     const codeB = await invite(trainerB.token, 'shared@example.com');
     await request(app.getHttpServer())
       .post(`/api/v1/coaches/invitations/${codeB}/accept`)
-      .send({ password: COACH_PASSWORD })
+      .send({ password: COACH_PASSWORD, firstName: 'Cody' })
       .expect(409)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.COACH_ACTIVE_ELSEWHERE));
   });
@@ -157,7 +157,7 @@ describe('Trainer invites coach (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/v1/coaches/invitations/${code}/accept`)
-      .send({ password: COACH_PASSWORD })
+      .send({ password: COACH_PASSWORD, firstName: 'Cody' })
       .expect(410)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.SHARE_LINK_EXPIRED));
 

@@ -7,13 +7,12 @@ import {
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
-import { ClockService } from '../../shared/clock/clock.service';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { displayNameFor } from '../../shared/format/display-name';
+import { AgeGateService } from '../../shared/registration/age-gate.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
-import { ContextService } from '../auth/context.service';
 import { Principal } from '../auth/principal';
 import { MailService } from '../mail/mail.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
@@ -23,17 +22,10 @@ import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { AssociationsService } from './associations.service';
 import { JoinMembersPromptView } from './dto/join-members.dto';
-import { RosterEntryView } from './dto/roster.dto';
 import { JoinRegisterDto } from './dto/join-register.dto';
-import { ShareLink, ShareLinkType } from './entities/share-link.entity';
+import { ShareLinkType } from './entities/share-link.entity';
 import { AssociationStatus } from './entities/trainer-player-association.entity';
 import { ShareLinksService } from './share-links.service';
-
-export interface ResolvedShareLink {
-  code: string;
-  valid: boolean;
-  trainer: { profileId: string; businessName: string } | null;
-}
 
 export interface JoinResult {
   message: string;
@@ -44,90 +36,31 @@ export interface JoinResult {
   playerProfileIds: string[];
 }
 
-export const AUDIT_SHARE_LINK_CREATED = 'sharelink.created';
 export const AUDIT_ENROLLMENT_JOINED = 'enrollment.joined';
 export const AUDIT_ENROLLMENT_REGISTERED = 'enrollment.registered';
-export const AUDIT_ROSTER_SKILL_LEVEL_SET = 'roster.skill-level-set';
-export const AUDIT_ROSTER_MEMBER_REMOVED = 'roster.member-removed';
 
+/**
+ * The public join workflow: registering through a trainer's ShareLink, and an
+ * existing player connecting to another trainer. Link administration lives on
+ * ShareLinksService, the trainer-side roster on RosterService.
+ */
 @Injectable()
-export class EnrollmentService {
-  private readonly logger = new Logger(EnrollmentService.name);
+export class JoinService {
+  private readonly logger = new Logger(JoinService.name);
 
   constructor(
     private readonly dataSource: DataSource,
     private readonly authService: AuthService,
+    private readonly ageGate: AgeGateService,
     private readonly usersService: UsersService,
     private readonly playersService: PlayersService,
     private readonly trainersService: TrainersService,
     private readonly shareLinks: ShareLinksService,
     private readonly associations: AssociationsService,
     private readonly mail: MailService,
-    private readonly clock: ClockService,
     private readonly audit: AuditService,
-    private readonly context: ContextService,
     private readonly passwords: PasswordService,
   ) {}
-
-  /** Public: resolve a ShareLink for the join page (trainer name + validity). */
-  async resolve(code: string): Promise<ResolvedShareLink> {
-    const link = await this.shareLinks.findByCode(code);
-    // A coach invite is not a player join code; the join page must not preview
-    // one, let alone name the trainer behind it.
-    if (!link || !link.active || link.type !== ShareLinkType.PlayerStatic) {
-      return { code, valid: false, trainer: null };
-    }
-    const usable =
-      (link.expiresAt === null || link.expiresAt.getTime() > this.clock.now().getTime()) &&
-      (link.maxUses === null || link.useCount < link.maxUses);
-    const profile = await this.trainersService.findById(link.trainerProfileId);
-    return {
-      code,
-      valid: usable,
-      trainer: profile ? { profileId: profile.id, businessName: profile.businessName } : null,
-    };
-  }
-
-  /**
-   * Generate a static player ShareLink for the calling trainer.
-   *
-   * Player links only. Coach invites are single-use, 7-day and bound to a
-   * target email, all of which this endpoint would leave unset — minting one
-   * here produced a "coach invite" that never expires and never runs out.
-   * They belong to POST /coaches/invitations.
-   */
-  async createTrainerShareLink(principal: Principal): Promise<ShareLink> {
-    const trainerProfile = await this.trainersService.findByUserId(principal.userId);
-    if (!trainerProfile) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
-        message: 'No trainer profile for this account.',
-      });
-    }
-    const link = await this.shareLinks.create({
-      trainerProfileId: trainerProfile.id,
-      type: ShareLinkType.PlayerStatic,
-      createdByUserId: principal.userId,
-    });
-    await this.audit.record({
-      action: AUDIT_SHARE_LINK_CREATED,
-      actor: principal,
-      target: { type: 'ShareLink', id: link.id },
-      metadata: { linkType: ShareLinkType.PlayerStatic },
-    });
-    return link;
-  }
-
-  async listTrainerShareLinks(principal: Principal): Promise<ShareLink[]> {
-    const trainerProfile = await this.trainersService.findByUserId(principal.userId);
-    if (!trainerProfile) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
-        message: 'No trainer profile for this account.',
-      });
-    }
-    return this.shareLinks.findByTrainer(trainerProfile.id);
-  }
 
   /**
    * New player/parent registers via a trainer's ShareLink: creates the account
@@ -137,7 +70,7 @@ export class EnrollmentService {
   async registerViaShareLink(code: string, dto: JoinRegisterDto): Promise<JoinResult> {
     // Registration's age floor applies here too — a second public way to mint an
     // account. Before the transaction, so a refusal costs no link use.
-    this.authService.assertOldEnoughForOwnAccount(dto.birthDate);
+    this.ageGate.assertOldEnoughForOwnAccount(dto.birthDate);
 
     // Also before it: argon2id is ~40ms of CPU, and the transaction holds a row
     // lock on the ShareLink for as long as it runs.
@@ -400,7 +333,13 @@ export class EnrollmentService {
       }
       const parent = await this.usersService.findById(principal.parentUserId);
       const link = await this.shareLinks.findByCode(code);
-      if (!parent || !link || link.type !== ShareLinkType.PlayerStatic) {
+      if (!parent || !link) {
+        return;
+      }
+      // Kind confusion still blocks, but an expired or spent link does not: the
+      // parent is told about a stale code too, so they can ask for a fresh one.
+      const evaluation = this.shareLinks.evaluate(link, ShareLinkType.PlayerStatic);
+      if (!evaluation.ok && evaluation.reason === 'wrong-type') {
         return;
       }
       const child = principal.childPlayerProfileId
@@ -419,165 +358,6 @@ export class EnrollmentService {
         }`,
       );
     }
-  }
-
-  /**
-   * The trainer's roster: every player profile connected to them.
-   *
-   * Scoped to the caller's own organisation, resolved from their user id — a
-   * trainer cannot pass an org id and read someone else's roster, because
-   * there is nowhere to pass one.
-   */
-  async roster(
-    principal: Principal,
-    query: { search?: string; includeInactive?: boolean } = {},
-  ): Promise<RosterEntryView[]> {
-    const trainer = await this.trainersService.findByUserId(principal.userId);
-    if (!trainer) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
-        message: 'No trainer profile for this account.',
-      });
-    }
-
-    const associations = (await this.associations.findByTrainer(trainer.id)).filter(
-      (a) => query.includeInactive === true || a.status === AssociationStatus.Active,
-    );
-    if (associations.length === 0) {
-      return [];
-    }
-
-    const profiles = await this.playersService.findByIds(
-      associations.map((a) => a.playerProfileId),
-    );
-    const profileById = new Map(profiles.map((p) => [p.id, p]));
-    const accounts = await this.usersService.findByIds([
-      ...new Set(profiles.map((p) => p.ownerUserId)),
-    ]);
-    const accountById = new Map(accounts.map((u) => [u.id, u]));
-
-    const rows = associations
-      .map((a) => {
-        const profile = profileById.get(a.playerProfileId);
-        if (!profile) {
-          return null;
-        }
-        const account = accountById.get(profile.ownerUserId);
-        return {
-          playerProfileId: profile.id,
-          displayName: profile.displayName,
-          isChild: profile.isChild,
-          birthDate: profile.birthDate,
-          gender: profile.gender,
-          skillLevel: profile.skillLevel,
-          school: profile.school,
-          jerseyNumber: profile.jerseyNumber,
-          accountUserId: profile.ownerUserId,
-          accountEmail: account?.email ?? null,
-          accountName: account ? displayNameFor(account, account.email) : null,
-          accountPhone: account?.phone ?? null,
-          status: a.status,
-          connectedAt: a.connectedAt,
-        };
-      })
-      .filter((r): r is RosterEntryView => r !== null);
-
-    const search = query.search?.trim().toLowerCase();
-    if (!search) {
-      return rows;
-    }
-    return rows.filter((r) =>
-      [r.displayName, r.accountEmail, r.accountName].some(
-        (field) => field !== null && field.toLowerCase().includes(search),
-      ),
-    );
-  }
-
-  /**
-   * The tenancy gate for every trainer-side write against a roster member.
-   *
-   * Resolves the caller's org and the association in one place, and reports a
-   * player from another organisation as simply not on the roster — a 403 would
-   * confirm the id names a real profile somewhere else.
-   */
-  private async requireRosterMember(
-    principal: Principal,
-    playerProfileId: string,
-  ): Promise<{ trainerProfileId: string; profile: PlayerProfile }> {
-    const trainer = await this.trainersService.findByUserId(principal.userId);
-    if (!trainer) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
-        message: 'No trainer profile for this account.',
-      });
-    }
-
-    const association = await this.associations.find(trainer.id, playerProfileId);
-    const profile = await this.playersService.findById(playerProfileId);
-    if (!association || association.status !== AssociationStatus.Active || !profile) {
-      throw new NotFoundException({
-        errorCode: ErrorCode.NOT_FOUND,
-        message: 'This player is not on your roster.',
-      });
-    }
-    return { trainerProfileId: trainer.id, profile };
-  }
-
-  /** Record the trainer's assessment of a player's skill level. */
-  async setRosterSkillLevel(
-    principal: Principal,
-    playerProfileId: string,
-    skillLevel: string | null,
-  ): Promise<RosterEntryView> {
-    const { trainerProfileId, profile } = await this.requireRosterMember(
-      principal,
-      playerProfileId,
-    );
-
-    await this.playersService.setSkillLevel(profile.id, skillLevel);
-    await this.audit.record({
-      action: AUDIT_ROSTER_SKILL_LEVEL_SET,
-      actor: principal,
-      target: { type: 'PlayerProfile', id: profile.id },
-      metadata: { trainerProfileId, skillLevel },
-    });
-
-    const entry = (await this.roster(principal)).find((r) => r.playerProfileId === profile.id);
-    if (!entry) {
-      // Unreachable: requireRosterMember just proved the association is active.
-      throw new NotFoundException({
-        errorCode: ErrorCode.NOT_FOUND,
-        message: 'This player is not on your roster.',
-      });
-    }
-    return entry;
-  }
-
-  /**
-   * Remove a player from the trainer's own roster.
-   *
-   * Deactivated rather than deleted, matching the family-side removal in
-   * mirroring the family-side removal: history is preserved and the pairing can
-   * be re-established. Until this existed only the family could sever the link,
-   * so a trainer had no way to off-board a player who had left.
-   */
-  async removeFromRoster(principal: Principal, playerProfileId: string): Promise<void> {
-    const { trainerProfileId, profile } = await this.requireRosterMember(
-      principal,
-      playerProfileId,
-    );
-
-    await this.associations.setStatus(trainerProfileId, profile.id, AssociationStatus.Inactive);
-    // A session parked in this context now points at a trainer the profile is
-    // no longer connected to, exactly as on the family side.
-    await this.context.clearForAssociation(profile.id, trainerProfileId);
-
-    await this.audit.record({
-      action: AUDIT_ROSTER_MEMBER_REMOVED,
-      actor: principal,
-      target: { type: 'PlayerProfile', id: profile.id },
-      metadata: { trainerProfileId },
-    });
   }
 
   private async trainerName(trainerProfileId: string): Promise<string> {

@@ -189,7 +189,12 @@ describe('ShareLink registration + multi-trainer (e2e)', () => {
   it('an invalid code is rejected', async () => {
     await request(app.getHttpServer())
       .post(`/api/v1/join/nope-not-real/register`)
-      .send({ email: 'x@example.com', password: 'Str0ng!Passw0rd', birthDate: '1994-03-22' })
+      .send({
+        email: 'x@example.com',
+        password: 'Str0ng!Passw0rd',
+        birthDate: '1994-03-22',
+        firstName: 'Reg',
+      })
       .expect(404)
       .expect((r) => expect(r.body.errorCode).toBe(ErrorCode.SHARE_LINK_INVALID));
 

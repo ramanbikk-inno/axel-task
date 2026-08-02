@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsOptional,
   IsString,
   IsUUID,
@@ -57,4 +58,13 @@ export class CreateChildDto {
   @ArrayUnique()
   @IsUUID('4', { each: true })
   trainerProfileIds?: string[];
+
+  /**
+   * Twins exist. The name+birth-date check is a duplicate-entry guard, not a
+   * uniqueness rule, so the parent can say they meant it.
+   */
+  @ApiPropertyOptional({ description: 'Proceed despite an exact name + birth date match.' })
+  @IsOptional()
+  @IsBoolean()
+  allowDuplicate?: boolean;
 }

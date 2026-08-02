@@ -13,10 +13,8 @@ import { ClockService } from '../../shared/clock/clock.service';
 import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/changed-fields';
 import { ErrorCode } from '../../shared/errors/error-codes';
-import { PasswordService } from '../../shared/crypto/password.service';
 import { decodeImageUpload, MAX_IMAGE_UPLOAD_BYTES } from '../../shared/files/image-content';
 import { ageInYears, parseCalendarDate } from '../../shared/validation/calendar-date';
-import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { ContextService } from '../auth/context.service';
 import { AssociationsService } from '../enrollment/associations.service';
@@ -26,25 +24,27 @@ import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
 import { UploadPhotoDto } from '../profile/dto/profile.dto';
-import { discardAsset } from '../storage/discard-asset';
+import { replaceStoredAsset } from '../storage/replace-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
-import { Role, UserStatus } from '../users/entities/user.enums';
-import { UsersService } from '../users/users.service';
+import { ChildAccountService } from './child-account.service';
+import { findSimilarChildren } from './child-similarity';
 import { ChildLoginStatusView, ChildLoginView } from './dto/child-login.dto';
 import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
 import { FamilyContextView } from './dto/family-context.view';
 import { PlayerProfileView, TrainerContextView } from './dto/player-profile.view';
+import { SimilarChildrenQueryDto, SimilarChildrenView } from './dto/similar-children.dto';
 
 export const AUDIT_CHILD_CREATED = 'family.child-created';
 export const AUDIT_CHILD_UPDATED = 'family.child-updated';
 export const AUDIT_CHILD_PHOTO_UPDATED = 'family.child-photo-updated';
 export const AUDIT_CHILD_PHOTO_REMOVED = 'family.child-photo-removed';
-export const AUDIT_CHILD_LOGIN_CREATED = 'family.child-login-created';
-export const AUDIT_CHILD_LOGIN_REVOKED = 'family.child-login-revoked';
 export const AUDIT_FAMILY_TRAINER_ADDED = 'family.trainer-added';
 export const AUDIT_FAMILY_TRAINER_REMOVED = 'family.trainer-removed';
+
+/** Moved with the credential lifecycle; re-exported for existing importers. */
+export { AUDIT_CHILD_LOGIN_CREATED, AUDIT_CHILD_LOGIN_REVOKED } from './child-account.service';
 
 @Injectable()
 export class FamilyService {
@@ -57,9 +57,7 @@ export class FamilyService {
     private readonly shareLinks: ShareLinksService,
     private readonly trainersService: TrainersService,
     private readonly context: ContextService,
-    private readonly usersService: UsersService,
-    private readonly passwords: PasswordService,
-    private readonly auth: AuthService,
+    private readonly childAccounts: ChildAccountService,
     private readonly clock: ClockService,
     private readonly audit: AuditService,
     @Inject(STORAGE) private readonly storage: StorageService,
@@ -84,6 +82,25 @@ export class FamilyService {
     return this.buildViews(profiles);
   }
 
+  /**
+   * Children already on the account that resemble the one the parent is about
+   * to add — the advisory half of US-01.03's duplicate check. Read-only, so a
+   * near miss warns rather than blocks; only an exact match is refused, and
+   * even that yields to `allowDuplicate`.
+   */
+  async findSimilarChildren(
+    parentUserId: string,
+    query: SimilarChildrenQueryDto,
+  ): Promise<SimilarChildrenView> {
+    const owned = await this.playersService.findByOwner(parentUserId);
+    const matches = findSimilarChildren(
+      owned.filter((p) => p.isChild),
+      { displayName: query.displayName, birthDate: query.birthDate ?? null },
+      query.excludeProfileId,
+    );
+    return { matches, hasExactMatch: matches.some((m) => m.exact) };
+  }
+
   /** Create a child profile and optionally connect it to the parent's trainers. */
   async createChild(actor: Principal, dto: CreateChildDto): Promise<PlayerProfileView> {
     const parentUserId = actor.userId;
@@ -96,10 +113,12 @@ export class FamilyService {
         p.displayName.trim().toLowerCase() === dto.displayName.trim().toLowerCase() &&
         p.birthDate === birthDate,
     );
-    if (duplicate) {
+    if (duplicate && dto.allowDuplicate !== true) {
       throw new ConflictException({
         errorCode: ErrorCode.DUPLICATE_CHILD,
-        message: 'A child with the same name and birth date already exists.',
+        message:
+          'A child with the same name and birth date already exists. ' +
+          'Send allowDuplicate to add them anyway.',
       });
     }
 
@@ -192,10 +211,12 @@ export class FamilyService {
           p.displayName.trim().toLowerCase() === displayName.trim().toLowerCase() &&
           p.birthDate === birthDate,
       );
-      if (duplicate) {
+      if (duplicate && dto.allowDuplicate !== true) {
         throw new ConflictException({
           errorCode: ErrorCode.DUPLICATE_CHILD,
-          message: 'A child with the same name and birth date already exists.',
+          message:
+            'A child with the same name and birth date already exists. ' +
+            'Send allowDuplicate to proceed anyway.',
         });
       }
     }
@@ -241,19 +262,14 @@ export class FamilyService {
       maxBytes: MAX_IMAGE_UPLOAD_BYTES,
       label: 'Child photo',
     });
-    const stored = await this.storage.upload({
-      buffer,
-      fileName: dto.fileName,
-      mimeType: dto.mimeType,
-      folder: 'avatars',
+    const { persisted: updated } = await replaceStoredAsset({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId: profile.photoPublicId,
+      upload: { buffer, fileName: dto.fileName, mimeType: dto.mimeType, folder: 'avatars' },
+      persist: (stored) => this.playersService.setPhoto(profile.id, stored),
     });
-    const updated = await this.playersService.setPhoto(profile.id, stored);
 
-    // Only after the row points at the new asset: deleting first would leave a
-    // profile referencing nothing if the upload then failed.
-    if (profile.photoPublicId !== null && profile.photoPublicId !== stored.publicId) {
-      await discardAsset(this.storage, profile.photoPublicId, this.logger);
-    }
     await this.audit.record({
       action: AUDIT_CHILD_PHOTO_UPDATED,
       actor,
@@ -280,10 +296,13 @@ export class FamilyService {
       });
     }
 
-    const updated = await this.playersService.setPhoto(profile.id, null);
-    if (profile.photoPublicId !== null) {
-      await discardAsset(this.storage, profile.photoPublicId, this.logger);
-    }
+    const { persisted: updated } = await replaceStoredAsset({
+      storage: this.storage,
+      logger: this.logger,
+      previousPublicId: profile.photoPublicId,
+      persist: () => this.playersService.setPhoto(profile.id, null),
+    });
+
     await this.audit.record({
       action: AUDIT_CHILD_PHOTO_REMOVED,
       actor,
@@ -421,115 +440,25 @@ export class FamilyService {
     return view;
   }
 
-  /**
-   * Give a child profile its own login. The account is an ordinary PlayerParent;
-   * what makes it a child is `player_profiles.child_user_id` pointing at it. The
-   * link is unique and a CHECK refuses it on a profile that is not a child.
-   */
+  /** Give a child profile its own login. See ChildAccountService. */
   async createChildLogin(
     actor: Principal,
     profileId: string,
     input: { email: string; password: string },
   ): Promise<ChildLoginView> {
-    const parentUserId = actor.userId;
-    const profile = await this.requireOwnedProfile(parentUserId, profileId);
-    if (!profile.isChild) {
-      throw new BadRequestException({
-        errorCode: ErrorCode.NOT_A_CHILD_PROFILE,
-        message: 'Only a child profile can be given its own login.',
-      });
-    }
-    if (profile.childUserId !== null) {
-      throw new ConflictException({
-        errorCode: ErrorCode.CHILD_LOGIN_EXISTS,
-        message: 'This child already has a login.',
-      });
-    }
-
-    const existing = await this.usersService.findByEmail(input.email);
-    if (existing) {
-      // Not enumeration-sensitive: the caller is an authenticated parent
-      // choosing an address, and a silent no-op here would leave them thinking
-      // the login was created.
-      throw new ConflictException({
-        errorCode: ErrorCode.EMAIL_ALREADY_EXISTS,
-        message: 'An account with this email already exists.',
-      });
-    }
-
-    const passwordHash = await this.passwords.hash(input.password);
-    const childUser = await this.dataSource.transaction(async (manager: EntityManager) => {
-      const created = await this.usersService.create(
-        {
-          email: input.email,
-          role: Role.PlayerParent,
-          passwordHash,
-          firstName: profile.displayName,
-          // The parent vouching for the address is the verification; there is
-          // no separate mailbox to confirm.
-          emailVerified: true,
-          mustSetPassword: false,
-          status: UserStatus.Active,
-        },
-        manager,
-      );
-      await manager
-        .getRepository(PlayerProfile)
-        .update({ id: profile.id }, { childUserId: created.id });
-      return created;
-    });
-
-    await this.audit.record({
-      action: AUDIT_CHILD_LOGIN_CREATED,
-      actor,
-      targetUserId: childUser.id,
-      target: { type: 'PlayerProfile', id: profile.id },
-    });
-
-    return {
-      playerProfileId: profile.id,
-      displayName: profile.displayName,
-      childUserId: childUser.id,
-      email: childUser.email,
-    };
+    const profile = await this.requireOwnedProfile(actor.userId, profileId);
+    return this.childAccounts.createLogin(actor, profile, input);
   }
 
-  /**
-   * Revoke a child's login. The profile stays; only the ability to sign in as
-   * it goes away, along with every session currently doing so — otherwise a
-   * live child session keeps working for up to its refresh lifetime after the
-   * parent has withdrawn access.
-   */
+  /** Revoke a child's login and every session using it. See ChildAccountService. */
   async revokeChildLogin(actor: Principal, profileId: string): Promise<void> {
     const profile = await this.requireOwnedProfile(actor.userId, profileId);
-    if (profile.childUserId === null) {
-      throw new NotFoundException({
-        errorCode: ErrorCode.NOT_FOUND,
-        message: 'This child does not have a login.',
-      });
-    }
-
-    const childUserId = profile.childUserId;
-    await this.dataSource.transaction(async (manager: EntityManager) => {
-      await manager.getRepository(PlayerProfile).update({ id: profile.id }, { childUserId: null });
-      await this.usersService.setStatus(childUserId, UserStatus.Inactive, manager);
-    });
-    await this.auth.revokeAllUserSessions(childUserId, 'child-login-revoked');
-    await this.audit.record({
-      action: AUDIT_CHILD_LOGIN_REVOKED,
-      actor,
-      targetUserId: childUserId,
-      target: { type: 'PlayerProfile', id: profile.id },
-    });
+    await this.childAccounts.revokeLogin(actor, profile);
   }
 
   async childLoginStatus(parentUserId: string, profileId: string): Promise<ChildLoginStatusView> {
     const profile = await this.requireOwnedProfile(parentUserId, profileId);
-    if (profile.childUserId === null) {
-      return { hasLogin: false };
-    }
-    const user = await this.usersService.findById(profile.childUserId);
-    return user ? { hasLogin: true, childUserId: user.id, email: user.email } : { hasLogin: false };
+    return this.childAccounts.loginStatus(profile);
   }
 
   private async requireOwnedProfile(

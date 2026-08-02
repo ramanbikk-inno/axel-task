@@ -2,34 +2,25 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
-  Inject,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 
-import { ClockService } from '../../shared/clock/clock.service';
+import { AgeGateService } from '../../shared/registration/age-gate.service';
 import { ErrorCode } from '../../shared/errors/error-codes';
 import { AuditService } from '../audit/audit.service';
 import { changedFields } from '../audit/changed-fields';
 import { Principal } from '../auth/principal';
 import { AuthService } from '../auth/auth.service';
-import { CoachesService } from '../coaches/coaches.service';
+import { CoachProfileService } from '../coaches/coach-profile.service';
 import { CoachView, UpdateCoachProfileDto } from '../coaches/dto/coach.dto';
-import { ShareLinksService } from '../enrollment/share-links.service';
 import { MailService } from '../mail/mail.service';
-import {
-  AUDIT_PLAYER_PROFILE_UPDATED,
-  AUDIT_TRAINER_PROFILE_UPDATED,
-} from '../profile/profile.service';
 import { UpdatePlayerProfileDto, UpdateTrainerProfileDto } from '../profile/dto/profile.dto';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { PlayersService } from '../players/players.service';
-import { discardAsset } from '../storage/discard-asset';
-import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
 import {
   AdminPlayerProfileView,
@@ -39,18 +30,30 @@ import {
 import { CreateTrainerDto } from './dto/create-trainer.dto';
 import { ListUsersQueryDto } from './dto/list-users.query.dto';
 import { PaginatedUsersDto, UserSummaryDto } from './dto/user-summary.dto';
-import { UserDeletionLog } from './entities/user-deletion-log.entity';
+import { requireUser } from './require-user';
+import { UserErasureService } from './user-erasure.service';
 
 export const AUDIT_TRAINER_CREATED = 'trainer.created';
 export const AUDIT_USER_DEACTIVATED = 'user.deactivated';
 export const AUDIT_USER_REACTIVATED = 'user.reactivated';
 export const AUDIT_USER_UPDATED = 'user.updated';
-export const AUDIT_USER_DELETED = 'user.deleted';
+export { AUDIT_USER_DELETED } from './user-erasure.service';
+
+/** One Active/Inactive transition, minus what differs between the two routes. */
+interface StatusTransition {
+  to: UserStatus;
+  action: string;
+  reason?: string;
+  /** Erasure is permanent, so both routes refuse a Deleted target — differently worded. */
+  deletedMessage: string;
+  /** Runs before the Deleted check; only deactivation has one. */
+  extraGuard?: (target: User) => void;
+  /** Runs after the status is written, before the audit row. Deactivation only. */
+  onApplied?: (target: User) => Promise<void>;
+}
 
 @Injectable()
 export class AdminService {
-  private readonly logger = new Logger(AdminService.name);
-
   constructor(
     private readonly dataSource: DataSource,
     private readonly usersService: UsersService,
@@ -59,10 +62,9 @@ export class AdminService {
     private readonly mail: MailService,
     private readonly audit: AuditService,
     private readonly playersService: PlayersService,
-    private readonly shareLinks: ShareLinksService,
-    @Inject(STORAGE) private readonly storage: StorageService,
-    private readonly clock: ClockService,
-    private readonly coachesService: CoachesService,
+    private readonly ageGate: AgeGateService,
+    private readonly coachProfiles: CoachProfileService,
+    private readonly userErasure: UserErasureService,
   ) {}
 
   async createTrainer(
@@ -146,37 +148,23 @@ export class AdminService {
     actor: Principal,
     reason?: string,
   ): Promise<UserSummaryDto> {
-    const target = await this.requireUser(targetUserId);
-
-    if (target.role === Role.SuperAdmin) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.CANNOT_DEACTIVATE_SUPER_ADMIN,
-        message: 'Super Admin accounts cannot be deactivated.',
-      });
-    }
-
-    // Otherwise Deleted -> deactivate -> reactivate walks an erased account back
-    // to life, past the guard on reactivate.
-    if (target.status === UserStatus.Deleted) {
-      throw new ConflictException({
-        errorCode: ErrorCode.ACCOUNT_DELETED,
-        message: 'Deleted users cannot be deactivated.',
-      });
-    }
-
-    if (target.status !== UserStatus.Inactive) {
-      await this.usersService.setStatus(target.id, UserStatus.Inactive);
-      await this.authService.revokeAllUserSessions(target.id, 'deactivated');
-      await this.audit.record({
-        action: AUDIT_USER_DEACTIVATED,
-        actor,
-        targetUserId: target.id,
-        metadata: { reason: reason ?? null },
-      });
-    }
-
-    const updated = await this.requireUser(target.id);
-    return UserSummaryDto.fromEntity(updated);
+    return this.changeUserStatus(targetUserId, actor, {
+      to: UserStatus.Inactive,
+      action: AUDIT_USER_DEACTIVATED,
+      reason,
+      // Otherwise Deleted -> deactivate -> reactivate walks an erased account back
+      // to life, past the guard on reactivate.
+      deletedMessage: 'Deleted users cannot be deactivated.',
+      extraGuard: (target) => {
+        if (target.role === Role.SuperAdmin) {
+          throw new ForbiddenException({
+            errorCode: ErrorCode.CANNOT_DEACTIVATE_SUPER_ADMIN,
+            message: 'Super Admin accounts cannot be deactivated.',
+          });
+        }
+      },
+      onApplied: (target) => this.authService.revokeAllUserSessions(target.id, 'deactivated'),
+    });
   }
 
   /** Reactivate a deactivated user. Erasure is permanent, so Deleted is refused. */
@@ -185,22 +173,42 @@ export class AdminService {
     actor: Principal,
     reason?: string,
   ): Promise<UserSummaryDto> {
+    return this.changeUserStatus(targetUserId, actor, {
+      to: UserStatus.Active,
+      action: AUDIT_USER_REACTIVATED,
+      reason,
+      deletedMessage: 'Deleted users cannot be reactivated.',
+    });
+  }
+
+  /**
+   * Shared body of the two status routes. Reactivation revokes nothing, so the
+   * session sweep is an opt-in hook rather than part of the transition.
+   */
+  private async changeUserStatus(
+    targetUserId: string,
+    actor: Principal,
+    transition: StatusTransition,
+  ): Promise<UserSummaryDto> {
     const target = await this.requireUser(targetUserId);
+
+    transition.extraGuard?.(target);
 
     if (target.status === UserStatus.Deleted) {
       throw new ConflictException({
         errorCode: ErrorCode.ACCOUNT_DELETED,
-        message: 'Deleted users cannot be reactivated.',
+        message: transition.deletedMessage,
       });
     }
 
-    if (target.status !== UserStatus.Active) {
-      await this.usersService.setStatus(target.id, UserStatus.Active);
+    if (target.status !== transition.to) {
+      await this.usersService.setStatus(target.id, transition.to);
+      await transition.onApplied?.(target);
       await this.audit.record({
-        action: AUDIT_USER_REACTIVATED,
+        action: transition.action,
         actor,
         targetUserId: target.id,
-        metadata: { reason: reason ?? null },
+        metadata: { reason: transition.reason ?? null },
       });
     }
 
@@ -236,28 +244,17 @@ export class AdminService {
     input: UpdateTrainerProfileDto,
   ): Promise<AdminTrainerProfileView> {
     const target = await this.requireUser(targetUserId);
-    if (target.role !== Role.Trainer) {
-      throw new ConflictException({
-        errorCode: ErrorCode.ROLE_MISMATCH,
-        message: 'This user does not have a trainer profile.',
-      });
-    }
+    AdminService.requireRole(target, Role.Trainer, 'trainer');
 
-    const updated = await this.trainersService.updateProfileByUserId(targetUserId, input);
-    if (!updated) {
+    const profile = await this.trainersService.findByUserId(targetUserId);
+    if (!profile) {
       throw new NotFoundException({
         errorCode: ErrorCode.TRAINER_PROFILE_NOT_FOUND,
         message: 'Trainer profile not found.',
       });
     }
 
-    await this.audit.record({
-      action: AUDIT_TRAINER_PROFILE_UPDATED,
-      actor,
-      targetUserId,
-      target: { type: 'TrainerProfile', id: updated.id },
-      metadata: { fields: changedFields(input) },
-    });
+    const updated = await this.trainersService.applyProfileUpdate(profile, input, actor);
     return AdminTrainerProfileView.from(updated);
   }
 
@@ -268,13 +265,8 @@ export class AdminService {
     input: UpdateCoachProfileDto,
   ): Promise<CoachView> {
     const target = await this.requireUser(targetUserId);
-    if (target.role !== Role.Coach) {
-      throw new ConflictException({
-        errorCode: ErrorCode.ROLE_MISMATCH,
-        message: 'This user does not have a coach profile.',
-      });
-    }
-    return this.coachesService.adminUpdateProfile(targetUserId, actor, input);
+    AdminService.requireRole(target, Role.Coach, 'coach');
+    return this.coachProfiles.adminUpdateProfile(targetUserId, actor, input);
   }
 
   /** Super Admin edits a player's own (non-child) trainee profile fields. */
@@ -284,168 +276,32 @@ export class AdminService {
     input: UpdatePlayerProfileDto,
   ): Promise<AdminPlayerProfileView> {
     const target = await this.requireUser(targetUserId);
-    if (target.role !== Role.PlayerParent) {
-      throw new ConflictException({
-        errorCode: ErrorCode.ROLE_MISMATCH,
-        message: 'This user does not have a player profile.',
-      });
-    }
+    AdminService.requireRole(target, Role.PlayerParent, 'player');
     if (input.birthDate !== undefined) {
       // Same floor as the self-service route: the age rule belongs to the
       // account, not to whoever is editing it.
-      this.authService.assertOldEnoughForOwnAccount(input.birthDate);
+      this.ageGate.assertOldEnoughForOwnAccount(input.birthDate);
     }
 
-    const updated = await this.playersService.updateSelfProfile(targetUserId, input);
-    if (!updated) {
+    const profile = await this.playersService.findSelfProfile(targetUserId);
+    if (!profile) {
       throw new NotFoundException({
         errorCode: ErrorCode.PLAYER_PROFILE_NOT_FOUND,
         message: 'This account has no self player profile — it may be a child login.',
       });
     }
 
-    await this.audit.record({
-      action: AUDIT_PLAYER_PROFILE_UPDATED,
-      actor,
-      targetUserId,
-      target: { type: 'PlayerProfile', id: updated.id },
-      metadata: { fields: changedFields(input) },
-    });
+    const updated = await this.playersService.applyProfileUpdate(profile, input, actor);
     return AdminPlayerProfileView.from(updated);
   }
 
-  /**
-   * Permanent erasure: anonymise the user and every profile they own, mark them
-   * Deleted, revoke sessions. The audit row keeps the original email and name as
-   * the compliance record; everything else reads "Deleted User".
-   */
+  /** GDPR erasure. Owned by UserErasureService; kept here for existing callers. */
   async deleteUser(
     targetUserId: string,
     actor: Principal,
     reason: string,
   ): Promise<UserSummaryDto> {
-    const target = await this.requireUser(targetUserId);
-
-    if (target.role === Role.SuperAdmin) {
-      throw new ForbiddenException({
-        errorCode: ErrorCode.CANNOT_DELETE_SUPER_ADMIN,
-        message: 'Super Admin accounts cannot be deleted.',
-      });
-    }
-    if (target.status === UserStatus.Deleted) {
-      throw new ConflictException({
-        errorCode: ErrorCode.ACCOUNT_DELETED,
-        message: 'This user has already been deleted.',
-      });
-    }
-
-    const now = this.clock.now();
-    const photoPublicId = target.photoPublicId;
-    // Captured before anonymisation: copies living outside `users` can only be
-    // found by the original value.
-    const originalEmail = target.email;
-
-    // Cascades to the children's own logins, which would otherwise stay usable
-    // with the child's name and email intact. Captured before anonymisation, same
-    // reason as `originalEmail` above: each child gets its own compliance record.
-    //
-    // Erasing a child login does not clear `child_user_id`, so an already-erased
-    // child is still listed here. Skipping it is what keeps this idempotent: its
-    // deletion-log row exists, and the unique index on user_id would reject a
-    // second one and roll the parent's erasure back.
-    const childUsers = (
-      await this.usersService.findByIds(await this.playersService.childUserIdsByOwner(target.id))
-    ).filter((u) => u.status !== UserStatus.Deleted);
-    const childUserIds = childUsers.map((u) => u.id);
-    // Each child login has its own address to sweep out of those same copies.
-    const erasedEmails = [originalEmail, ...childUsers.map((u) => u.email)];
-
-    // Profile photos live outside `users` too — captured before anonymisation
-    // wipes the column, same reason as photoPublicId above. Covers deleting a
-    // parent (owned profiles) and deleting a child login directly (the profile
-    // is owned by the parent, so it is found by childUserId instead).
-    const ownedProfiles = await this.playersService.findByOwner(target.id);
-    const childLoginProfile = await this.playersService.findByChildUserId(target.id);
-    const profilePhotoPublicIds = [
-      ...ownedProfiles.map((p) => p.photoPublicId),
-      childLoginProfile?.photoPublicId ?? null,
-    ].filter((id): id is string => id !== null);
-
-    await this.dataSource.transaction(async (manager: EntityManager) => {
-      const deletionLogs = manager.getRepository(UserDeletionLog);
-      const logErasure = (
-        user: User,
-        originalData: Record<string, unknown> | null,
-      ): Promise<UserDeletionLog> =>
-        deletionLogs.save(
-          deletionLogs.create({
-            userId: user.id,
-            originalEmail: user.email,
-            originalFirstName: user.firstName ?? null,
-            originalLastName: user.lastName ?? null,
-            originalPhone: user.phone ?? null,
-            originalRole: user.role,
-            deletedByUserId: actor.userId,
-            reason,
-            deletedAt: now,
-            originalData,
-          }),
-        );
-
-      await logErasure(target, { childUserIds, hadPhoto: photoPublicId !== null });
-      // Each cascaded child login is itself a deleted user under §8's compliance
-      // requirement — the primary target's row alone doesn't cover their address.
-      for (const childUser of childUsers) {
-        await logErasure(childUser, { cascadedFromUserId: target.id });
-      }
-
-      await this.usersService.anonymize(target.id, manager);
-      await this.playersService.anonymizeByOwner(target.id, manager);
-      // A child's profile is owned by the parent, so the owner sweep above never
-      // reaches it when the child's own account is the target.
-      await this.playersService.anonymizeByChildUserId(target.id, manager);
-      // No-op unless the target ever held a coach engagement — clears bio,
-      // credentials and certifications that would otherwise outlive the erasure.
-      await this.coachesService.anonymizeByUserId(target.id, manager);
-      for (const childUserId of childUserIds) {
-        await this.usersService.anonymize(childUserId, manager);
-        await this.playersService.anonymizeByChildUserId(childUserId, manager);
-      }
-
-      // Copies outside `users`, matched on the pre-anonymisation values captured
-      // above rather than rows this transaction has already rewritten.
-      for (const email of erasedEmails) {
-        await this.shareLinks.scrubTargetEmail(email, manager);
-        await this.audit.scrubEmailFromMetadata(email, manager);
-      }
-
-      await this.audit.record(
-        {
-          action: AUDIT_USER_DELETED,
-          actor,
-          targetUserId: target.id,
-          metadata: { reason, childAccountsAnonymized: childUserIds.length },
-        },
-        manager,
-      );
-    });
-
-    await this.authService.revokeAllUserSessions(target.id, 'deleted');
-    for (const childUserId of childUserIds) {
-      await this.authService.revokeAllUserSessions(childUserId, 'parent-deleted');
-    }
-
-    // Outside the transaction: the storage provider is not transactional, and an
-    // outage there must not roll back a recorded erasure.
-    if (photoPublicId !== null) {
-      await discardAsset(this.storage, photoPublicId, this.logger);
-    }
-    for (const publicId of profilePhotoPublicIds) {
-      await discardAsset(this.storage, publicId, this.logger);
-    }
-
-    const updated = await this.requireUser(target.id);
-    return UserSummaryDto.fromEntity(updated);
+    return this.userErasure.deleteUser(targetUserId, actor, reason);
   }
 
   async getUser(targetUserId: string): Promise<AdminUserDetailView> {
@@ -455,9 +311,7 @@ export class AdminService {
       user: UserSummaryDto.fromEntity(user),
       trainer: user.role === Role.Trainer ? await this.trainerViewFor(targetUserId) : null,
       coach:
-        user.role === Role.Coach
-          ? await this.coachesService.findActiveByUserId(targetUserId)
-          : null,
+        user.role === Role.Coach ? await this.coachProfiles.findActiveByUserId(targetUserId) : null,
       player: user.role === Role.PlayerParent ? await this.playerViewFor(targetUserId) : null,
     };
   }
@@ -475,11 +329,17 @@ export class AdminService {
   }
 
   private async requireUser(id: string): Promise<User> {
-    const user = await this.usersService.findById(id);
-    if (!user) {
-      throw new NotFoundException({ errorCode: ErrorCode.NOT_FOUND, message: 'User not found.' });
+    return requireUser(this.usersService, id);
+  }
+
+  /** The target must hold the role whose profile is being edited. */
+  private static requireRole(target: User, role: Role, profileLabel: string): void {
+    if (target.role !== role) {
+      throw new ConflictException({
+        errorCode: ErrorCode.ROLE_MISMATCH,
+        message: `This user does not have a ${profileLabel} profile.`,
+      });
     }
-    return user;
   }
 
   async listUsers(query: ListUsersQueryDto): Promise<PaginatedUsersDto> {

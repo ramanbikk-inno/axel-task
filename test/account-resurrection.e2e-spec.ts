@@ -147,7 +147,7 @@ describe('Deactivated and deleted accounts cannot be resurrected (e2e)', () => {
     const email = 'resend@example.com';
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password: 'Str0ng!Passw0rd', birthDate: '1994-03-22' })
+      .send({ email, password: 'Str0ng!Passw0rd', birthDate: '1994-03-22', firstName: 'Reg' })
       .expect(201);
 
     const user = await ctx.dataSource.getRepository(User).findOne({ where: { email } });
@@ -185,7 +185,7 @@ describe('Deactivated and deleted accounts cannot be resurrected (e2e)', () => {
     const email = 'healthy@example.com';
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password: 'Str0ng!Passw0rd', birthDate: '1994-03-22' })
+      .send({ email, password: 'Str0ng!Passw0rd', birthDate: '1994-03-22', firstName: 'Reg' })
       .expect(201);
 
     const verifyUrl: string = ctx.mailer.sendVerification.mock.calls[0][0].verifyUrl;

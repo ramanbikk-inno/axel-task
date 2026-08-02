@@ -21,7 +21,8 @@ import { RolesGuard } from '../ability/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Principal } from '../auth/principal';
 import { Role } from '../users/entities/user.enums';
-import { CoachesService } from './coaches.service';
+import { CoachInvitationService } from './coach-invitation.service';
+import { CoachProfileService } from './coach-profile.service';
 import {
   AcceptCoachInviteDto,
   CoachInvitationView,
@@ -36,7 +37,10 @@ import {
 @ApiTags('coaches')
 @Controller('coaches')
 export class CoachesController {
-  constructor(private readonly coaches: CoachesService) {}
+  constructor(
+    private readonly invitations: CoachInvitationService,
+    private readonly profiles: CoachProfileService,
+  ) {}
 
   @Post('invitations')
   @HttpCode(201)
@@ -45,7 +49,7 @@ export class CoachesController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: CoachInvitationView })
   async invite(@Body() dto: InviteCoachDto, @Req() req: Request): Promise<CoachInvitationView> {
-    return this.coaches.invite(req.user as Principal, dto);
+    return this.invitations.invite(req.user as Principal, dto);
   }
 
   @Get('invitations')
@@ -55,7 +59,7 @@ export class CoachesController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: [CoachInvitationView] })
   async listInvitations(@Req() req: Request): Promise<CoachInvitationView[]> {
-    return this.coaches.listInvitations(req.user as Principal);
+    return this.invitations.listInvitations(req.user as Principal);
   }
 
   @Get()
@@ -68,7 +72,7 @@ export class CoachesController {
     @Query() query: ListCoachesQueryDto,
     @Req() req: Request,
   ): Promise<CoachView[]> {
-    return this.coaches.listCoaches(req.user as Principal, query.includeInactive ?? false);
+    return this.profiles.listCoaches(req.user as Principal, query.includeInactive ?? false);
   }
 
   /** Resend an invitation whose link expired. */
@@ -83,7 +87,7 @@ export class CoachesController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Req() req: Request,
   ): Promise<CoachInvitationView> {
-    return this.coaches.resendInvitation(req.user as Principal, id);
+    return this.invitations.resendInvitation(req.user as Principal, id);
   }
 
   @Delete('invitations/:id')
@@ -96,7 +100,7 @@ export class CoachesController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Req() req: Request,
   ): Promise<CoachInvitationView> {
-    return this.coaches.revokeInvitation(req.user as Principal, id);
+    return this.invitations.revokeInvitation(req.user as Principal, id);
   }
 
   /** End a coach's engagement. The row survives; the access does not. */
@@ -110,7 +114,7 @@ export class CoachesController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Req() req: Request,
   ): Promise<CoachView> {
-    return this.coaches.offboardCoach(req.user as Principal, id);
+    return this.profiles.offboardCoach(req.user as Principal, id);
   }
 
   /**
@@ -126,7 +130,7 @@ export class CoachesController {
     @Param('trainerProfileId', ParseUUIDPipe) trainerProfileId: string,
     @Req() req: Request,
   ): Promise<PublicCoachView[]> {
-    return this.coaches.listPublicCoaches(req.user as Principal, trainerProfileId);
+    return this.profiles.listPublicCoaches(req.user as Principal, trainerProfileId);
   }
 
   /** A coach edits their own profile. */
@@ -137,7 +141,7 @@ export class CoachesController {
   @ApiBearerAuth()
   @ApiOkResponse({ type: CoachView })
   async getOwnProfile(@Req() req: Request): Promise<CoachView> {
-    return this.coaches.getOwnProfile(req.user as Principal);
+    return this.profiles.getOwnProfile(req.user as Principal);
   }
 
   @Patch('me')
@@ -150,7 +154,7 @@ export class CoachesController {
     @Body() dto: UpdateCoachProfileDto,
     @Req() req: Request,
   ): Promise<CoachView> {
-    return this.coaches.updateOwnProfile(req.user as Principal, dto);
+    return this.profiles.updateOwnProfile(req.user as Principal, dto);
   }
 
   // Public: resolve an invite for the accept page.
@@ -158,7 +162,7 @@ export class CoachesController {
   @HttpCode(200)
   @ApiOkResponse({ type: ResolvedCoachInviteView })
   async resolve(@Param('code') code: string): Promise<ResolvedCoachInviteView> {
-    return this.coaches.resolve(code);
+    return this.invitations.resolve(code);
   }
 
   // Public: a new coach accepts the invitation and sets a password.
@@ -169,6 +173,6 @@ export class CoachesController {
     @Param('code') code: string,
     @Body() dto: AcceptCoachInviteDto,
   ): Promise<{ message: string }> {
-    return this.coaches.accept(code, dto);
+    return this.invitations.accept(code, dto);
   }
 }

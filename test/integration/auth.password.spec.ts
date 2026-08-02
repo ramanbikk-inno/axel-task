@@ -4,6 +4,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource, IsNull } from 'typeorm';
 
 import { AuthService } from '../../src/modules/auth/auth.service';
+import { SingleUseTokenService } from '../../src/modules/auth/single-use-token.service';
+import { AgeGateService } from '../../src/shared/registration/age-gate.service';
 import { ImpersonationLogService } from '../../src/modules/impersonation/impersonation-log.service';
 import { PlayersService } from '../../src/modules/players/players.service';
 import { Principal } from '../../src/modules/auth/principal';
@@ -119,6 +121,8 @@ describe('AuthService password reset & change', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
+        SingleUseTokenService,
+        AgeGateService,
         { provide: getRepositoryToken(User), useValue: repoStub() },
         { provide: getRepositoryToken(AuthSession), useValue: sessions },
         { provide: getRepositoryToken(RefreshToken), useValue: repoStub() },
@@ -203,7 +207,10 @@ describe('AuthService password reset & change', () => {
 
     await service.resetPassword({ token: 'reset-plain', newPassword: 'NewStr0ng!Pass' });
 
-    expect(passwordResets.update).toHaveBeenCalledWith({ id: 'prt-1' }, { consumedAt: NOW });
+    expect(passwordResets.update).toHaveBeenCalledWith(
+      { id: 'prt-1', consumedAt: IsNull() },
+      { consumedAt: NOW },
+    );
     expect(usersService.setPasswordAndBumpVersion).toHaveBeenCalledWith('user-1', 'new-hash');
     expect(sessions.update).toHaveBeenCalledWith(
       { userId: 'user-1', revokedAt: IsNull() },

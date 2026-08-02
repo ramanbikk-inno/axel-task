@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 import { CoachView } from '../../coaches/dto/coach.dto';
+import {
+  PlayerProfileFields,
+  toPlayerProfileFields,
+} from '../../players/dto/player-profile-fields';
 import { EmergencyContact, PlayerProfile } from '../../players/entities/player-profile.entity';
 import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
 import { UserSummaryDto } from './user-summary.dto';
@@ -29,7 +33,7 @@ export class AdminTrainerProfileView {
  * Flat, unlike family's PlayerProfileView: an admin editing surface has no use
  * for the trainer-association list, so it isn't fetched.
  */
-export class AdminPlayerProfileView {
+export class AdminPlayerProfileView implements PlayerProfileFields {
   @ApiProperty() id!: string;
   @ApiProperty() ownerUserId!: string;
   @ApiProperty() displayName!: string;
@@ -40,20 +44,13 @@ export class AdminPlayerProfileView {
   @ApiProperty({ nullable: true }) jerseyNumber!: string | null;
   @ApiProperty({ nullable: true }) skillLevel!: string | null;
   @ApiProperty({ nullable: true }) emergencyContact!: EmergencyContact | null;
+  /** Only ever set for a child profile; an account holder's own is users.photoUrl. */
+  @ApiProperty({ nullable: true }) photoUrl!: string | null;
+  @ApiProperty() allowChildTokenSpendNoApproval!: boolean;
 
   static from(profile: PlayerProfile): AdminPlayerProfileView {
-    return {
-      id: profile.id,
-      ownerUserId: profile.ownerUserId,
-      displayName: profile.displayName,
-      isChild: profile.isChild,
-      birthDate: profile.birthDate,
-      gender: profile.gender,
-      school: profile.school,
-      jerseyNumber: profile.jerseyNumber,
-      skillLevel: profile.skillLevel,
-      emergencyContact: profile.emergencyContact,
-    };
+    // ownerUserId is this view's own addition, not part of the shared field list.
+    return { ...toPlayerProfileFields(profile), ownerUserId: profile.ownerUserId };
   }
 }
 

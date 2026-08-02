@@ -70,7 +70,11 @@ describe('RolesGuard', () => {
     } as unknown as Reflector;
     const guard = new RolesGuard(reflector);
 
-    expect(() => guard.canActivate(buildContext(undefined))).toThrow(ForbiddenException);
+    // Same message as the role mismatch above: the shared extractor must not
+    // leak a different one.
+    expect(() => guard.canActivate(buildContext(undefined))).toThrow(
+      new ForbiddenException('Insufficient role'),
+    );
   });
 
   it('reads metadata from both handler and class via ROLES_KEY', () => {

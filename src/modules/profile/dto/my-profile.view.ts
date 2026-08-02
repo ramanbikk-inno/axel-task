@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 import { EmergencyContact, PlayerProfile } from '../../players/entities/player-profile.entity';
+import {
+  PlayerProfileFields,
+  toPlayerProfileFields,
+} from '../../players/dto/player-profile-fields';
 import { TrainerProfile } from '../../trainers/entities/trainer-profile.entity';
 import { User } from '../../users/entities/user.entity';
 import { Role, UserStatus } from '../../users/entities/user.enums';
@@ -12,7 +16,7 @@ class TrainerProfileView {
   @ApiProperty({ nullable: true }) description!: string | null;
 }
 
-class SelfPlayerProfileView {
+class SelfPlayerProfileView implements PlayerProfileFields {
   @ApiProperty() id!: string;
   @ApiProperty() displayName!: string;
   @ApiProperty({ nullable: true }) school!: string | null;
@@ -30,6 +34,9 @@ class SelfPlayerProfileView {
 
   /** Only ever set on a child profile — see the entity's photoUrl. */
   @ApiProperty({ nullable: true }) photoUrl!: string | null;
+
+  /** Only meaningful for a child profile. Default OFF — see US-01.05. */
+  @ApiProperty() allowChildTokenSpendNoApproval!: boolean;
 }
 
 /** Aggregated self-profile: editable common fields + role-specific profile. */
@@ -78,20 +85,7 @@ export class MyProfileView {
             description: trainer.description,
           }
         : null,
-      player: player
-        ? {
-            id: player.id,
-            displayName: player.displayName,
-            school: player.school,
-            jerseyNumber: player.jerseyNumber,
-            gender: player.gender,
-            birthDate: player.birthDate,
-            isChild,
-            skillLevel: player.skillLevel,
-            emergencyContact: player.emergencyContact,
-            photoUrl: player.photoUrl,
-          }
-        : null,
+      player: player ? { ...toPlayerProfileFields(player), isChild } : null,
     };
   }
 }

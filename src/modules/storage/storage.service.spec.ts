@@ -1,7 +1,14 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 
-import { CloudinaryStorageService, MAX_EDGE_PX } from './storage.service';
+import { replaceStoredAsset } from './replace-asset';
+import {
+  CloudinaryStorageService,
+  MAX_EDGE_PX,
+  StorageService,
+  StorageUploadResult,
+} from './storage.service';
 
 jest.mock('cloudinary', () => ({
   v2: {
@@ -121,5 +128,145 @@ describe('CloudinaryStorageService', () => {
     destroyMock.mockRejectedValue(new Error('gone'));
 
     await expect(service('cloudinary://k:s@demo').delete('logos/abc')).resolves.toBeUndefined();
+  });
+});
+
+const NEW_ASSET: StorageUploadResult = { url: 'https://cdn/new.png', publicId: 'avatars/new' };
+const UPLOAD = { buffer: PNG, fileName: 'new.png', mimeType: 'image/png', folder: 'avatars' };
+
+describe('replaceStoredAsset', () => {
+  let calls: string[];
+  let storage: StorageService;
+  let logger: Logger;
+
+  beforeEach(() => {
+    calls = [];
+    storage = {
+      upload: jest.fn(async () => {
+        calls.push('upload');
+        return NEW_ASSET;
+      }),
+      delete: jest.fn(async () => {
+        calls.push('delete');
+      }),
+    };
+    logger = { warn: jest.fn() } as unknown as Logger;
+  });
+
+  const persistSpy = (): jest.Mock =>
+    jest.fn(async () => {
+      calls.push('persist');
+      return 'row';
+    });
+
+  it('uploads, persists, then discards the previous asset — in that order', async () => {
+    const persist = persistSpy();
+
+    const result = await replaceStoredAsset({
+      storage,
+      logger,
+      previousPublicId: 'avatars/old',
+      upload: UPLOAD,
+      persist,
+    });
+
+    expect(calls).toEqual(['upload', 'persist', 'delete']);
+    expect(persist).toHaveBeenCalledWith(NEW_ASSET);
+    expect(storage.delete).toHaveBeenCalledWith('avatars/old');
+    expect(result).toEqual({ persisted: 'row', stored: NEW_ASSET });
+  });
+
+  it('has nothing to discard on a first upload', async () => {
+    await replaceStoredAsset({
+      storage,
+      logger,
+      previousPublicId: null,
+      upload: UPLOAD,
+      persist: persistSpy(),
+    });
+
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it('keeps the asset when the upload reused the same publicId', async () => {
+    await replaceStoredAsset({
+      storage,
+      logger,
+      previousPublicId: NEW_ASSET.publicId,
+      upload: UPLOAD,
+      persist: persistSpy(),
+    });
+
+    // The bytes were replaced in place; deleting would remove what the row now
+    // points at.
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it('clears the row without uploading, then discards the previous asset', async () => {
+    const persist = persistSpy();
+
+    const result = await replaceStoredAsset({
+      storage,
+      logger,
+      previousPublicId: 'avatars/old',
+      persist,
+    });
+
+    expect(storage.upload).not.toHaveBeenCalled();
+    expect(calls).toEqual(['persist', 'delete']);
+    expect(persist).toHaveBeenCalledWith(null);
+    expect(storage.delete).toHaveBeenCalledWith('avatars/old');
+    expect(result.stored).toBeNull();
+  });
+
+  it('leaves the previous asset in place when persisting fails', async () => {
+    // Orphaning the new upload is the accepted cost; deleting the old one would
+    // leave the row pointing at nothing.
+    await expect(
+      replaceStoredAsset({
+        storage,
+        logger,
+        previousPublicId: 'avatars/old',
+        upload: UPLOAD,
+        persist: async () => {
+          throw new Error('db down');
+        },
+      }),
+    ).rejects.toThrow('db down');
+
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it('never persists or discards when the upload fails', async () => {
+    (storage.upload as jest.Mock).mockRejectedValue(new Error('provider down'));
+    const persist = persistSpy();
+
+    await expect(
+      replaceStoredAsset({
+        storage,
+        logger,
+        previousPublicId: 'avatars/old',
+        upload: UPLOAD,
+        persist,
+      }),
+    ).rejects.toThrow('provider down');
+
+    expect(persist).not.toHaveBeenCalled();
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the request when the discard fails', async () => {
+    (storage.delete as jest.Mock).mockRejectedValue(new Error('gone'));
+
+    await expect(
+      replaceStoredAsset({
+        storage,
+        logger,
+        previousPublicId: 'avatars/old',
+        upload: UPLOAD,
+        persist: persistSpy(),
+      }),
+    ).resolves.toMatchObject({ persisted: 'row' });
+    expect(logger.warn).toHaveBeenCalled();
   });
 });

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { repoFor } from '../../shared/database/repo-for';
 import { Principal } from '../auth/principal';
 import { AuditLog } from './entities/audit-log.entity';
 
@@ -78,8 +79,7 @@ export class AuditService {
     row: Omit<AuditLog, 'id' | 'createdAt'>,
     manager?: EntityManager,
   ): Promise<AuditLog> {
-    const repository: Repository<AuditLog> =
-      manager !== undefined ? manager.getRepository(AuditLog) : this.auditRepository;
+    const repository = repoFor(this.auditRepository, AuditLog, manager);
     return repository.save(repository.create({ ...row, createdAt: this.clock.now() }));
   }
 
@@ -88,21 +88,12 @@ export class AuditService {
    * touched — the rest of the row is the compliance record and must survive.
    */
   async scrubEmailFromMetadata(email: string, manager?: EntityManager): Promise<void> {
-    const repository: Repository<AuditLog> =
-      manager !== undefined ? manager.getRepository(AuditLog) : this.auditRepository;
-    await repository
+    await repoFor(this.auditRepository, AuditLog, manager)
       .createQueryBuilder()
       .update(AuditLog)
       .set({ metadata: () => `jsonb_set("metadata", '{email}', '"[redacted]"')` })
       .where(`LOWER("metadata" ->> 'email') = LOWER(:email)`, { email })
       .execute();
-  }
-
-  async findByTarget(targetUserId: string): Promise<AuditLog[]> {
-    return this.auditRepository.find({
-      where: { targetUserId },
-      order: { createdAt: 'DESC' },
-    });
   }
 
   /** Everything recorded during a set of impersonation sessions, oldest first. */

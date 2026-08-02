@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 
 import { ClockService } from '../../shared/clock/clock.service';
+import { repoFor } from '../../shared/database/repo-for';
 import {
   AssociationStatus,
   TrainerPlayerAssociation,
@@ -27,18 +28,14 @@ export class AssociationsService {
     private readonly clock: ClockService,
   ) {}
 
-  private repo(manager?: EntityManager): Repository<TrainerPlayerAssociation> {
-    return manager !== undefined
-      ? manager.getRepository(TrainerPlayerAssociation)
-      : this.associations;
-  }
-
   async find(
     trainerProfileId: string,
     playerProfileId: string,
     manager?: EntityManager,
   ): Promise<TrainerPlayerAssociation | null> {
-    return this.repo(manager).findOne({ where: { trainerProfileId, playerProfileId } });
+    return repoFor(this.associations, TrainerPlayerAssociation, manager).findOne({
+      where: { trainerProfileId, playerProfileId },
+    });
   }
 
   /**
@@ -55,13 +52,15 @@ export class AssociationsService {
         if (input.shareLinkId) {
           existing.shareLinkId = input.shareLinkId;
         }
-        const saved = await this.repo(manager).save(existing);
+        const saved = await repoFor(this.associations, TrainerPlayerAssociation, manager).save(
+          existing,
+        );
         return { association: saved, created: false };
       }
       return { association: existing, created: false };
     }
 
-    const repository = this.repo(manager);
+    const repository = repoFor(this.associations, TrainerPlayerAssociation, manager);
     const created = repository.create({
       trainerProfileId: input.trainerProfileId,
       playerProfileId: input.playerProfileId,
@@ -88,12 +87,12 @@ export class AssociationsService {
       return null;
     }
     existing.status = status;
-    return this.repo(manager).save(existing);
+    return repoFor(this.associations, TrainerPlayerAssociation, manager).save(existing);
   }
 
   /** Player profiles connected to a trainer's organization. */
   async findByTrainer(trainerProfileId: string): Promise<TrainerPlayerAssociation[]> {
-    return this.repo().find({
+    return this.associations.find({
       where: { trainerProfileId },
       order: { connectedAt: 'DESC' },
     });
@@ -104,7 +103,7 @@ export class AssociationsService {
     if (playerProfileIds.length === 0) {
       return [];
     }
-    return this.repo()
+    return this.associations
       .createQueryBuilder('a')
       .where('a.player_profile_id IN (:...ids)', { ids: playerProfileIds })
       .orderBy('a.connected_at', 'DESC')
