@@ -68,6 +68,10 @@ function buildMockMailer(): jest.Mocked<Mailer> {
     sendCoachInvite: jest.fn(),
     sendChildJoinRequest: jest.fn(),
     sendCoachAvailabilityOverride: jest.fn(),
+    sendPurchaseApprovalRequest: jest.fn(),
+    sendChildPurchaseNotice: jest.fn(),
+    sendPurchaseDecision: jest.fn(),
+    sendCampShareLink: jest.fn(),
   } as unknown as jest.Mocked<Mailer>;
 }
 
@@ -93,6 +97,11 @@ export async function bootstrapE2E(): Promise<E2EContext> {
   process.env.DB_USER = container.getUsername();
   process.env.DB_PASSWORD = container.getPassword();
   process.env.DB_NAME = container.getDatabase();
+  // The production default is sized for one instance serving real traffic. Jest
+  // runs suites in parallel workers, each booting its own app and its own
+  // container, so that default multiplies into far more connections and
+  // containers than the host can carry — suites then time out rather than fail.
+  process.env.DB_POOL_SIZE = '5';
 
   const { AppDataSource } = await import('../src/shared/database/data-source');
   const migrationDataSource: DataSource = AppDataSource;

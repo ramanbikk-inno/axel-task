@@ -128,6 +128,67 @@ export class ResendMailer implements Mailer {
     );
   }
 
+  async sendPurchaseApprovalRequest(input: {
+    to: string;
+    childName: string;
+    eventTitle: string;
+    amountLabel: string;
+    expiresAt: string;
+  }): Promise<void> {
+    const childName = escapeHtml(input.childName);
+    await this.send(
+      input.to,
+      `${input.childName} needs your approval to book a session`,
+      `<p>${childName} would like to book ${escapeHtml(input.eventTitle)} for ${escapeHtml(input.amountLabel)}.</p>` +
+        `<p>Approve or decline it from your account. If nobody answers by ${escapeHtml(input.expiresAt)}, the request is declined automatically.</p>`,
+    );
+  }
+
+  async sendChildPurchaseNotice(input: {
+    to: string;
+    childName: string;
+    eventTitle: string;
+    amountLabel: string;
+  }): Promise<void> {
+    const childName = escapeHtml(input.childName);
+    await this.send(
+      input.to,
+      `${input.childName} booked a session with tokens`,
+      `<p>${childName} booked ${escapeHtml(input.eventTitle)} for ${escapeHtml(input.amountLabel)}.</p>` +
+        `<p>This is for your information only — you allow ${childName} to spend tokens without approval. You can change that in their profile settings.</p>`,
+    );
+  }
+
+  async sendPurchaseDecision(input: {
+    to: string;
+    childName: string;
+    eventTitle: string;
+    decision: string;
+    notes?: string;
+  }): Promise<void> {
+    const decided = input.decision === 'approved' ? 'approved' : 'not approved';
+    await this.send(
+      input.to,
+      `Your request for ${input.eventTitle} was ${decided}`,
+      `<p>Your request to book ${escapeHtml(input.eventTitle)} was ${escapeHtml(decided)}.</p>` +
+        (input.notes ? `<p>Note from your parent: ${escapeHtml(input.notes)}</p>` : ''),
+    );
+  }
+
+  async sendCampShareLink(input: {
+    to: string;
+    firstName: string;
+    trainerName: string;
+    joinUrl: string;
+  }): Promise<void> {
+    await this.send(
+      input.to,
+      `Finish signing up with ${input.trainerName}`,
+      `<p>Hi ${escapeHtml(input.firstName)}, thanks for filling in the form.</p>` +
+        `<p>When you are ready, <a href="${input.joinUrl}">create your account</a> to see ${escapeHtml(input.trainerName)}'s sessions.</p>`,
+    );
+  }
+
   private async send(to: string, subject: string, html: string): Promise<void> {
     const { error } = await this.getClient().emails.send({
       from: this.from,

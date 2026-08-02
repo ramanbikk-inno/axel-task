@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
 
+import { DB_POOL_SIZE_DEFAULT } from '../config/env.validation';
+
 @Module({
   imports: [
     TypeOrmModule.forRootAsync({
@@ -19,6 +21,9 @@ import { TypeOrmModule, TypeOrmModuleOptions } from '@nestjs/typeorm';
         entities: [__dirname + '/../../**/*.entity.{ts,js}'],
         migrations: [__dirname + '/migrations/*.{ts,js}'],
         migrationsRun: false,
+        // Left unset, node-postgres caps the pool at 10 and the API queues
+        // behind it well before the database is the bottleneck.
+        extra: { max: config.get<number>('DB_POOL_SIZE') ?? DB_POOL_SIZE_DEFAULT },
       }),
     }),
   ],

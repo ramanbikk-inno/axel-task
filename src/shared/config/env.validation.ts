@@ -9,6 +9,15 @@ export const MIN_SELF_REGISTRATION_AGE_DEFAULT = 18;
 /** How long a session may sit unrefreshed before it is treated as abandoned. */
 export const SESSION_IDLE_TIMEOUT_DEFAULT = '24h';
 
+/**
+ * Postgres connections per instance. The driver default is 10, which throttles
+ * concurrency long before the database does: every authenticated request takes
+ * two indexed reads to revalidate its session, so a pool of 10 caps throughput
+ * far under the 1,000-concurrent-user target. Sized per instance — multiply by
+ * the instance count and keep the product under the server's max_connections.
+ */
+export const DB_POOL_SIZE_DEFAULT = 40;
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -18,6 +27,7 @@ export const envSchema = z.object({
   DB_USER: z.string().min(1),
   DB_PASSWORD: z.string().min(1),
   DB_NAME: z.string().min(1),
+  DB_POOL_SIZE: z.coerce.number().int().positive().default(DB_POOL_SIZE_DEFAULT),
 
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),

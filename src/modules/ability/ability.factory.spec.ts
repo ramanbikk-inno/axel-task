@@ -302,10 +302,30 @@ describe('AbilityFactory', () => {
       ).toBe(false);
     });
 
-    it('cannot purchase or approve', () => {
+    it('can raise a purchase request against its own profile', () => {
+      // Asking is the whole point of the approval flow; deciding is not.
+      expect(
+        childAbility().can(Action.Create, {
+          __type: 'PurchaseApproval',
+          childPlayerProfileId: CHILD,
+        }),
+      ).toBe(true);
+    });
+
+    it('cannot raise a request against a sibling', () => {
+      expect(
+        childAbility().can(Action.Create, {
+          __type: 'PurchaseApproval',
+          childPlayerProfileId: SIBLING,
+        }),
+      ).toBe(false);
+    });
+
+    it('cannot answer a purchase request, its own included', () => {
       const ability = childAbility();
-      expect(ability.can(Action.Create, 'PurchaseApproval')).toBe(false);
-      expect(ability.can(Action.Update, 'PurchaseApproval')).toBe(false);
+      const own = { __type: 'PurchaseApproval', childPlayerProfileId: CHILD };
+      expect(ability.can(Action.Update, own)).toBe(false);
+      expect(ability.can(Action.Delete, own)).toBe(false);
     });
 
     it.each(['User', 'ShareLink', 'CoachProfile'] as const)('cannot manage %s', (subject) => {

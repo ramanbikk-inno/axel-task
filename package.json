@@ -17,7 +17,8 @@
     "migration:generate": "typeorm-ts-node-commonjs migration:generate -d src/shared/database/data-source.ts",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/shared/database/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/shared/database/data-source.ts",
-    "seed:super-admin": "ts-node src/database/seeds/seed-super-admin.ts"
+    "seed:super-admin": "ts-node src/database/seeds/seed-super-admin.ts",
+    "test:load": "node test/load/concurrent-users.mjs"
   },
   "dependencies": {
     "@casl/ability": "6.7.1",

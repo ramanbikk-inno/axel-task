@@ -48,6 +48,29 @@ export enum ErrorCode {
   ROLE_MISMATCH = 'ROLE_MISMATCH',
   FILE_TOO_LARGE = 'FILE_TOO_LARGE',
   UNSUPPORTED_FILE_TYPE = 'UNSUPPORTED_FILE_TYPE',
+
+  EVENT_NOT_FOUND = 'EVENT_NOT_FOUND',
+  /** The coach already holds an assignment on this event. */
+  COACH_ALREADY_ASSIGNED = 'COACH_ALREADY_ASSIGNED',
+  /**
+   * The coach is not free for the event's window. Recoverable: the trainer may
+   * repeat the call with an override reason.
+   */
+  COACH_UNAVAILABLE = 'COACH_UNAVAILABLE',
+  ASSIGNMENT_NOT_FOUND = 'ASSIGNMENT_NOT_FOUND',
+
+  APPROVAL_NOT_FOUND = 'APPROVAL_NOT_FOUND',
+  /** Already approved, denied or expired — a decision cannot be revisited. */
+  APPROVAL_NOT_PENDING = 'APPROVAL_NOT_PENDING',
+  /** The 48-hour window closed before the parent acted. */
+  APPROVAL_EXPIRED = 'APPROVAL_EXPIRED',
+  /** Token spend the child may make unattended still needs the setting on. */
+  APPROVAL_REQUIRED = 'APPROVAL_REQUIRED',
+
+  SUBMISSION_NOT_FOUND = 'SUBMISSION_NOT_FOUND',
+  /** The submission already became an account; it cannot convert twice. */
+  SUBMISSION_ALREADY_CONVERTED = 'SUBMISSION_ALREADY_CONVERTED',
+
   NOT_FOUND = 'NOT_FOUND',
   INTERNAL_ERROR = 'INTERNAL_ERROR',
 }

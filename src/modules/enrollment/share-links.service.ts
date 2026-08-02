@@ -93,6 +93,18 @@ export class ShareLinksService {
   }
 
   /**
+   * A trainer's live player link, for flows that have the trainer but not a
+   * code — converting a camp submission, or mailing one out. Oldest first, so
+   * repeat calls keep landing on the same link rather than rotating.
+   */
+  async findActivePlayerLink(trainerProfileId: string): Promise<ShareLink | null> {
+    return this.links.findOne({
+      where: { trainerProfileId, type: ShareLinkType.PlayerStatic, active: true },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
+  /**
    * Generate a static player ShareLink for the calling trainer.
    *
    * Player links only. Coach invites are single-use, 7-day and bound to a

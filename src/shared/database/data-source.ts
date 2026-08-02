@@ -2,6 +2,8 @@ import { config as loadDotenv } from 'dotenv';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { PostgresConnectionOptions } from 'typeorm/driver/postgres/PostgresConnectionOptions';
 
+import { DB_POOL_SIZE_DEFAULT } from '../config/env.validation';
+
 loadDotenv();
 
 const baseOptions: PostgresConnectionOptions = {
@@ -11,6 +13,9 @@ const baseOptions: PostgresConnectionOptions = {
   username: process.env.DB_USER ?? 'axel',
   password: process.env.DB_PASSWORD ?? 'axel',
   database: process.env.DB_NAME ?? 'axel',
+  // Matches DatabaseModule; see DB_POOL_SIZE_DEFAULT for why the driver's 10
+  // is too low. Read from env directly — this file runs outside Nest's DI.
+  extra: { max: Number(process.env.DB_POOL_SIZE ?? DB_POOL_SIZE_DEFAULT) },
   synchronize: false,
   logging: false,
   entities: [__dirname + '/../../**/*.entity.{ts,js}'],

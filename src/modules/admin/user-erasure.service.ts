@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { CoachProfileService } from '../coaches/coach-profile.service';
+import { CampSubmissionsService } from '../enrollment/camp-submissions.service';
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayersService } from '../players/players.service';
 import { discardAsset } from '../storage/discard-asset';
@@ -40,6 +41,7 @@ export class UserErasureService {
     private readonly clock: ClockService,
     private readonly coachProfiles: CoachProfileService,
     private readonly trainers: TrainersService,
+    private readonly campSubmissions: CampSubmissionsService,
   ) {}
 
   /**
@@ -152,6 +154,9 @@ export class UserErasureService {
       for (const email of erasedEmails) {
         await this.shareLinks.scrubTargetEmail(email, manager);
         await this.audit.scrubEmailFromMetadata(email, manager);
+        // A camp form the person filled in before they had an account still
+        // carries their name, address, phone and date of birth.
+        await this.campSubmissions.scrubByEmail(email, manager);
       }
 
       await this.audit.record(

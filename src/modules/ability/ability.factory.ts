@@ -64,6 +64,9 @@ export class AbilityFactory {
     const ownAssociations: MongoQuery = {
       playerProfileId: principal.childPlayerProfileId,
     } as MongoQuery;
+    const ownRequests: MongoQuery = {
+      childPlayerProfileId: principal.childPlayerProfileId,
+    } as MongoQuery;
 
     // "View own training progress", "Update basic profile info".
     can(Action.Read, 'PlayerProfile', ownProfile);
@@ -87,9 +90,12 @@ export class AbilityFactory {
     cannot(Action.Manage, 'User');
     cannot(Action.Manage, 'ShareLink');
     cannot(Action.Manage, 'CoachProfile');
-    // "Purchase tokens", "Complete purchases without parent approval".
-    cannot(Action.Create, 'PurchaseApproval');
+    // A child may raise a request against their own profile — that is the whole
+    // point of the approval flow. What they may never do is answer one, which
+    // is what "Complete purchases without parent approval" forbids.
+    can(Action.Create, 'PurchaseApproval', ownRequests);
     cannot(Action.Update, 'PurchaseApproval');
+    cannot(Action.Delete, 'PurchaseApproval');
   }
 
   createForPrincipal(principal: Principal): AppAbility {
