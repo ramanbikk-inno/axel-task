@@ -138,7 +138,9 @@ export class RecordCoachOverrideDto {
   coachProfileId!: string;
 
   @ApiPropertyOptional({
-    description: 'The event being scheduled. Optional until Epic-02 introduces events.',
+    description:
+      'The event being scheduled. Optional: a trainer may record an override while planning, ' +
+      'before the session exists.',
   })
   @IsOptional()
   @IsUUID()

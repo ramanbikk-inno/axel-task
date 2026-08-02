@@ -80,4 +80,68 @@ export class MailService {
   ): Promise<void> {
     await this.mailer.sendCoachAvailabilityOverride({ to, ...input });
   }
+
+  /** Cents render as money; tokens render as a count. */
+  private static amountLabel(amount: number, paymentType: string): string {
+    return paymentType === 'usd'
+      ? `$${(amount / 100).toFixed(2)}`
+      : `${amount} token${amount === 1 ? '' : 's'}`;
+  }
+
+  async sendPurchaseApprovalRequestEmail(
+    to: string,
+    input: {
+      childName: string;
+      eventTitle: string;
+      amount: number;
+      paymentType: string;
+      expiresAt: Date;
+    },
+  ): Promise<void> {
+    await this.mailer.sendPurchaseApprovalRequest({
+      to,
+      childName: input.childName,
+      eventTitle: input.eventTitle,
+      amountLabel: MailService.amountLabel(input.amount, input.paymentType),
+      expiresAt: input.expiresAt.toISOString(),
+    });
+  }
+
+  async sendChildPurchaseNoticeEmail(
+    to: string,
+    input: { childName: string; eventTitle: string; amount: number; paymentType: string },
+  ): Promise<void> {
+    await this.mailer.sendChildPurchaseNotice({
+      to,
+      childName: input.childName,
+      eventTitle: input.eventTitle,
+      amountLabel: MailService.amountLabel(input.amount, input.paymentType),
+    });
+  }
+
+  async sendPurchaseDecisionEmail(
+    to: string,
+    input: { childName: string; eventTitle: string; status: string; notes: string | null },
+  ): Promise<void> {
+    await this.mailer.sendPurchaseDecision({
+      to,
+      childName: input.childName,
+      eventTitle: input.eventTitle,
+      decision: input.status,
+      notes: input.notes ?? undefined,
+    });
+  }
+
+  /** Sends a trainer's player ShareLink to someone who submitted a camp form. */
+  async sendCampShareLinkEmail(
+    to: string,
+    input: { firstName: string; trainerName: string; code: string },
+  ): Promise<void> {
+    await this.mailer.sendCampShareLink({
+      to,
+      firstName: input.firstName,
+      trainerName: input.trainerName,
+      joinUrl: `${this.appUrl}/join/${input.code}`,
+    });
+  }
 }

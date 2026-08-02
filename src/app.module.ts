@@ -21,6 +21,8 @@ import { FamilyModule } from './modules/family/family.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { CoachesModule } from './modules/coaches/coaches.module';
 import { AvailabilityModule } from './modules/availability/availability.module';
+import { EventsModule } from './modules/events/events.module';
+import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { AuthThrottlerGuard } from './modules/auth/guards/auth-throttler.guard';
 import { identityTracker, ipTracker } from './modules/auth/guards/throttle-trackers';
 
@@ -44,6 +46,8 @@ import { identityTracker, ipTracker } from './modules/auth/guards/throttle-track
     ProfileModule,
     CoachesModule,
     AvailabilityModule,
+    EventsModule,
+    ApprovalsModule,
     /**
      * Two buckets, both of which must pass. `default` keys on IP + email and
      * stops targeted brute force; `ip` keys on IP alone and stops spraying,

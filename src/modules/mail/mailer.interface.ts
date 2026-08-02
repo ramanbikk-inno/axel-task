@@ -28,4 +28,34 @@ export interface Mailer {
     endTime: string;
     reason: string;
   }): Promise<void>;
+  /** A child's purchase is waiting on the parent, and expires in 48 hours. */
+  sendPurchaseApprovalRequest(input: {
+    to: string;
+    childName: string;
+    eventTitle: string;
+    amountLabel: string;
+    expiresAt: string;
+  }): Promise<void>;
+  /** Token spend the parent already permitted: informational, not a request. */
+  sendChildPurchaseNotice(input: {
+    to: string;
+    childName: string;
+    eventTitle: string;
+    amountLabel: string;
+  }): Promise<void>;
+  /** The answer, to the child who asked. */
+  sendPurchaseDecision(input: {
+    to: string;
+    childName: string;
+    eventTitle: string;
+    decision: string;
+    notes?: string;
+  }): Promise<void>;
+  /** A camp submitter who has not registered yet, sent their ShareLink. */
+  sendCampShareLink(input: {
+    to: string;
+    firstName: string;
+    trainerName: string;
+    joinUrl: string;
+  }): Promise<void>;
 }

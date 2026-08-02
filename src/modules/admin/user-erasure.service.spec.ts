@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { Principal } from '../auth/principal';
 import { CoachProfileService } from '../coaches/coach-profile.service';
+import { CampSubmissionsService } from '../enrollment/camp-submissions.service';
 import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
@@ -82,6 +83,7 @@ interface Mocks {
   coachAnonymizeByUserId: jest.Mock;
   trainerAnonymizeByUserId: jest.Mock;
   trainerFindByUserId: jest.Mock;
+  scrubCampSubmissions: jest.Mock;
   deletionLogCreate: jest.Mock;
   deletionLogSave: jest.Mock;
 }
@@ -122,6 +124,11 @@ function build(): Mocks {
   const scrubTargetEmail = jest.fn().mockResolvedValue(undefined);
   const shareLinks = { scrubTargetEmail } as unknown as ShareLinksService;
 
+  const scrubCampSubmissions = jest.fn().mockResolvedValue(undefined);
+  const campSubmissions = {
+    scrubByEmail: scrubCampSubmissions,
+  } as unknown as CampSubmissionsService;
+
   const storageDelete = jest.fn().mockResolvedValue(undefined);
   const storage = { delete: storageDelete } as unknown as StorageService;
 
@@ -158,6 +165,7 @@ function build(): Mocks {
     clock,
     coachProfiles,
     trainers,
+    campSubmissions,
   );
 
   return {
@@ -181,6 +189,7 @@ function build(): Mocks {
     coachAnonymizeByUserId,
     trainerAnonymizeByUserId,
     trainerFindByUserId,
+    scrubCampSubmissions,
     deletionLogCreate,
     deletionLogSave,
   };

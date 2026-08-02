@@ -39,6 +39,6 @@ import { CoachAvailabilityOverride } from './entities/coach-availability-overrid
     CoachOverridesController,
   ],
   providers: [AvailabilityService, CoachOverridesService, CoachLookupService],
-  exports: [AvailabilityService, CoachOverridesService],
+  exports: [AvailabilityService, CoachOverridesService, CoachLookupService],
 })
 export class AvailabilityModule {}
