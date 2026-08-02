@@ -17,6 +17,7 @@ export interface CreateShareLinkInput {
   type: ShareLinkType;
   createdByUserId: string;
   targetEmail?: string | null;
+  targetName?: string | null;
   expiresAt?: Date | null;
   maxUses?: number | null;
 }
@@ -58,6 +59,7 @@ export class ShareLinksService {
       code: this.generateCode(),
       type: input.type,
       targetEmail: input.targetEmail ?? null,
+      targetName: input.targetName ?? null,
       expiresAt: input.expiresAt ?? null,
       maxUses: input.maxUses ?? null,
       useCount: 0,
@@ -257,7 +259,8 @@ export class ShareLinksService {
     await repoFor(this.links, ShareLink, manager)
       .createQueryBuilder()
       .update(ShareLink)
-      .set({ targetEmail: null, active: false })
+      // targetName goes with it: an invitee's name is PII on the same row.
+      .set({ targetEmail: null, targetName: null, active: false })
       .where('LOWER("target_email") = LOWER(:email)', { email })
       .execute();
   }

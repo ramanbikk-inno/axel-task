@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 
+import { UserStatus } from '../../users/entities/user.enums';
 import { AssociationStatus } from '../entities/trainer-player-association.entity';
 
 /**
@@ -26,6 +27,14 @@ export class RosterEntryView {
   @ApiPropertyOptional({ nullable: true }) accountEmail!: string | null;
   @ApiPropertyOptional({ nullable: true }) accountName!: string | null;
   @ApiPropertyOptional({ nullable: true }) accountPhone!: string | null;
+
+  /**
+   * The account's own status, distinct from `status` below, which is the
+   * association. A Super Admin deactivation does not touch the association, so
+   * without this the CRM has nothing to gray the row out by.
+   */
+  @ApiPropertyOptional({ enum: UserStatus, nullable: true })
+  accountStatus!: UserStatus | null;
 
   @ApiProperty({ enum: AssociationStatus }) status!: AssociationStatus;
   @ApiProperty() connectedAt!: Date;

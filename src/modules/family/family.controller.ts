@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -27,6 +28,7 @@ import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
 import { FamilyContextView } from './dto/family-context.view';
 import { PlayerProfileView } from './dto/player-profile.view';
+import { SimilarChildrenQueryDto, SimilarChildrenView } from './dto/similar-children.dto';
 import { FamilyService } from './family.service';
 
 @ApiTags('family')
@@ -51,6 +53,19 @@ export class FamilyController {
   async context(@Req() req: Request): Promise<FamilyContextView> {
     const principal = req.user as Principal;
     return this.family.getContext(principal);
+  }
+
+  /** Preflight for the add-child form: warn on look-alikes before submitting. */
+  @Get('children/similar')
+  @HttpCode(200)
+  @UseGuards(NotAChildGuard)
+  @ApiOkResponse({ type: SimilarChildrenView })
+  async similarChildren(
+    @Query() query: SimilarChildrenQueryDto,
+    @Req() req: Request,
+  ): Promise<SimilarChildrenView> {
+    const principal = req.user as Principal;
+    return this.family.findSimilarChildren(principal.userId, query);
   }
 
   @Post('children')

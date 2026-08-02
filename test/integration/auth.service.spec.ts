@@ -244,6 +244,7 @@ describe('AuthService (login + register)', () => {
     const result = await service.register({
       email: 'fresh@example.com',
       password: 'Str0ng!Passw0rd',
+      firstName: 'Reg',
       birthDate: '1994-03-22',
     });
 
@@ -267,6 +268,7 @@ describe('AuthService (login + register)', () => {
     const result = await service.register({
       email: 'player@example.com',
       password: 'Str0ng!Passw0rd',
+      firstName: 'Reg',
       birthDate: '1994-03-22',
     });
 
@@ -283,6 +285,7 @@ describe('AuthService (login + register)', () => {
     await service.register({
       email: 'fresh@example.com',
       password: 'Str0ng!Passw0rd',
+      firstName: 'Reg',
       birthDate: '1994-03-22',
     });
 
@@ -296,6 +299,7 @@ describe('AuthService (login + register)', () => {
     await service.register({
       email: 'player@example.com',
       password: 'Str0ng!Passw0rd',
+      firstName: 'Reg',
       birthDate: '1994-03-22',
     });
 

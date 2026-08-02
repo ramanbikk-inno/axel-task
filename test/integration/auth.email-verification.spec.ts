@@ -142,6 +142,7 @@ describe('AuthService email verification', () => {
     const result = await service.register({
       email: 'new@example.com',
       password: 'Str0ng!Passw0rd',
+      firstName: 'Reg',
       birthDate: '1994-03-22',
     });
 
@@ -168,6 +169,7 @@ describe('AuthService email verification', () => {
     const result = await service.register({
       email: 'taken@example.com',
       password: 'Str0ng!Passw0rd',
+      firstName: 'Reg',
       birthDate: '1994-03-22',
     });
 

@@ -11,6 +11,7 @@ import { ShareLinksService } from '../enrollment/share-links.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
 import { StorageService } from '../storage/storage.service';
+import { TrainersService } from '../trainers/trainers.service';
 import { User } from '../users/entities/user.entity';
 import { Role, UserStatus } from '../users/entities/user.enums';
 import { UsersService } from '../users/users.service';
@@ -79,6 +80,8 @@ interface Mocks {
   scrubTargetEmail: jest.Mock;
   storageDelete: jest.Mock;
   coachAnonymizeByUserId: jest.Mock;
+  trainerAnonymizeByUserId: jest.Mock;
+  trainerFindByUserId: jest.Mock;
   deletionLogCreate: jest.Mock;
   deletionLogSave: jest.Mock;
 }
@@ -129,6 +132,13 @@ function build(): Mocks {
     anonymizeByUserId: coachAnonymizeByUserId,
   } as unknown as CoachProfileService;
 
+  const trainerAnonymizeByUserId = jest.fn().mockResolvedValue(undefined);
+  const trainerFindByUserId = jest.fn().mockResolvedValue(null);
+  const trainers = {
+    anonymizeByUserId: trainerAnonymizeByUserId,
+    findByUserId: trainerFindByUserId,
+  } as unknown as TrainersService;
+
   const deletionLogCreate = jest.fn((x) => x);
   const deletionLogSave = jest.fn();
   const manager = {
@@ -147,6 +157,7 @@ function build(): Mocks {
     storage,
     clock,
     coachProfiles,
+    trainers,
   );
 
   return {
@@ -168,6 +179,8 @@ function build(): Mocks {
     scrubTargetEmail,
     storageDelete,
     coachAnonymizeByUserId,
+    trainerAnonymizeByUserId,
+    trainerFindByUserId,
     deletionLogCreate,
     deletionLogSave,
   };
@@ -423,6 +436,61 @@ describe('UserErasureService.deleteUser', () => {
       // The compliance record must exist before the account is unrecoverably
       // scrubbed, so the log write cannot land after the session/asset cleanup.
       expect(order).toEqual(['log-write', 'revoke', 'discard']);
+    });
+  });
+
+  describe('trainer organisation', () => {
+    it('anonymises the trainer profile inside the same transaction', async () => {
+      const { service, manager, findById, trainerAnonymizeByUserId } = build();
+      findById.mockResolvedValue(makeUser({ id: 'trainer-1', role: Role.Trainer }));
+
+      await service.deleteUser('trainer-1', actor(), 'gdpr request');
+
+      expect(trainerAnonymizeByUserId).toHaveBeenCalledTimes(1);
+      expect(trainerAnonymizeByUserId).toHaveBeenCalledWith('trainer-1', manager);
+    });
+
+    it('discards the org logo, read before anonymisation clears its handle', async () => {
+      const { service, findById, trainerFindByUserId, trainerAnonymizeByUserId, storageDelete } =
+        build();
+      findById.mockResolvedValue(makeUser({ id: 'trainer-1', role: Role.Trainer }));
+      trainerFindByUserId.mockResolvedValue({ id: 'org-1', logoPublicId: 'logos/abc' });
+
+      const order: string[] = [];
+      trainerAnonymizeByUserId.mockImplementation(() => {
+        order.push('anonymize');
+        return Promise.resolve(undefined);
+      });
+      storageDelete.mockImplementation(() => {
+        order.push('discard');
+        return Promise.resolve(undefined);
+      });
+
+      await service.deleteUser('trainer-1', actor(), 'gdpr request');
+
+      expect(storageDelete).toHaveBeenCalledWith('logos/abc');
+      // Reversed, the handle is already null and the image stays served.
+      expect(order).toEqual(['anonymize', 'discard']);
+    });
+
+    it('discards nothing for a trainer who never uploaded a logo', async () => {
+      const { service, findById, trainerFindByUserId, storageDelete } = build();
+      findById.mockResolvedValue(makeUser({ id: 'trainer-1', role: Role.Trainer }));
+      trainerFindByUserId.mockResolvedValue({ id: 'org-1', logoPublicId: null });
+
+      await service.deleteUser('trainer-1', actor(), 'gdpr request');
+
+      expect(storageDelete).not.toHaveBeenCalled();
+    });
+
+    it('is a harmless no-op for a user who runs no organisation', async () => {
+      const { service, manager, findById, trainerAnonymizeByUserId, storageDelete } = build();
+      findById.mockResolvedValue(makeUser({ id: 'parent-1' }));
+
+      await service.deleteUser('parent-1', actor(), 'gdpr request');
+
+      expect(trainerAnonymizeByUserId).toHaveBeenCalledWith('parent-1', manager);
+      expect(storageDelete).not.toHaveBeenCalled();
     });
   });
 });

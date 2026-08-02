@@ -23,7 +23,7 @@ describe('Email verification (e2e)', () => {
 
     const registerRes = await request(ctx.app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password, birthDate: '1994-03-22' })
+      .send({ email, password, birthDate: '1994-03-22', firstName: 'Reg' })
       .expect(201);
 
     expect(registerRes.body).toEqual({
@@ -60,13 +60,13 @@ describe('Email verification (e2e)', () => {
 
     await request(ctx.app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password, birthDate: '1994-03-22' })
+      .send({ email, password, birthDate: '1994-03-22', firstName: 'Reg' })
       .expect(201);
     expect(ctx.mailer.sendVerification).toHaveBeenCalledTimes(1);
 
     const second = await request(ctx.app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password, birthDate: '1994-03-22' })
+      .send({ email, password, birthDate: '1994-03-22', firstName: 'Reg' })
       .expect(201);
     expect(second.body).toEqual({
       message: 'Registration received. Check your email to verify your account.',
@@ -80,7 +80,7 @@ describe('Email verification (e2e)', () => {
 
     await request(ctx.app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password, birthDate: '1994-03-22' })
+      .send({ email, password, birthDate: '1994-03-22', firstName: 'Reg' })
       .expect(201);
 
     const verifyUrl: string = ctx.mailer.sendVerification.mock.calls[0][0].verifyUrl;
@@ -104,7 +104,7 @@ describe('Email verification (e2e)', () => {
 
     await request(ctx.app.getHttpServer())
       .post('/api/v1/auth/register')
-      .send({ email, password, birthDate: '1994-03-22' })
+      .send({ email, password, birthDate: '1994-03-22', firstName: 'Reg' })
       .expect(201);
 
     const verifyUrl: string = ctx.mailer.sendVerification.mock.calls[0][0].verifyUrl;

@@ -56,6 +56,17 @@ export class ProfileService {
   }
 
   async updateCommon(actor: Principal, dto: UpdateProfileDto): Promise<MyProfileView> {
+    // A child owns their own name on this route, but not the family's phone
+    // number: "Parent owns all contact information for family". A child login
+    // shares the parent's contact details, so letting the child rewrite them
+    // rewrites how the trainer reaches the parent.
+    if (actor.isChild && dto.phone !== undefined) {
+      throw new ForbiddenException({
+        errorCode: ErrorCode.CHILD_ACTION_NOT_ALLOWED,
+        message: 'Ask your parent to change the contact phone number.',
+      });
+    }
+
     await this.requireUser(actor.userId);
     const user = await this.usersService.updateProfile(actor.userId, {
       firstName: dto.firstName,

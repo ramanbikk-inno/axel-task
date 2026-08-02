@@ -220,6 +220,33 @@ export class TrainersService {
     return saved;
   }
 
+  /** The PII an erasure has to clear off a trainer organisation. */
+  private static readonly ANONYMIZED_PROFILE = {
+    businessName: 'Deleted User',
+    // A one-person business identifies the person: the address is often their
+    // home, and website and description carry their name and photo.
+    website: null,
+    address: null,
+    description: null,
+    logoUrl: null,
+    logoPublicId: null,
+  } as const;
+
+  /**
+   * GDPR erasure of the organisation a user runs. Stripe ids, subscription
+   * status and the fee percentage stay: they are financial records the
+   * payments epic still has to reconcile, not personal data.
+   *
+   * The caller deletes the stored logo — capture `logoPublicId` before calling,
+   * because this clears the only handle that could find it again.
+   */
+  async anonymizeByUserId(userId: string, manager?: EntityManager): Promise<void> {
+    await repoFor(this.trainersRepository, TrainerProfile, manager).update(
+      { userId },
+      { ...TrainersService.ANONYMIZED_PROFILE },
+    );
+  }
+
   /**
    * The caller's own trainer profile, or 403. Shared by every service that acts
    * on "the trainer behind this request" — not for lookups by id, where a 404

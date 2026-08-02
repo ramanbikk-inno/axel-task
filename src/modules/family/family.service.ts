@@ -28,11 +28,13 @@ import { replaceStoredAsset } from '../storage/replace-asset';
 import { STORAGE, StorageService } from '../storage/storage.service';
 import { TrainersService } from '../trainers/trainers.service';
 import { ChildAccountService } from './child-account.service';
+import { findSimilarChildren } from './child-similarity';
 import { ChildLoginStatusView, ChildLoginView } from './dto/child-login.dto';
 import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
 import { FamilyContextView } from './dto/family-context.view';
 import { PlayerProfileView, TrainerContextView } from './dto/player-profile.view';
+import { SimilarChildrenQueryDto, SimilarChildrenView } from './dto/similar-children.dto';
 
 export const AUDIT_CHILD_CREATED = 'family.child-created';
 export const AUDIT_CHILD_UPDATED = 'family.child-updated';
@@ -80,6 +82,25 @@ export class FamilyService {
     return this.buildViews(profiles);
   }
 
+  /**
+   * Children already on the account that resemble the one the parent is about
+   * to add — the advisory half of US-01.03's duplicate check. Read-only, so a
+   * near miss warns rather than blocks; only an exact match is refused, and
+   * even that yields to `allowDuplicate`.
+   */
+  async findSimilarChildren(
+    parentUserId: string,
+    query: SimilarChildrenQueryDto,
+  ): Promise<SimilarChildrenView> {
+    const owned = await this.playersService.findByOwner(parentUserId);
+    const matches = findSimilarChildren(
+      owned.filter((p) => p.isChild),
+      { displayName: query.displayName, birthDate: query.birthDate ?? null },
+      query.excludeProfileId,
+    );
+    return { matches, hasExactMatch: matches.some((m) => m.exact) };
+  }
+
   /** Create a child profile and optionally connect it to the parent's trainers. */
   async createChild(actor: Principal, dto: CreateChildDto): Promise<PlayerProfileView> {
     const parentUserId = actor.userId;
@@ -92,10 +113,12 @@ export class FamilyService {
         p.displayName.trim().toLowerCase() === dto.displayName.trim().toLowerCase() &&
         p.birthDate === birthDate,
     );
-    if (duplicate) {
+    if (duplicate && dto.allowDuplicate !== true) {
       throw new ConflictException({
         errorCode: ErrorCode.DUPLICATE_CHILD,
-        message: 'A child with the same name and birth date already exists.',
+        message:
+          'A child with the same name and birth date already exists. ' +
+          'Send allowDuplicate to add them anyway.',
       });
     }
 
@@ -188,10 +211,12 @@ export class FamilyService {
           p.displayName.trim().toLowerCase() === displayName.trim().toLowerCase() &&
           p.birthDate === birthDate,
       );
-      if (duplicate) {
+      if (duplicate && dto.allowDuplicate !== true) {
         throw new ConflictException({
           errorCode: ErrorCode.DUPLICATE_CHILD,
-          message: 'A child with the same name and birth date already exists.',
+          message:
+            'A child with the same name and birth date already exists. ' +
+            'Send allowDuplicate to proceed anyway.',
         });
       }
     }

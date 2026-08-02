@@ -59,6 +59,7 @@ export class CoachInvitationService {
       type: ShareLinkType.CoachUnique,
       createdByUserId: principal.userId,
       targetEmail: dto.email,
+      targetName: dto.name ?? null,
       expiresAt: new Date(this.clock.now().getTime() + COACH_INVITE_TTL_MS),
       maxUses: 1,
     });
@@ -112,6 +113,8 @@ export class CoachInvitationService {
           type: ShareLinkType.CoachUnique,
           createdByUserId: principal.userId,
           targetEmail: email,
+          // Carried over so a resend does not lose the name the trainer typed.
+          targetName: existing.targetName,
           expiresAt: new Date(this.clock.now().getTime() + COACH_INVITE_TTL_MS),
           maxUses: 1,
         },
@@ -278,6 +281,7 @@ export class CoachInvitationService {
       id: link.id,
       code: link.code,
       email: link.targetEmail ?? '',
+      name: link.targetName,
       status: this.statusOf(link),
       expiresAt: link.expiresAt,
       createdAt: link.createdAt,

@@ -42,6 +42,10 @@ export class ProfileController {
     return this.profile.getMe((req.user as Principal).userId);
   }
 
+  /**
+   * Open to a child for their own name; `phone` is refused in the service,
+   * because the parent owns the family's contact details.
+   */
   @Patch('me')
   @HttpCode(200)
   @ApiOkResponse({ type: MyProfileView })
