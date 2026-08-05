@@ -18,10 +18,13 @@ import {
 
 import { PaginationQueryDto } from '../../../shared/dto/pagination.query.dto';
 
-// Time-of-day in 24h HH:MM, confined to a single calendar day (00:00–23:59).
-// Availability windows do not cross midnight: endTime must be strictly after
-// startTime and both fall on the same day, so a window cannot end at 24:00.
-const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+// Time-of-day in 24h HH:MM. Windows are half-open — a slot 17:00–18:00 covers
+// 17:00:00 to 17:59:59 — so the exclusive end of a full day is 24:00, not
+// 23:59. A start is a real instant in the day and stops at 23:59; only an end
+// may name the boundary. Without that, no window can cover the day's last
+// minute and "available all day" is inexpressible.
+const HHMM_START = /^([01]\d|2[0-3]):[0-5]\d$/;
+const HHMM_END = /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/;
 
 export class AvailabilitySlotInput {
   @ApiProperty({ minimum: 0, maximum: 6, description: '0=Sunday .. 6=Saturday' })
@@ -32,12 +35,12 @@ export class AvailabilitySlotInput {
 
   @ApiProperty({ example: '17:00' })
   @IsString()
-  @Matches(HHMM, { message: 'startTime must be HH:MM (24h)' })
+  @Matches(HHMM_START, { message: 'startTime must be HH:MM (24h)' })
   startTime!: string;
 
   @ApiProperty({ example: '20:00' })
   @IsString()
-  @Matches(HHMM, { message: 'endTime must be HH:MM (24h)' })
+  @Matches(HHMM_END, { message: 'endTime must be HH:MM (24h), up to 24:00' })
   endTime!: string;
 
   @ApiPropertyOptional({
@@ -91,7 +94,7 @@ export class TrainerAvailabilityQuery {
   @ApiPropertyOptional({ example: '18:00' })
   @IsOptional()
   @IsString()
-  @Matches(HHMM, { message: 'time must be HH:MM (24h)' })
+  @Matches(HHMM_START, { message: 'time must be HH:MM (24h)' })
   time?: string;
 }
 
@@ -106,12 +109,12 @@ export class ConflictCheckQuery {
 
   @ApiProperty({ example: '16:00' })
   @IsString()
-  @Matches(HHMM, { message: 'startTime must be HH:MM (24h)' })
+  @Matches(HHMM_START, { message: 'startTime must be HH:MM (24h)' })
   startTime!: string;
 
   @ApiProperty({ example: '18:00' })
   @IsString()
-  @Matches(HHMM, { message: 'endTime must be HH:MM (24h)' })
+  @Matches(HHMM_END, { message: 'endTime must be HH:MM (24h), up to 24:00' })
   endTime!: string;
 }
 
@@ -154,12 +157,12 @@ export class RecordCoachOverrideDto {
 
   @ApiProperty({ example: '16:00' })
   @IsString()
-  @Matches(HHMM, { message: 'startTime must be HH:MM (24h)' })
+  @Matches(HHMM_START, { message: 'startTime must be HH:MM (24h)' })
   startTime!: string;
 
   @ApiProperty({ example: '18:00' })
   @IsString()
-  @Matches(HHMM, { message: 'endTime must be HH:MM (24h)' })
+  @Matches(HHMM_END, { message: 'endTime must be HH:MM (24h), up to 24:00' })
   endTime!: string;
 
   @ApiProperty({ minLength: 5, maxLength: 1000, description: 'Required' })

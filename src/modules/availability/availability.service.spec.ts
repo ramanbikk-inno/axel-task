@@ -518,6 +518,29 @@ describe('AvailabilityService', () => {
       await expect(service.trainerView('u1', { time: '20:00' })).resolves.toHaveLength(0); // end exclusive
     });
 
+    it('covers the last minute of the day when a window runs to 24:00', async () => {
+      // The reason the range bound is 1440 rather than 1439: end-exclusive means
+      // a window ending 1439 stops at 23:58:59, so 23:59 was uncoverable by
+      // anyone. 1440 is the exclusive end of a full day.
+      const { service, findByUserId, findByTrainer, findByIds, slotsFind } = makeService();
+      findByUserId.mockResolvedValue({ id: 't1' });
+      findByTrainer.mockResolvedValue([assoc('p1')]);
+      findByIds.mockResolvedValue([profile('p1', 'Amy')]);
+      slotsFind.mockResolvedValue([slotRow('p1', 1, 1380, 1440)]); // 23:00–24:00
+
+      await expect(service.trainerView('u1', { time: '23:59' })).resolves.toHaveLength(1);
+    });
+
+    it('leaves the last minute uncovered when a window stops at 23:59', async () => {
+      const { service, findByUserId, findByTrainer, findByIds, slotsFind } = makeService();
+      findByUserId.mockResolvedValue({ id: 't1' });
+      findByTrainer.mockResolvedValue([assoc('p1')]);
+      findByIds.mockResolvedValue([profile('p1', 'Amy')]);
+      slotsFind.mockResolvedValue([slotRow('p1', 1, 1380, 1439)]); // 23:00–23:59
+
+      await expect(service.trainerView('u1', { time: '23:59' })).resolves.toHaveLength(0);
+    });
+
     it('matches a Sunday (dayOfWeek 0) filter — the falsy-zero guard holds', async () => {
       const { service, findByUserId, findByTrainer, findByIds, slotsFind } = makeService();
       findByUserId.mockResolvedValue({ id: 't1' });

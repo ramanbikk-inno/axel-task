@@ -5,6 +5,7 @@ import { ClockModule } from '../../shared/clock/clock.module';
 import { AuditModule } from '../audit/audit.module';
 import { EventsModule } from '../events/events.module';
 import { MailModule } from '../mail/mail.module';
+import { OrgMembershipModule } from '../org-membership/org-membership.module';
 import { PlayersModule } from '../players/players.module';
 import { UsersModule } from '../users/users.module';
 import { ApprovalsController } from './approvals.controller';
@@ -15,6 +16,7 @@ import { PurchaseApproval } from './entities/purchase-approval.entity';
   imports: [
     TypeOrmModule.forFeature([PurchaseApproval]),
     EventsModule,
+    OrgMembershipModule,
     PlayersModule,
     UsersModule,
     MailModule,
