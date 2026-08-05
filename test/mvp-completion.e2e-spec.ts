@@ -4,6 +4,10 @@ import request from 'supertest';
 import { bootstrapE2E, E2EContext } from './setup-e2e';
 import { CampSubmission } from '../src/modules/enrollment/entities/camp-submission.entity';
 import { ShareLink, ShareLinkType } from '../src/modules/enrollment/entities/share-link.entity';
+import {
+  AssociationStatus,
+  TrainerPlayerAssociation,
+} from '../src/modules/enrollment/entities/trainer-player-association.entity';
 import { TrainerProfile } from '../src/modules/trainers/entities/trainer-profile.entity';
 import { User } from '../src/modules/users/entities/user.entity';
 import { Role, UserStatus } from '../src/modules/users/entities/user.enums';
@@ -314,6 +318,18 @@ describe('Epic-01 MVP completion (e2e)', () => {
         .set(auth(parentToken))
         .send({ email: `${code}child@example.com`, password: CHILD_PASSWORD })
         .expect(201);
+
+      // A purchase request is scoped to the child's own organisation, so the
+      // association has to exist for the child to transact at all.
+      const associations = ctx.dataSource.getRepository(TrainerPlayerAssociation);
+      await associations.save(
+        associations.create({
+          trainerProfileId: trainer.profileId,
+          playerProfileId: childProfileId,
+          status: AssociationStatus.Active,
+          connectedAt: new Date(),
+        }),
+      );
 
       return {
         parentToken,

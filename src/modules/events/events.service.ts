@@ -11,6 +11,9 @@ import { Event } from './entities/event.entity';
 
 export const AUDIT_EVENT_CREATED = 'event.created';
 
+/** Bounds an event to at most two weekday segments for the availability check. */
+export const MAX_EVENT_DURATION_MS = 24 * 60 * 60 * 1000;
+
 export function toEventView(event: Event): EventView {
   return {
     id: event.id,
@@ -41,6 +44,15 @@ export class EventsService {
       throw new BadRequestException({
         errorCode: ErrorCode.VALIDATION_ERROR,
         message: 'endsAt must be after startsAt.',
+      });
+    }
+    // A session is checked against a weekly availability schedule, so it has to
+    // stay short enough to be expressed in one. Anything longer is a camp or a
+    // series, which is a different thing than a session.
+    if (endsAt.getTime() - startsAt.getTime() > MAX_EVENT_DURATION_MS) {
+      throw new BadRequestException({
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        message: 'An event cannot run longer than 24 hours.',
       });
     }
 

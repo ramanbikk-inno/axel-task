@@ -18,27 +18,49 @@ export const AUDIT_COACH_ASSIGNED = 'event.coach-assigned';
 export const AUDIT_COACH_UNASSIGNED = 'event.coach-unassigned';
 export const AUDIT_ASSIGNMENT_ANSWERED = 'event.assignment-answered';
 
-/**
- * Availability is a weekly recurring schedule (day of week + minute window),
- * so an event's absolute instant has to be reduced to that shape to be checked
- * against it. UTC on both sides: the slots carry no zone either.
- */
-export function weeklyWindowOf(event: Event): {
+export interface WeeklySegment {
   dayOfWeek: number;
   startMinute: number;
   endMinute: number;
-} {
+}
+
+const MINUTES_PER_DAY = 24 * 60;
+const MS_PER_MINUTE = 60_000;
+
+function utcMidnight(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/**
+ * Availability is a weekly recurring schedule (day of week + minute window), so
+ * an event's absolute interval has to be reduced to that shape to be checked
+ * against it. UTC on both sides: the slots carry no zone either.
+ *
+ * One tuple cannot express an event that spans a UTC midnight, and collapsing
+ * it to one silently drops whole days from the check. So the interval is cut at
+ * each midnight it crosses and every piece is returned; the caller checks all
+ * of them. A same-day event still yields exactly one segment.
+ */
+export function weeklySegmentsOf(event: Event): WeeklySegment[] {
   const startsAt = new Date(event.startsAt);
   const endsAt = new Date(event.endsAt);
-  const startMinute = startsAt.getUTCHours() * 60 + startsAt.getUTCMinutes();
-  const rawEnd = endsAt.getUTCHours() * 60 + endsAt.getUTCMinutes();
-  return {
-    dayOfWeek: startsAt.getUTCDay(),
-    startMinute,
-    // An event ending past midnight would wrap to a smaller number and read as
-    // an empty window; clamp to end-of-day so the check stays conservative.
-    endMinute: rawEnd > startMinute ? rawEnd : 24 * 60,
-  };
+  const segments: WeeklySegment[] = [];
+
+  let cursor = startsAt;
+  while (cursor.getTime() < endsAt.getTime()) {
+    const dayStart = utcMidnight(cursor);
+    const nextMidnight = dayStart + MINUTES_PER_DAY * MS_PER_MINUTE;
+    const pieceEnd = Math.min(nextMidnight, endsAt.getTime());
+
+    const startMinute = Math.floor((cursor.getTime() - dayStart) / MS_PER_MINUTE);
+    // Ceil so a partial minute is covered rather than trimmed away.
+    const endMinute = Math.ceil((pieceEnd - dayStart) / MS_PER_MINUTE);
+    if (endMinute > startMinute) {
+      segments.push({ dayOfWeek: cursor.getUTCDay(), startMinute, endMinute });
+    }
+    cursor = new Date(nextMidnight);
+  }
+  return segments;
 }
 
 @Injectable()
@@ -77,37 +99,50 @@ export class AssignmentsService {
       });
     }
 
-    const window = weeklyWindowOf(event);
-    const free = await this.availability.isCoachFreeFor(
-      coach.id,
-      window.dayOfWeek,
-      window.startMinute,
-      window.endMinute,
-    );
+    // Every piece the event covers has to clear, not just the first day of it.
+    const segments = weeklySegmentsOf(event);
+    const conflicting: WeeklySegment[] = [];
+    for (const segment of segments) {
+      const free = await this.availability.isCoachFreeFor(
+        coach.id,
+        segment.dayOfWeek,
+        segment.startMinute,
+        segment.endMinute,
+      );
+      if (!free) {
+        conflicting.push(segment);
+      }
+    }
 
-    if (!free && dto.overrideReason === undefined) {
+    const hadConflict = conflicting.length > 0;
+    if (hadConflict && dto.overrideReason === undefined) {
+      const windows = conflicting
+        .map((s) => `${toHHMM(s.startMinute)}-${toHHMM(s.endMinute)}`)
+        .join(', ');
       throw new ConflictException({
         errorCode: ErrorCode.COACH_UNAVAILABLE,
         message:
           `This coach is not available at this time per their schedule ` +
-          `(${toHHMM(window.startMinute)}-${toHHMM(window.endMinute)}). ` +
+          `(${windows}). ` +
           `Continue anyway? Resend with an overrideReason to confirm.`,
       });
     }
 
     // Reuses the existing override machinery rather than a second record of the
     // same fact: it recomputes the conflict itself, audits, and emails the coach.
+    // One row per conflicting segment, since a row carries a single weekday;
+    // the assignment names the first, and the rest hang off the event id.
     let overrideId: string | null = null;
-    if (!free) {
+    for (const segment of conflicting) {
       const override = await this.overrides.record(actor, {
         coachProfileId: coach.id,
         eventId: event.id,
-        dayOfWeek: window.dayOfWeek,
-        startTime: toHHMM(window.startMinute),
-        endTime: toHHMM(window.endMinute),
+        dayOfWeek: segment.dayOfWeek,
+        startTime: toHHMM(segment.startMinute),
+        endTime: toHHMM(segment.endMinute),
         overrideReason: dto.overrideReason as string,
       });
-      overrideId = override.id;
+      overrideId ??= override.id;
     }
 
     const saved = await this.assignments.save(
@@ -117,7 +152,7 @@ export class AssignmentsService {
         assignedByUserId: actor.userId,
         response: AssignmentResponse.Pending,
         coachNote: null,
-        hadConflict: !free,
+        hadConflict,
         overrideId,
         respondedAt: null,
       }),
@@ -127,7 +162,7 @@ export class AssignmentsService {
       action: AUDIT_COACH_ASSIGNED,
       actor,
       target: { type: 'Event', id: event.id },
-      metadata: { coachProfileId: coach.id, hadConflict: !free, overrideId },
+      metadata: { coachProfileId: coach.id, hadConflict, overrideId },
     });
     return this.toView(saved, event);
   }

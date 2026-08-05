@@ -16,6 +16,7 @@ import { Principal } from '../auth/principal';
 import { Event } from '../events/entities/event.entity';
 import { EventsService } from '../events/events.service';
 import { MailService } from '../mail/mail.service';
+import { OrgMembershipService } from '../org-membership/org-membership.service';
 import { PlayerProfile } from '../players/entities/player-profile.entity';
 import { PlayersService } from '../players/players.service';
 import { UsersService } from '../users/users.service';
@@ -38,6 +39,7 @@ export class ApprovalsService {
     @InjectRepository(PurchaseApproval)
     private readonly approvals: Repository<PurchaseApproval>,
     private readonly events: EventsService,
+    private readonly orgMembership: OrgMembershipService,
     private readonly playersService: PlayersService,
     private readonly usersService: UsersService,
     private readonly mail: MailService,
@@ -51,8 +53,10 @@ export class ApprovalsService {
    */
   async request(actor: Principal, dto: RequestPurchaseDto): Promise<PurchaseApprovalView> {
     const child = await this.requireChildProfile(actor);
+    // The id is caller-supplied, so existence is not permission: 404 either way,
+    // so a child cannot tell a foreign event from one that was never there.
     const event = await this.events.findById(dto.eventId);
-    if (!event) {
+    if (!event || !(await this.orgMembership.isOrgMember(actor, event.trainerProfileId))) {
       throw new NotFoundException({
         errorCode: ErrorCode.EVENT_NOT_FOUND,
         message: 'Event not found.',
@@ -67,6 +71,11 @@ export class ApprovalsService {
         message: 'This event has no price for that payment type.',
       });
     }
+
+    // Expiry is lazy, so anything reading pending state has to settle it first —
+    // otherwise a request that lapsed overnight keeps blocking the next one
+    // until somebody happens to open the parent's queue.
+    await this.expireOverdue(child.ownerUserId);
 
     const open = await this.approvals.findOne({
       where: {
@@ -99,6 +108,7 @@ export class ApprovalsService {
         parentNotes: null,
         respondedAt: autoApproved ? now : null,
         expiresAt: new Date(now.getTime() + APPROVAL_TTL_MS),
+        autoApproved,
       }),
     );
 
@@ -114,8 +124,8 @@ export class ApprovalsService {
       },
     });
 
-    await this.notifyParent(saved, child, event, autoApproved);
-    return this.toView(saved, child, event, autoApproved);
+    await this.notifyParent(saved, child, event);
+    return this.toView(saved, child, event);
   }
 
   /**
@@ -272,14 +282,13 @@ export class ApprovalsService {
     approval: PurchaseApproval,
     child: PlayerProfile,
     event: Event,
-    autoApproved: boolean,
   ): Promise<void> {
     try {
       const parent = await this.usersService.findById(approval.parentUserId);
       if (!parent) {
         return;
       }
-      if (autoApproved) {
+      if (approval.autoApproved) {
         await this.mail.sendChildPurchaseNoticeEmail(parent.email, {
           childName: child.displayName,
           eventTitle: event.title,
@@ -337,7 +346,7 @@ export class ApprovalsService {
     const eventById = new Map(events.map((e) => [e.id, e]));
 
     return rows.map((r) =>
-      this.toView(r, childById.get(r.childPlayerProfileId), eventById.get(r.eventId), false),
+      this.toView(r, childById.get(r.childPlayerProfileId), eventById.get(r.eventId)),
     );
   }
 
@@ -345,7 +354,6 @@ export class ApprovalsService {
     row: PurchaseApproval,
     child: PlayerProfile | undefined,
     event: Event | undefined,
-    autoApproved: boolean,
   ): PurchaseApprovalView {
     return {
       id: row.id,
@@ -362,7 +370,7 @@ export class ApprovalsService {
       requestedAt: row.requestedAt,
       respondedAt: row.respondedAt,
       expiresAt: row.expiresAt,
-      autoApproved,
+      autoApproved: row.autoApproved,
     };
   }
 }

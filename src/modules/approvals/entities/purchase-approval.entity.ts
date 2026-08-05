@@ -82,4 +82,12 @@ export class PurchaseApproval {
 
   @Column({ name: 'expires_at', type: 'timestamptz' })
   expiresAt!: Date;
+
+  /**
+   * Whether this went straight through on the parent's standing permission.
+   * Stored rather than derived: the setting behind it is mutable, so
+   * recomputing would rewrite the history of requests already answered.
+   */
+  @Column({ name: 'auto_approved', type: 'boolean', default: false })
+  autoApproved!: boolean;
 }
