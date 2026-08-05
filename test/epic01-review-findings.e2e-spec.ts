@@ -32,6 +32,7 @@ describe('Epic-01 review findings (e2e)', () => {
   // 22:00-00:00 UTC is 5pm-7pm US Eastern, i.e. the ordinary case for this product.
   const MONDAY_22 = '2026-09-07T22:00:00.000Z';
   const TUESDAY_00 = '2026-09-08T00:00:00.000Z';
+  const MONDAY_10 = '2026-09-07T10:00:00.000Z';
 
   beforeAll(async () => {
     ctx = await bootstrapE2E();
@@ -309,6 +310,82 @@ describe('Epic-01 review findings (e2e)', () => {
 
       expect(res.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR);
     });
+
+    it('accepts an event of exactly 24 hours', async () => {
+      // The cap is inclusive: 24h is the longest span still expressible in at
+      // most two weekday segments.
+      const trainer = await seedTrainer('span5');
+      await request(app.getHttpServer())
+        .post('/api/v1/trainers/me/events')
+        .set(auth(trainer.token))
+        .send({
+          title: 'Full day',
+          startsAt: `${MONDAY_10}`,
+          endsAt: '2026-09-08T10:00:00.000Z',
+        })
+        .expect(201);
+    });
+
+    it('refuses an event one minute over the cap', async () => {
+      const trainer = await seedTrainer('span6');
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/trainers/me/events')
+        .set(auth(trainer.token))
+        .send({
+          title: 'Just too long',
+          startsAt: `${MONDAY_10}`,
+          endsAt: '2026-09-08T10:01:00.000Z',
+        })
+        .expect(400);
+
+      expect(res.body.errorCode).toBe(ErrorCode.VALIDATION_ERROR);
+    });
+  });
+
+  /**
+   * 24:00 is the exclusive end of a day, so it is meaningful as an end and
+   * meaningless as a start. The two patterns have to stay distinct.
+   */
+  describe('the 24:00 boundary is an end, not a start', () => {
+    it('accepts a window ending at 24:00', async () => {
+      const trainer = await seedTrainer('bnd1');
+      const coachToken = await inviteCoach(trainer, 'bndcoach1@example.com');
+      await request(app.getHttpServer())
+        .put('/api/v1/coaches/me/availability')
+        .set(auth(coachToken))
+        .send({ slots: [{ dayOfWeek: 1, startTime: '22:00', endTime: '24:00' }] })
+        .expect(200);
+    });
+
+    it('refuses a window starting at 24:00', async () => {
+      const trainer = await seedTrainer('bnd2');
+      const coachToken = await inviteCoach(trainer, 'bndcoach2@example.com');
+      await request(app.getHttpServer())
+        .put('/api/v1/coaches/me/availability')
+        .set(auth(coachToken))
+        .send({ slots: [{ dayOfWeek: 1, startTime: '24:00', endTime: '24:00' }] })
+        .expect(422);
+    });
+
+    it('refuses an hour above 24', async () => {
+      const trainer = await seedTrainer('bnd3');
+      const coachToken = await inviteCoach(trainer, 'bndcoach3@example.com');
+      await request(app.getHttpServer())
+        .put('/api/v1/coaches/me/availability')
+        .set(auth(coachToken))
+        .send({ slots: [{ dayOfWeek: 1, startTime: '22:00', endTime: '25:00' }] })
+        .expect(422);
+    });
+
+    it('refuses 24:00 with a non-zero minute', async () => {
+      const trainer = await seedTrainer('bnd4');
+      const coachToken = await inviteCoach(trainer, 'bndcoach4@example.com');
+      await request(app.getHttpServer())
+        .put('/api/v1/coaches/me/availability')
+        .set(auth(coachToken))
+        .send({ slots: [{ dayOfWeek: 1, startTime: '22:00', endTime: '24:30' }] })
+        .expect(422);
+    });
   });
 
   describe('purchase approvals', () => {
@@ -430,6 +507,77 @@ describe('Epic-01 review findings (e2e)', () => {
         .set(auth(fam.childToken))
         .expect(200);
       expect(childList.body[0].autoApproved).toBe(true);
+    });
+
+    /**
+     * The flag is now a stored column, so it has to stay false for a request the
+     * parent actually answered - the sibling read path that was previously
+     * correct only because it hardcoded false.
+     */
+    it('distinguishes a parent-approved spend from an auto-approved one', async () => {
+      const fam = await seedFamily('auto2');
+      const usd = await createEvent(fam.trainer, { priceCents: 2500 });
+
+      const answered = await request(app.getHttpServer())
+        .post('/api/v1/purchase-approvals')
+        .set(auth(fam.childToken))
+        .send({ eventId: usd.id, paymentType: 'usd' })
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/v1/purchase-approvals/${answered.body.id}/approve`)
+        .set(auth(fam.parentToken))
+        .send({})
+        .expect(200);
+
+      // Now let a token spend through on the standing permission.
+      await request(app.getHttpServer())
+        .patch(`/api/v1/players/children/${fam.childProfileId}`)
+        .set(auth(fam.parentToken))
+        .send({ allowChildTokenSpendNoApproval: true })
+        .expect(200);
+      const tokens = await createEvent(fam.trainer, { priceTokens: 2 });
+      await request(app.getHttpServer())
+        .post('/api/v1/purchase-approvals')
+        .set(auth(fam.childToken))
+        .send({ eventId: tokens.id, paymentType: 'tokens' })
+        .expect(201);
+
+      const queue = await request(app.getHttpServer())
+        .get('/api/v1/purchase-approvals')
+        .set(auth(fam.parentToken))
+        .expect(200);
+
+      // Both approved, but only one bypassed the parent.
+      const byEvent = new Map<string, boolean>(
+        queue.body.map((r: { eventId: string; autoApproved: boolean }) => [
+          r.eventId,
+          r.autoApproved,
+        ]),
+      );
+      expect(byEvent.get(usd.id)).toBe(false);
+      expect(byEvent.get(tokens.id)).toBe(true);
+    });
+
+    /**
+     * The decision response itself goes through decorate(), the path that used
+     * to hardcode the flag.
+     */
+    it('reports autoApproved false on the approve response', async () => {
+      const fam = await seedFamily('auto3');
+      const event = await createEvent(fam.trainer, { priceCents: 1500 });
+      const requested = await request(app.getHttpServer())
+        .post('/api/v1/purchase-approvals')
+        .set(auth(fam.childToken))
+        .send({ eventId: event.id, paymentType: 'usd' })
+        .expect(201);
+
+      const approved = await request(app.getHttpServer())
+        .post(`/api/v1/purchase-approvals/${requested.body.id}/approve`)
+        .set(auth(fam.parentToken))
+        .send({})
+        .expect(200);
+
+      expect(approved.body).toMatchObject({ status: 'approved', autoApproved: false });
     });
 
     /**
