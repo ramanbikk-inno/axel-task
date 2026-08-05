@@ -34,9 +34,19 @@ export class WidenMinuteRangeToEndOfDay1700002000000 implements MigrationInterfa
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     // Rows written against the wider bound would fail the narrower constraint,
-    // so bring them back inside it before restoring it.
+    // so bring them back inside it before restoring it. A window starting at
+    // 23:59 cannot be clamped — 1439 to 1439 is empty, which the range check
+    // rejects while it is still attached — so it is dropped, as 1700000900000
+    // drops what its own older schema could not express.
+    await queryRunner.query(
+      `DELETE FROM "availability_slots" WHERE "end_minute" > 1439 AND "start_minute" >= 1439`,
+    );
     await queryRunner.query(
       `UPDATE "availability_slots" SET "end_minute" = 1439 WHERE "end_minute" > 1439`,
+    );
+    await queryRunner.query(
+      `DELETE FROM "coach_availability_overrides"
+         WHERE "end_minute" > 1439 AND "start_minute" >= 1439`,
     );
     await queryRunner.query(
       `UPDATE "coach_availability_overrides" SET "end_minute" = 1439 WHERE "end_minute" > 1439`,
